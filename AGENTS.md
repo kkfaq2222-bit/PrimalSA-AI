@@ -94,7 +94,7 @@ PrimalSA-AI/
 
 ## 5. 操作遊戲畫面
 操作前先讀 `.claude/skills/psa-game-ui/SKILL.md`（工具用法、操作迴圈、紅區）與同資料夾 `ui/README.md`（功能索引；按鈕座標、各面板內容依功能拆檔）。
-工具：`bash tools/gui/gui.sh shot|click|drag|key|info|max|end`，座標用截圖座標；任務做完一定要跑 `end` 把前景還給使用者。
+工具：`bash tools/gui/gui.sh shot|click|drag|key|info|max|end`，座標用截圖座標；預設背景操作（不搶前景，點擊時游標瞬移約 0.15 秒）；用過 `fg` / `max` 後要跑 `end` 把前景還給使用者。
 
 ## 5.1 怎麼查知識庫
 1. 先看 `knowledge/README.md` 的分類目錄。

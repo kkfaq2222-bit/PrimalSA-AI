@@ -78,17 +78,19 @@ WSL 的 bash 包一層 Windows PowerShell，用 Win32 API：
 | 指令 | 作法 | 重點 |
 |---|---|---|
 | `shot [檔]` | `PrintWindow(PW_RENDERFULLCONTENT)` 背景截圖，縮成 1/2 | **不搶焦點、被遮住也截得到**；DirectX 視窗要 RENDERFULLCONTENT 才不會黑畫面 |
-| `click X Y [right]` | `SetCursorPos` + `mouse_event` | **Unity 不吃 PostMessage**，一定要真的移動游標 |
+| `click X Y [right]` | 背景：PostMessage 假焦點（WM_ACTIVATEAPP / WM_ACTIVATE / WM_SETFOCUS）+ 游標瞬移到目標 + PostMessage 按放 + 游標移回 | **不搶前景**，游標只離開約 0.15 秒。Unity 滑鼠位置讀真實游標、按鍵吃 PostMessage；沒假焦點時 UGUI 會忽略 UI 點擊（點擊穿透到地面變走路） |
 | `dclick X Y` | 同位置兩次按放，間隔 80ms | 倉庫存入等「雙擊」操作 |
 | `drag X1 Y1 X2 Y2` | 按住、分段移動、放開 | 拖曳清單 |
-| `key '{ESC}'` | SendKeys | 關面板 |
+| `key '{ESC}'` / `key 文字` | 背景：特殊鍵送 WM_KEYDOWN / WM_KEYUP；一般字元只送 WM_CHAR（`PostMessageW`） | 游標完全不動。字元若連按鍵一起送，Unity 會自己 TranslateMessage 再生一個字（abc → aabbcc）；用 ANSI 版 PostMessage 中文會被截成低位元組 |
 | `info` / `max` | 視窗大小 / 最大化 | 座標只在固定視窗大小下有效 |
 | `seq "a; wait 300; b; shot"` | 同一個行程連跑多個動作 | 省掉每次啟動 PowerShell 的約 0.4 秒 |
-| `end` | 還原使用者原本的前景視窗與游標 | **任務結束、中途停手、要問使用者之前都要跑** |
+| `fg <指令>` | 舊做法：拉到前景 + `SetCursorPos` + `mouse_event` / SendKeys | 背景模式失靈時的備案 |
+| `end` | 還原使用者原本的前景視窗與游標 | 用過 `fg` / `max` 後要跑；背景模式不需要（跑了也無害） |
 
 細節：
 - 座標一律用**截圖座標**（工具內部 ×2），AI 看圖就能直接量座標。
-- 第一次點擊時記下使用者原本的前景視窗與游標，把遊戲拉到前景；`end` 才還原（用 `AttachThreadInput` 繞過前景鎖定）。
+- 背景模式：點擊期間用 `WH_MOUSE_LL` 低階滑鼠鉤子吞掉使用者實體滑鼠的移動 / 按下（放開放行、`LLMHF_INJECTED` 放行；`SetCursorPos` 不經過鉤子），使用者同時操作電腦也不會把點擊帶歪。
+- `fg` 模式：第一次點擊時記下使用者原本的前景視窗與游標，把遊戲拉到前景；`end` 才還原（用 `AttachThreadInput` 繞過前景鎖定）。
 - 遊戲最小化時不會繪製，要用 `SW_SHOWNOACTIVATE` 還原（不搶焦點）。
 - PowerShell 5.1 的腳本要存成 **UTF-8 with BOM**，不然中文會被當 Big5 讀，整支解析失敗。
 - DPI：先呼叫 `SetProcessDPIAware`，不然座標會偏。

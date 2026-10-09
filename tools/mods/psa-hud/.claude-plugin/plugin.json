@@ -1,0 +1,1 @@
+{ "name": "psa-hud", "version": "0.2.0", "author": { "name": "bal" }, "types": "./types/index.d.ts", "description": "精靈王石器：pane 顯示遊戲實際截圖與目前角色的等級 / HP / MP、寵物、地圖座標（OCR 讀遊戲畫面）" }
