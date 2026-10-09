@@ -6,6 +6,7 @@
 #   gui.ps1 drag <x1> <y1> <x2> <y2>  拖曳（縮圖座標）
 #   gui.ps1 key <SendKeys字串>        送鍵盤，例：{ESC}、{ENTER}、abc
 #   gui.ps1 info                      印出視窗大小 / 位置
+#   gui.ps1 pixel <x> <y> | "x,y x,y ..."  背景截圖後印出各點顏色 r,g,b（縮圖座標），給腳本判斷畫面狀態
 #   gui.ps1 max                       最大化遊戲視窗（ui/ 座標以最大化的 2880×1659 為準）
 #   gui.ps1 end                       任務結束：把前景視窗與游標還給使用者（只有 fg 模式需要）
 #   gui.ps1 wait <毫秒>               等待（給 seq 用）
@@ -262,6 +263,19 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     $prev = [IntPtr][int64]$v[0]
     if ($prev -ne [IntPtr]::Zero -and $prev -ne $h) { SetFg $prev }
     "end: 已還原前景視窗與游標"
+  }
+  'pixel' {
+    $full = New-Object System.Drawing.Bitmap $r.R, $r.B
+    $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
+    $ok = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
+    if (-not $ok) { Write-Error "PrintWindow 失敗"; exit 1 }
+    # 點可以是「pixel X Y」或一個字串「pixel "X,Y X,Y ..."」（參數個數有限，多點用後者）
+    $pts = if ($A2) { @("$A1,$A2") } else { $A1 -split '\s+' | Where-Object { $_ } }
+    $out = foreach ($pt in $pts) {
+      $v = $pt -split ','
+      $c = $full.GetPixel([int]([double]$v[0] * $Scale), [int]([double]$v[1] * $Scale)); "$($c.R),$($c.G),$($c.B)"
+    }
+    $full.Dispose(); $out -join ' '
   }
   'wait' { Start-Sleep -Milliseconds ([int]$A1) }
   'seq' {

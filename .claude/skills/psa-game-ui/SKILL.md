@@ -27,7 +27,9 @@ bash tools/gui/gui.sh fg click X Y         # 前景模式備案（背景點擊�
 bash tools/gui/gui.sh end                  # 用過 fg / max 後還原前景視窗與游標（背景模式跑了也無害）
 bash tools/gui/gui.sh seq "click 763 760; wait 400; shot"   # 同一個行程連跑多個動作（快）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w tools/gui/stat.ps1)"   # OCR 讀 HUD → 一行 JSON（等級 / HP / MP / 寵物 / 地圖座標），不用看圖、不搶焦點
-bash tools/gui/mirror.sh [幀/秒]           # 給使用者看的即時畫面鏡像視窗（常駐、可縮放、右鍵置頂 / 調速；2 幀/秒 ≈ 全機 CPU 0.9%）
+bash tools/gui/mirror.sh                   # 給使用者看的即時畫面鏡像視窗（DWM 縮圖：幀數同遊戲、CPU ≈ 0；可縮放、右鍵 / 標題列選單置頂）
+bash tools/gui/gui.sh pixel "X,Y X,Y"      # 背景截圖讀像素顏色（腳本判斷畫面狀態用，例：遇敵開關）
+uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 150 --mp 20]   # 回村補血再回練功點（約 75 秒）；--watch 常駐監看自動補
 ```
 - 遊戲**不能最小化**（Unity 最小化不繪製）；每個指令遇到最小化會用 SW_SHOWNOACTIVATE 還原（不搶焦點）。放在其他視窗後面沒關係。
 - **座標 = 截圖座標**：截圖固定縮成客戶區的 1/2（`-Scale 2`，不隨視窗大小變），click 內部 ×2。實測客戶區 2880×1659 → 截圖 1440×830。

@@ -1,97 +1,115 @@
-﻿# 精靈王石器 畫面鏡像視窗：背景截圖（PrintWindow）即時畫進一個獨立小視窗，不搶焦點、不讀遊戲記憶體
-# 用法：mirror.ps1 [-Fps 2]          （WSL：bash tools/gui/mirror.sh）
-# - 視窗可自由縮放，畫面保持比例；右鍵選單：置頂、更新速度（0.5 / 1 / 2 / 5 幀）。
-# - 鏡像視窗最小化時暫停截圖；遊戲最小化 / 沒開時顯示提示，遊戲重開會自動重新找視窗。
-# - 單一執行個體：已經開著就把它帶到前面。位置、大小、置頂、速度存在 tools/.cache/mirror.txt。
-# 效能（2026-10-09 實測，Core Ultra 7 258V）：每幀約 25 ms CPU，2 幀 / 秒 ≈ 全機 0.2%。
-param([double]$Fps = 0)
+﻿# 精靈王石器 畫面鏡像視窗：用 DWM 縮圖（Alt+Tab 預覽同一套）把遊戲視窗即時合成進一個獨立小視窗
+# 用法：mirror.ps1          （WSL：bash tools/gui/mirror.sh）
+# - 幀數跟遊戲同步、幾乎不吃 CPU（顯示卡合成，不截圖、不縮放）；不搶焦點、不讀遊戲記憶體。
+# - 視窗可自由縮放，畫面保持比例。「置頂」在畫面右鍵選單與標題列選單（兩邊同步）。
+# - 遊戲最小化時 DWM 沒有畫面可給（Unity 最小化不繪製）→ 顯示提示；遊戲重開會自動重新接上。
+# - 單一執行個體：已經開著就把它帶到前面。位置、大小、置頂存在 tools/.cache/mirror.txt。
+# 舊版每幀用 PrintWindow 截圖，2 幀/秒 ≈ 全機 CPU 0.9%；DWM 縮圖不需要。
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -ReferencedAssemblies System.Drawing, System.Windows.Forms @"
-using System; using System.Drawing; using System.Drawing.Drawing2D; using System.Windows.Forms;
+using System; using System.Drawing; using System.Windows.Forms;
 using System.Runtime.InteropServices; using System.Diagnostics; using System.IO;
 public class Mirror : Form {
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
-  [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint f);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] static extern IntPtr GetSystemMenu(IntPtr h, bool revert);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool AppendMenu(IntPtr m, uint flags, UIntPtr id, string text);
+  [DllImport("user32.dll")] static extern uint CheckMenuItem(IntPtr m, uint id, uint flags);
+  [DllImport("dwmapi.dll")] static extern int DwmRegisterThumbnail(IntPtr dest, IntPtr src, out IntPtr thumb);
+  [DllImport("dwmapi.dll")] static extern int DwmUnregisterThumbnail(IntPtr thumb);
+  [DllImport("dwmapi.dll")] static extern int DwmUpdateThumbnailProperties(IntPtr thumb, ref THUMBPROPS p);
   struct RECT { public int L, T, R, B; }
+  [StructLayout(LayoutKind.Sequential)] struct THUMBPROPS {
+    public uint flags; public RECT dest; public RECT src; public byte opacity;
+    [MarshalAs(UnmanagedType.Bool)] public bool visible; [MarshalAs(UnmanagedType.Bool)] public bool clientOnly;
+  }
+  const uint SC_TOP = 0x1000;   // 標題列系統選單的「置頂」
   public static void DpiAware() { SetProcessDPIAware(); }
 
-  IntPtr game = IntPtr.Zero; Bitmap full; string msg = "找遊戲視窗…"; string stateFile;
-  Timer timer = new Timer(); MenuItem topItem; double fps;
-  public Mirror(string stateFile, double fps) {
+  IntPtr game = IntPtr.Zero, thumb = IntPtr.Zero; string msg = "找遊戲視窗…"; string stateFile;
+  Timer timer = new Timer(); MenuItem topItem; int srcW, srcH; bool shown;
+  public Mirror(string stateFile) {
     this.stateFile = stateFile;
     Text = "精靈王石器 畫面"; DoubleBuffered = true; BackColor = Color.Black;
     StartPosition = FormStartPosition.Manual; ClientSize = new Size(720, 415); Location = new Point(40, 40);
-    bool top = false; double savedFps = 2;
+    bool top = false;
     try {
       var v = File.ReadAllText(stateFile).Trim().Split(' ');
       Location = new Point(int.Parse(v[0]), int.Parse(v[1])); ClientSize = new Size(int.Parse(v[2]), int.Parse(v[3]));
-      top = v[4] == "1"; savedFps = double.Parse(v[5], System.Globalization.CultureInfo.InvariantCulture);
+      top = v[4] == "1";
     } catch { }
     // 存檔的位置不在任何螢幕上（換過螢幕）就放回左上
-    if (Screen.FromRectangle(Bounds).WorkingArea.IntersectsWith(Bounds) == false) Location = new Point(40, 40);
-    TopMost = top; this.fps = fps > 0 ? fps : savedFps;
+    if (!Screen.FromRectangle(Bounds).WorkingArea.IntersectsWith(Bounds)) Location = new Point(40, 40);
+    TopMost = top;
     var menu = new ContextMenu();
-    topItem = new MenuItem("置頂", delegate { TopMost = !TopMost; topItem.Checked = TopMost; Save(); });
+    topItem = new MenuItem("置頂", delegate { SetTop(!TopMost); });
     topItem.Checked = TopMost; menu.MenuItems.Add(topItem);
-    menu.MenuItems.Add("-");
-    foreach (double f in new double[] { 0.5, 1, 2, 5 }) {
-      double ff = f;
-      var it = new MenuItem(f + " 幀 / 秒", delegate { SetFps(ff); Save(); });
-      it.RadioCheck = true; menu.MenuItems.Add(it);
-    }
     ContextMenu = menu;
-    timer.Tick += delegate { Tick(); };
-    SetFps(this.fps);
-    FormClosing += delegate { Save(); timer.Stop(); };
-    Resize += delegate { Invalidate(); };
+    // 計時器只負責檢查遊戲還在不在、有沒有最小化、大小有沒有變；畫面本身由 DWM 即時合成
+    timer.Interval = 500; timer.Tick += delegate { Check(); }; timer.Start();
+    FormClosing += delegate { Save(); timer.Stop(); Drop(); };
+    Resize += delegate { Place(); Invalidate(); };
     // 用 -WindowStyle Hidden 啟動時，行程第一次 ShowWindow 會沿用「隱藏」→ 表單建立後再顯示一次
-    Shown += delegate { ShowWindow(Handle, 5); Activate(); };
+    Shown += delegate { ShowWindow(Handle, 5); Activate(); shown = true; Check(); };
   }
-  void SetFps(double f) {
-    fps = f; timer.Interval = (int)(1000 / f); timer.Start();
-    foreach (MenuItem it in ContextMenu.MenuItems) if (it.RadioCheck) it.Checked = it.Text.StartsWith(f + " ");
+  // 置頂：畫面右鍵選單與標題列系統選單兩邊同步打勾
+  void SetTop(bool on) {
+    TopMost = on; topItem.Checked = on;
+    if (IsHandleCreated) CheckMenuItem(GetSystemMenu(Handle, false), SC_TOP, on ? 8u : 0u);   // MF_CHECKED = 8
+    Save();
+  }
+  protected override void OnHandleCreated(EventArgs e) {
+    base.OnHandleCreated(e);
+    IntPtr m = GetSystemMenu(Handle, false);
+    AppendMenu(m, 0x800, UIntPtr.Zero, null);                     // MF_SEPARATOR
+    AppendMenu(m, TopMost ? 8u : 0u, (UIntPtr)SC_TOP, "置頂(&T)");
+  }
+  protected override void WndProc(ref Message m) {
+    if (m.Msg == 0x0112 && ((long)m.WParam & 0xFFF0) == SC_TOP) { SetTop(!TopMost); return; }   // WM_SYSCOMMAND
+    base.WndProc(ref m);
   }
   void Save() {
     if (WindowState != FormWindowState.Normal) return;
-    try { File.WriteAllText(stateFile, string.Format(System.Globalization.CultureInfo.InvariantCulture,
-      "{0} {1} {2} {3} {4} {5}", Location.X, Location.Y, ClientSize.Width, ClientSize.Height, TopMost ? 1 : 0, fps)); } catch { }
+    try { File.WriteAllText(stateFile, string.Format("{0} {1} {2} {3} {4}",
+      Location.X, Location.Y, ClientSize.Width, ClientSize.Height, TopMost ? 1 : 0)); } catch { }
   }
-  void Tick() {
-    if (WindowState == FormWindowState.Minimized) return;   // 沒人看就不截
+  void Drop() { if (thumb != IntPtr.Zero) { DwmUnregisterThumbnail(thumb); thumb = IntPtr.Zero; } }
+  void Check() {
+    if (!shown) return;
     if (game == IntPtr.Zero || !IsWindow(game)) {
-      game = IntPtr.Zero;
+      Drop(); game = IntPtr.Zero;
       foreach (var p in Process.GetProcessesByName("PrimalSA")) if (p.MainWindowHandle != IntPtr.Zero) game = p.MainWindowHandle;
       if (game == IntPtr.Zero) { Status("遊戲沒有在執行"); return; }
     }
     if (IsIconic(game)) { Status("遊戲視窗最小化（Unity 最小化不繪製）"); return; }
     RECT r; GetClientRect(game, out r);
     if (r.R <= 0 || r.B <= 0) { Status("讀不到遊戲視窗大小"); return; }
-    if (full == null || full.Width != r.R || full.Height != r.B) { if (full != null) full.Dispose(); full = new Bitmap(r.R, r.B); }
-    using (var g = Graphics.FromImage(full)) {
-      IntPtr dc = g.GetHdc();
-      // 3 = PW_CLIENTONLY | PW_RENDERFULLCONTENT（DirectX 視窗要 RENDERFULLCONTENT 才不會黑畫面）
-      bool ok = PrintWindow(game, dc, 3); g.ReleaseHdc(dc);
-      if (!ok) { Status("PrintWindow 失敗"); return; }
-    }
-    msg = null; Invalidate();
+    if (thumb == IntPtr.Zero && DwmRegisterThumbnail(Handle, game, out thumb) != 0) { thumb = IntPtr.Zero; Status("DWM 縮圖註冊失敗"); return; }
+    bool changed = msg != null || r.R != srcW || r.B != srcH;
+    srcW = r.R; srcH = r.B;
+    if (changed) { msg = null; Place(); Invalidate(); }
   }
-  void Status(string m) { if (msg != m) { msg = m; Invalidate(); } }
+  // 把縮圖放到視窗中間、保持比例；只取遊戲的客戶區（不含標題列）
+  void Place() {
+    if (thumb == IntPtr.Zero || srcW <= 0) return;
+    var c = ClientSize;
+    double s = Math.Min((double)c.Width / srcW, (double)c.Height / srcH);
+    int w = (int)(srcW * s), h = (int)(srcH * s), x = (c.Width - w) / 2, y = (c.Height - h) / 2;
+    var p = new THUMBPROPS();
+    p.flags = 0x1 | 0x8 | 0x10;   // RECTDESTINATION | VISIBLE | SOURCECLIENTAREAONLY
+    p.dest = new RECT { L = x, T = y, R = x + w, B = y + h };
+    p.visible = msg == null; p.clientOnly = true;
+    DwmUpdateThumbnailProperties(thumb, ref p);
+  }
+  void Status(string m) { if (msg != m) { msg = m; Place(); Invalidate(); } }
   protected override void OnPaint(PaintEventArgs e) {
-    var g = e.Graphics; var c = ClientSize;
-    if (msg != null || full == null) {
-      TextRenderer.DrawText(g, msg ?? "", Font, new Rectangle(0, 0, c.Width, c.Height), Color.Gray,
-        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
-      return;
-    }
-    // 保持比例置中
-    double s = Math.Min((double)c.Width / full.Width, (double)c.Height / full.Height);
-    int w = (int)(full.Width * s), h = (int)(full.Height * s);
-    g.InterpolationMode = InterpolationMode.HighQualityBilinear; g.PixelOffsetMode = PixelOffsetMode.HighSpeed;
-    g.DrawImage(full, new Rectangle((c.Width - w) / 2, (c.Height - h) / 2, w, h));
+    if (msg == null) return;   // 有畫面時 DWM 直接蓋在上面
+    var c = ClientSize;
+    TextRenderer.DrawText(e.Graphics, msg, Font, new Rectangle(0, 0, c.Width, c.Height), Color.Gray,
+      TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
   }
 }
 "@
@@ -108,5 +126,5 @@ if (-not $created) {
 $state = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.cache\mirror.txt'))
 New-Item -ItemType Directory -Force (Split-Path $state) | Out-Null
 [System.Windows.Forms.Application]::EnableVisualStyles()
-[System.Windows.Forms.Application]::Run((New-Object Mirror $state, $Fps))
+[System.Windows.Forms.Application]::Run((New-Object Mirror $state))
 $mutex.ReleaseMutex()

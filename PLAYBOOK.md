@@ -84,7 +84,7 @@ WSL 的 bash 包一層 Windows PowerShell，用 Win32 API：
 | `key '{ESC}'` / `key 文字` | 背景：特殊鍵送 WM_KEYDOWN / WM_KEYUP；一般字元只送 WM_CHAR（`PostMessageW`） | 游標完全不動。字元若連按鍵一起送，Unity 會自己 TranslateMessage 再生一個字（abc → aabbcc）；用 ANSI 版 PostMessage 中文會被截成低位元組 |
 | `info` / `max` | 視窗大小 / 最大化 | 座標只在固定視窗大小下有效 |
 | `seq "a; wait 300; b; shot"` | 同一個行程連跑多個動作 | 省掉每次啟動 PowerShell 的約 0.4 秒 |
-| `mirror.sh [幀/秒]` | 常駐 WinForms 視窗，計時器 PrintWindow 後縮放畫進視窗 | 給人看的即時畫面；終端機（Windows Terminal → herdr，或 wsl.exe 經 ConPTY）畫不了 kitty 圖片協定，所以不放在 Claude pane 裡。常駐比每幀啟動 PowerShell 省 10 倍以上（啟動 + 編譯 C# ≈ 330 ms CPU，截圖本身 ≈ 25 ms） |
+| `mirror.sh` | 常駐 WinForms 視窗 + **DWM 縮圖**（`DwmRegisterThumbnail`，Alt+Tab 預覽同一套） | 給人看的即時畫面：幀數跟遊戲同步、CPU ≈ 0.02%（舊版每幀 PrintWindow，2 幀/秒就要 0.9%）。終端機（Windows Terminal 經 ConPTY）畫不了 kitty 圖片協定，所以不放在 Claude pane 裡。DWM 合成的畫面 PrintWindow 截不到，要驗證用 CopyFromScreen |
 | `fg <指令>` | 舊做法：拉到前景 + `SetCursorPos` + `mouse_event` / SendKeys | 背景模式失靈時的備案 |
 | `end` | 還原使用者原本的前景視窗與游標 | 用過 `fg` / `max` 後要跑；背景模式不需要（跑了也無害） |
 
