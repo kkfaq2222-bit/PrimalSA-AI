@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WSL 包裝：bash tools/gui/gui.sh <shot|click|drag|key|info> ...
+# WSL 包裝：bash tools/gui/gui.sh <shot|click|dclick|drag|key|info> ...
 # shot 不給檔名時存到 tools/.cache/shot.png
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PS="$(wslpath -w "$DIR/gui.ps1")"

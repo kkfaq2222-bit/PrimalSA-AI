@@ -10,6 +10,7 @@
 ```
 PrimalSA-AI/
   AGENTS.md            本檔：專案規範 + 遊戲規則摘要
+  PLAYBOOK.md          方法手冊：怎麼讓 AI 玩遊戲（給其他 AI / 想照做的人）
   GameClient/          遊戲本體（唯讀！見第 3 節）
   knowledge/           遊戲知識庫（自動產生，勿手動修改）
     README.md          知識庫索引：分類目錄、全部文件清單、查詢方法

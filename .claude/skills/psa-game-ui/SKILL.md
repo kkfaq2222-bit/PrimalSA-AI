@@ -18,6 +18,7 @@ bash tools/gui/gui.sh info                 # 視窗大小
 bash tools/gui/gui.sh max                  # 最大化 → 客戶區 2880×1659（ui/ 座標的基準）
 bash tools/gui/gui.sh shot [out.png]       # 預設存 tools/.cache/shot.png，再用 Read 看圖
 bash tools/gui/gui.sh click X Y [right]
+bash tools/gui/gui.sh dclick X Y          # 雙擊（倉庫存入）
 bash tools/gui/gui.sh drag X1 Y1 X2 Y2
 bash tools/gui/gui.sh key '{ESC}'          # SendKeys 語法：{ENTER} {TAB} 一般字元
 bash tools/gui/gui.sh end                  # 任務結束：還原使用者的前景視窗與游標
@@ -39,6 +40,7 @@ bash tools/gui/gui.sh seq "click 763 760; wait 400; shot"   # 同一個行程連
 | 看角色屬性 / 抗性 / 潛力點 | [ui/role.md](ui/role.md) |
 | 看任務進度、任務詳情 | [ui/quest.md](ui/quest.md) |
 | 背包、道具、倉庫、材料圖鑑 | [ui/bag.md](ui/bag.md) |
+| 寵物出戰 / 騎乘 / 休息、寵物技能 | [ui/pet.md](ui/pet.md) |
 | 傳送到別的地圖 / 練級點 | [ui/transfer.md](ui/transfer.md) |
 | 遊戲設定、離線時間 | [ui/setting.md](ui/setting.md) |
 | 自動戰鬥、補血、抓寵、遇敵 | [ui/ass.md](ui/ass.md) |
@@ -53,19 +55,20 @@ bash tools/gui/gui.sh seq "click 763 760; wait 400; shot"   # 同一個行程連
    - **已知流程**（座標都驗證過）：用 `seq` 把多個動作串成一次呼叫，動作之間 `wait 150～500`，只在**分歧點**（要判斷畫面才能決定下一步）和**結尾**截圖。
    - **陌生畫面**：一次一個動作，`seq "click X Y; wait 400; shot"`，看完再決定下一步。
 3. 不要盲點：至少在結尾截圖驗證；流程中途需要事後查錯的，在 seq 裡多存一張 `shot <路徑>`（不用 Read，失敗時再看）。
-4. 關閉面板：優先 `key '{ESC}'`；ESC 關不掉的（聊天面板、小地圖浮窗、收合狀態）見 ui/home.md「關閉方式」。
-5. 收合鈕（`<` `>`）按下後會**換位置**，再點同一座標會點空，要重新截圖找。
-6. 任務結束（成功、失敗或停下來問使用者）→ `bash tools/gui/gui.sh end`。
+4. **面板開著時只點面板範圍內**：點面板外會穿透到遊戲場景（走路、點到 NPC）。要重開面板先 ESC。
+5. 關閉面板：優先 `key '{ESC}'`；ESC 關不掉的（聊天面板、小地圖浮窗、收合狀態）見 ui/home.md「關閉方式」。
+6. 收合鈕（`<` `>`）按下後會**換位置**，再點同一座標會點空，要重新截圖找。
+7. 任務結束（成功、失敗或停下來問使用者）→ `bash tools/gui/gui.sh end`。
 
 ## 紅區（絕對不點）
 | 東西 | 原因 |
 |---|---|
 | 贊助、商城的「購買」、LuckyCard「抽1次 / 抽10次 / 購買獎券」、任何 NT$ / 鑽石價格鈕 | 付費（鐵則 3） |
-| 設置面板底部：全員登出、離線掛機、回記錄點 | 會讓角色登出或傳送，改變全隊狀態 |
+| 設置面板底部：全員登出、離線掛機、回記錄點 | 會讓角色登出或傳送，改變全隊狀態（回記錄點＝無確認框直接回村長家，使用者交代時才按） |
 | 背包道具的「丟棄」、刪除管理 | 不可逆 |
 | 外掛（ASS）裡任何勾選、下拉選單、數值與 SET 鈕；主畫面「遇敵」 | 會改變自動戰鬥 / 遇敵行為。開面板看可以，改任何東西都要使用者同意 |
 | 設置面板「解決異常」 | 作用未知，要先問 |
-| 地圖傳送的目的地 | 會傳送（可能花石幣） |
+| 地圖傳送的目的地 | 會整隊傳送（實測不扣石幣），屬遊玩決策；英雄戰場有儲值門檻，不點 |
 | 交易所的上架 / 購買 | 交易 |
 
 開面板、切分頁、點道具看說明都可以自由做。

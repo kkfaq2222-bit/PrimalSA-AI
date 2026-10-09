@@ -93,6 +93,15 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4) {
     [W]::mouse_event($up, 0, 0, 0, [IntPtr]::Zero)
     "click $A1,$A2"
   }
+  'dclick' {
+    # 雙擊：游標不動、兩次按放間隔 80ms（在 Windows 雙擊時間內）。倉庫存入 / 取出用
+    Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
+    for ($i = 0; $i -lt 2; $i++) {
+      [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 40
+      [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero); if ($i -eq 0) { Start-Sleep -Milliseconds 80 }
+    }
+    "dclick $A1,$A2"
+  }
   'drag' {
     Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
     [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero)
@@ -125,7 +134,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4) {
       if ($t[0]) { Invoke-Gui $t[0] $t[1] $t[2] $t[3] $t[4] }
     }
   }
-  default { "未知指令：$Cmd（shot|click|drag|key|info|max|end|wait|seq）" }
+  default { "未知指令：$Cmd（shot|click|dclick|drag|key|info|max|end|wait|seq）" }
 }
 }
 Invoke-Gui $Cmd $A1 $A2 $A3 $A4
