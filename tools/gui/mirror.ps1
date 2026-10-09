@@ -1,7 +1,7 @@
 ﻿# 精靈王石器 畫面鏡像視窗：用 DWM 縮圖（Alt+Tab 預覽同一套）把遊戲視窗即時合成進一個獨立小視窗
 # 用法：mirror.ps1          （WSL：bash tools/gui/mirror.sh）
 # - 幀數跟遊戲同步、幾乎不吃 CPU（顯示卡合成，不截圖、不縮放）；不搶焦點、不讀遊戲記憶體。
-# - 視窗可自由縮放，畫面保持比例。「置頂」在畫面右鍵選單與標題列選單（兩邊同步）。
+# - 視窗可自由縮放，畫面保持比例。預設置頂，可在畫面右鍵選單與標題列選單取消（兩邊同步）。
 # - 遊戲最小化時 DWM 沒有畫面可給（Unity 最小化不繪製）→ 顯示提示；遊戲重開會自動重新接上。
 # - 單一執行個體：已經開著就把它帶到前面。位置、大小、置頂存在 tools/.cache/mirror.txt。
 # 舊版每幀用 PrintWindow 截圖，2 幀/秒 ≈ 全機 CPU 0.9%；DWM 縮圖不需要。
@@ -35,7 +35,7 @@ public class Mirror : Form {
     this.stateFile = stateFile;
     Text = "精靈王石器 畫面"; DoubleBuffered = true; BackColor = Color.Black;
     StartPosition = FormStartPosition.Manual; ClientSize = new Size(720, 415); Location = new Point(40, 40);
-    bool top = false;
+    bool top = true;   // 預設置頂；存檔裡有記錄就以存檔為準（右鍵選單可取消）
     try {
       var v = File.ReadAllText(stateFile).Trim().Split(' ');
       Location = new Point(int.Parse(v[0]), int.Parse(v[1])); ClientSize = new Size(int.Parse(v[2]), int.Parse(v[3]));
