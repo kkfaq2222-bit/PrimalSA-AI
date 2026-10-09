@@ -3,7 +3,7 @@
 > 座標 = `gui.sh shot` 截圖座標（客戶區 2880×1659 → 截圖 1440×830）。索引見 [README.md](README.md)。
 
 第一次遇到時截圖記錄，寫進對應功能檔（或新開檔），並更新 [README.md](README.md) 索引。
-- NPC 對話（npcdialog）、NPC 商店（npccommonstore）
+- NPC 商店（npccommonstore）（NPC 對話已實測，見 quest.md）
 - 戰鬥介面（battlehome 指令列、選技能 / 道具 / 騎寵）
 - 點地面移動
 - 寵物管理（有寵物時）
