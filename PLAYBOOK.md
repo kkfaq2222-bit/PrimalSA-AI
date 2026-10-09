@@ -74,7 +74,7 @@ AI 看畫面時不知道「這個道具有什麼用、這隻寵物在哪抓、�
 
 ## 4. 第二階段：讓 AI 能操作畫面
 ### 4.1 工具設計（tools/gui）
-WSL 的 bash 包一層 Windows PowerShell，用 Win32 API：
+Windows PowerShell 用 Win32 API（WSL 的 bash 用 `gui.sh` 包一層；Python 腳本與 Windows 原生版直接呼叫 `powershell.exe -File gui.ps1`，平台判斷見 `tools/gui/winenv.py`）：
 | 指令 | 作法 | 重點 |
 |---|---|---|
 | `shot [檔]` | `PrintWindow(PW_RENDERFULLCONTENT)` 背景截圖，縮成 1/2 | **不搶焦點、被遮住也截得到**；DirectX 視窗要 RENDERFULLCONTENT 才不會黑畫面 |

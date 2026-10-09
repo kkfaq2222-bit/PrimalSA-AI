@@ -94,7 +94,16 @@ PrimalSA-AI/
 
 ## 5. 操作遊戲畫面
 操作前先讀 `.claude/skills/psa-game-ui/SKILL.md`（工具用法、操作迴圈、紅區）與同資料夾 `ui/README.md`（功能索引；按鈕座標、各面板內容依功能拆檔）。
-工具：`bash tools/gui/gui.sh shot|click|drag|key|info|max|end`，座標用截圖座標；預設背景操作（不搶前景，點擊時游標瞬移約 0.15 秒）；用過 `fg` / `max` 後要跑 `end` 把前景還給使用者。
+工具：`bash tools/gui/gui.sh shot|click|drag|key|info|max|end`（WSL / Git Bash 手打用）；走路 / 補血用 `uv run --no-project python tools/gui/walk.py ...`、`heal.py`（兩邊指令相同）。座標用截圖座標；預設背景操作（不搶前景，點擊時游標瞬移約 0.15 秒）；用過 `fg` / `max` 後要跑 `end` 把前景還給使用者。
+
+## 5.2 在 Claude 桌面 App（Windows 原生）執行
+專案也可以用 Claude 桌面 App 的 Claude Code 開（路徑 `C:\games\PrimalSA-AI`，shell 是 Git Bash，沒有 wslpath、沒有 /mnt/c）。工具已兼容，差異如下：
+- **前置**：安裝 uv for Windows：`winget install astral-sh.uv`（Python 由 uv 自動管理）。`powershell.exe`（Windows PowerShell 5.1）系統內建。
+- **指令**：`uv run --no-project python tools/gui/walk.py ...`、`heal.py`、`tools/query/psa.py` 與 WSL 完全相同；`bash tools/gui/gui.sh ...` 在 Git Bash 也能用（用 cygpath 換路徑）。
+- **psa-hud mod**：stat.ps1 路徑由 session cwd 推算，不用改程式。載入方式在使用者層級設定（不放進專案）：Windows 版的 `CLAUDE_CODE_PLUGIN_DIRS` 設成 `C:\games\PrimalSA-AI\tools\mods\psa-hud`（WSL 版是 `/mnt/c/games/PrimalSA-AI/tools/mods/psa-hud`；兩邊各有自己的 settings.json）。
+- 其他：Windows 原生 Python 的 stdout 預設 cp950，walk.py 已自行改成 UTF-8；自己寫 Python 呼叫 gui.ps1 時用 `winenv.run_ps()`。
+- 紅區、背景操作、驗證視窗等規則與 WSL 相同。
+- 實測狀態：WSL 完整驗證；Windows 原生用 Windows 版 Python 驗過 `walk.py --plan`、`gui info / shot / pixel`、`stat.ps1`（Git Bash 環境本身未實測）。
 
 ## 5.1 怎麼查知識庫
 1. 先看 `knowledge/README.md` 的分類目錄。
@@ -129,4 +138,5 @@ uv run --no-project --with UnityPy python tools/extract/extract.py
 - Python：查詢工具只用標準函式庫；匯出器需要 UnityPy（用 `uv run --with UnityPy` 臨時載入，不要裝進系統）。本機沒有 `python` / `py` 指令，一律用 `uv run`。
 - C#：用 Windows 內建 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`，只支援 C# 5（不能用 `$""`、`?.`、`nameof`、`out var`）。
 - 程式註解與文件用繁體中文。
+- **跨平台（WSL 與 Windows 原生都要能跑）**：不寫死 `/mnt/c` 或 `C:\games\...`；Python 呼叫 PowerShell 一律經 `tools/gui/winenv.py`（`run_ps` / `to_windows`，自動判斷 WSL / Windows）；bash 腳本路徑換算先試 `wslpath -w`、再 `cygpath -w`。文件裡的指令寫成兩邊都通（`uv run --no-project python ...`）。
 - 格式逆向細節：`knowledge/overview/client-files.md`。同引擎的《時光石器》工具 `C:\games\SA-tool`（CLAUDE.md 有大量逆向筆記）可作參考，但兩個遊戲的設定表欄位不同，不要直接套用它的 schema。

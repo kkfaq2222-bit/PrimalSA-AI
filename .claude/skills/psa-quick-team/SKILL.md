@@ -20,7 +20,7 @@ description: Use when the PrimalSA (精靈王石器) characters need to be group
    - 全部「線上」「單人」→ 繼續。
 2. **一次跑完組隊並驗證**（快速組隊 → 選第一個當隊長 → 下排 4 人每個都點 → 組隊 → 開切換面板截圖後關掉）：
    ```bash
-   $G seq "click 520 578; wait 500; click 549 320; wait 400; click 549 520; wait 150; click 682 520; wait 150; click 815 520; wait 150; click 948 520; wait 300; shot C:\games\PrimalSA-AI\tools\.cache\q5.png; click 720 665; wait 1500; click 763 760; wait 400; shot; key {ESC}"
+   $G seq "click 520 578; wait 500; click 549 320; wait 400; click 549 520; wait 150; click 682 520; wait 150; click 815 520; wait 150; click 948 520; wait 300; click 720 665; wait 1500; click 763 760; wait 400; shot; key {ESC}"
    ```
 3. **檢查點 2**：Read `tools/.cache/shot.png` → 切換角色面板：DKB0 標紅字「**隊長**」，其餘 4 人都標「**隊員**」（取代原本的「單人」）= 成功。
    - 不要靠聊天日誌或左側組隊分頁：日誌常被抽獎廣播洗掉；左側列表只顯示 4 列，看不到第 5 人。

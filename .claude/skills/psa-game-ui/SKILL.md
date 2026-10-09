@@ -7,7 +7,10 @@ description: Use when operating the PrimalSA (精靈王石器) game client by sc
 
 ## 概觀
 AI 只透過「截圖 → 看圖 → 點擊 / 按鍵 → 再截圖確認」操作遊戲（AGENTS.md 第 3 節第 4 條）。
-工具是 `tools/gui/gui.sh`（WSL）→ `tools/gui/gui.ps1`（Windows PowerShell）。
+工具核心是 `tools/gui/gui.ps1`（Windows PowerShell）。兩種環境都能用：WSL（Ubuntu）的 Claude Code、Claude 桌面 App（Windows 原生，Git Bash 當 shell）。
+- 手打指令用 `bash tools/gui/gui.sh ...`（WSL / Git Bash 都行；自動用 wslpath 或 cygpath 換路徑）。
+- Python 腳本（`walk.py`、`heal.py`）兩邊指令相同：`uv run --no-project python tools/gui/walk.py ...`，它們直接呼叫 `powershell.exe -File gui.ps1`（平台判斷與路徑換算在 `tools/gui/winenv.py`），不經 bash。
+- Windows 原生需先裝 uv：`winget install astral-sh.uv`；設定細節見 AGENTS.md「在 Claude 桌面 App（Windows 原生）執行」。
 **背景操作（預設）**：`shot` 用 PrintWindow 背景截圖；`click`/`dclick`/`drag` 不搶前景，只把游標瞬移到目標點完再移回（約 0.15 秒），`key` 完全不動游標。使用者可以同時用其他視窗。
 - 原理：PostMessage 假焦點 + 按鍵訊息；Unity 的滑鼠位置讀真實游標，所以游標仍要移過去（細節見 gui.ps1 開頭註解）。
 - **使用者怎麼動都不影響自動操作**：點擊那 0.15 秒用低階滑鼠鉤子吞掉使用者實體滑鼠的移動 / 按下（放開放行），游標一定停在目標上；鍵盤訊息直接送遊戲視窗，使用者打字、切視窗都不干擾。不用等使用者閒置。
@@ -26,7 +29,7 @@ bash tools/gui/gui.sh key '{ESC}'          # SendKeys 語法：{ENTER} {TAB} 一
 bash tools/gui/gui.sh fg click X Y         # 前景模式備案（背景點擊沒反應時）
 bash tools/gui/gui.sh end                  # 用過 fg / max 後還原前景視窗與游標（背景模式跑了也無害）
 bash tools/gui/gui.sh seq "click 763 760; wait 400; shot"   # 同一個行程連跑多個動作（快）
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w tools/gui/stat.ps1)"   # OCR 讀 HUD → 一行 JSON（等級 / HP / MP / 寵物 / 地圖座標），不用看圖、不搶焦點
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\gui\stat.ps1   # （WSL 要用 "$(wslpath -w tools/gui/stat.ps1)"；Windows / Git Bash 直接給 Windows 路徑，在專案根目錄執行）OCR 讀 HUD → 一行 JSON（等級 / HP / MP / 寵物 / 地圖座標），不用看圖、不搶焦點
 bash tools/gui/mirror.sh                   # 給使用者看的即時畫面鏡像視窗（DWM 縮圖：幀數同遊戲、CPU ≈ 0；可縮放、右鍵 / 標題列選單置頂）
 bash tools/gui/gui.sh pixel "X,Y X,Y"      # 背景截圖讀像素顏色（腳本判斷畫面狀態用，例：遇敵開關）；seq 裡用 X,Y/X,Y
 bash tools/gui/gui.sh seq "click 1340 65; waitpix 1500 1290,97,197,73,49; ifok click 259 314"   # 輪詢到面板出現（點顏色符合）才點下一步，取代固定 wait

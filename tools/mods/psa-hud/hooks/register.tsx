@@ -5,11 +5,23 @@ import type { Stat } from '../types'
 
 // 讀 HUD 的腳本：背景截圖 + Windows OCR，印一行 JSON（見 tools/gui/stat.ps1）
 // 遊戲畫面由獨立的鏡像視窗顯示（tools/gui/mirror.sh），pane 只放文字
-const STAT_PS1 = 'C:\\games\\PrimalSA-AI\\tools\\gui\\stat.ps1'
+// 路徑由 session cwd 推算（WSL /mnt/c/games/PrimalSA-AI、Windows C:\\games\\PrimalSA-AI、Git Bash /c/games/... 都通），
+// 一律換成 Windows 路徑給 powershell.exe；還沒收到 session.start 時用預設值
+const PROJECT = 'PrimalSA-AI'
+let statPs1 = `C:\\games\\${PROJECT}\\tools\\gui\\stat.ps1`
+
+export function statPathFromCwd(cwd: string): string | undefined {
+  const i = cwd.indexOf(PROJECT)
+  if (i < 0) return undefined
+  let root = cwd.slice(0, i + PROJECT.length)
+  const m = /^\/(?:mnt\/|cygdrive\/)?([a-zA-Z])\//.exec(root)
+  if (m && !/^[a-zA-Z]:/.test(root)) root = `${m[1]!.toUpperCase()}:/${root.slice(m[0].length)}`
+  return `${root}/tools/gui/stat.ps1`.replace(/\//g, '\\')
+}
 const PERIOD_MS = 15000
 const PANE = 'psa-hud'
 
-export const STAT_ARGV = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', STAT_PS1]
+export const statArgv = () => ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', statPs1]
 
 const stat = atom({ plugin: 'psa-hud', key: 'stat' } as const, null)
 const at = atom({ plugin: 'psa-hud', key: 'at' } as const, 0)
@@ -26,7 +38,7 @@ export function format(s: Stat): string {
 
 async function poll($: EngineInterface): Promise<Stat> {
   try {
-    const { exitCode, stdout, stderr } = await $.process.run(STAT_ARGV, { timeoutMs: 10000 })
+    const { exitCode, stdout, stderr } = await $.process.run(statArgv(), { timeoutMs: 10000 })
     const line = stdout.trim().split('\n').pop()?.trim() ?? ''
     if (exitCode !== 0 || !line.startsWith('{')) return { ok: false, error: `讀取失敗 ${stderr.trim().slice(0, 80)}` }
     return JSON.parse(line) as Stat
@@ -62,6 +74,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // 設定在使用者層級（每個專案都會載入），只在精靈王石器專案裡啟動
     if (!e.cwd.includes('PrimalSA-AI') || !e.isInteractive) return next(e)
+    statPs1 = statPathFromCwd(e.cwd) ?? statPs1
     await $.command.register({ name: 'psa-hud', description: '打開精靈王石器資訊 pane 並立即更新' })
     // 舊版（0.1）放在狀態列，改用 pane 後清掉
     $.ui.status(undefined)

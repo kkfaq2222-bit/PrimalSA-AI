@@ -7,7 +7,7 @@
   uv run --no-project python tools/gui/heal.py --watch         # 常駐：每 15 秒看 HUD 血條，隊長血 / 魔太低就自動補
   uv run --no-project python tools/gui/heal.py --watch --hp 40 --mp 20 --every 15 --confirm 2 [--verbose] [--for 300]
 
-只透過 tools/gui/gui.sh（背景點擊 / 截圖）與 stat.ps1（OCR + 血條像素讀 HUD）操作，不碰遊戲記憶體。
+只透過 gui.ps1（經 walk.gui / winenv.py 直接呼叫 powershell.exe；背景點擊 / 截圖）與 stat.ps1（OCR + 血條像素讀 HUD）操作，不碰遊戲記憶體。
 走路、座標換算、OCR 讀座標、引子點擊、點 NPC 都用 tools/gui/walk.py（常數只在那裡定義）。
 座標以最大化 2880×1659（截圖 1440×830）為準；流程與座標的實測紀錄見 notes/leveling.md。
 """

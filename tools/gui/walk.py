@@ -7,7 +7,7 @@
   uv run --no-project python tools/gui/walk.py --path "1000:86,88 84,81 83,73 81,66" [--exit 1005]   # 照手動 waypoint 走
   uv run --no-project python tools/gui/walk.py --plan 1000 81 66 [--from 92,99]   # 只印自動找路的 waypoint，不動
   其他選項：--slow（每段都 OCR 驗證，慢但穩）、--no-auto（不用通行格，直線分段讓遊戲自己繞）、--from X,Y（不 OCR，假設起點）
-  WALK_DEBUG=1：印出每次 gui.sh 的輸出。
+  WALK_DEBUG=1：印出每次 gui.ps1 的輸出。
 
 給其他腳本 import（heal.py 就是這樣用）：
   import walk
@@ -17,7 +17,7 @@
   walk.npc_steps((20, 57), at=(23, 62), then='click 948 460')   # 點 NPC 開對話的 seq 片段
   walk.prime()                                      # 換地圖後的引子點擊
 
-只透過 tools/gui/gui.sh（背景點擊 / 截圖）與 stat.ps1（OCR 讀 HUD 座標）操作，不碰遊戲記憶體。
+只透過 gui.ps1（經 winenv.py 直接呼叫 powershell.exe；背景點擊 / 截圖）與 stat.ps1（OCR 讀 HUD 座標）操作，不碰遊戲記憶體。
 通行格讀取重用 tools/query/psa.py（load_maps / grid），格子值 1 = 可走。
 """
 import argparse
@@ -31,8 +31,11 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-GUI = ROOT / 'tools' / 'gui' / 'gui.sh'
 sys.path.insert(0, str(ROOT / 'tools' / 'query'))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+if hasattr(sys.stdout, 'reconfigure'):   # Windows 原生 Python 預設 cp950，中文會變亂碼
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+import winenv  # noqa: E402  平台判斷（WSL / Windows 原生）與路徑換算
 import psa  # noqa: E402  知識庫查詢工具：load_maps() / grid(map_id) / T('Npc')
 
 # ======== 走路常數（2026-10-09 實測；遊戲最大化客戶區 2880×1659 → 截圖 1440×830 為準）========
@@ -69,10 +72,12 @@ def log(msg: str) -> None:
 
 
 def gui(*args: str) -> str:
-    r = subprocess.run(['bash', str(GUI), *args], capture_output=True, text=True)
+    """直接呼叫 powershell.exe -File gui.ps1（不經 bash）；WSL / Windows 原生都通"""
+    r = winenv.run_ps('gui.ps1', *args)
+    out = (r.stdout.strip() or r.stderr.strip())
     if os.environ.get('WALK_DEBUG') or os.environ.get('HEAL_DEBUG'):
-        print('   ', args[0], '→', r.stdout.strip().replace('\n', ' | '), flush=True)
-    return r.stdout.strip()
+        print('   ', args[0], '→', out.replace('\n', ' | '), flush=True)
+    return out
 
 
 def last_ok(out: str) -> bool:
@@ -120,16 +125,8 @@ def split(a: tuple[int, int], b: tuple[int, int], lim: int = MAX_TILES) -> list[
 
 
 # ---------------- 讀座標（stat.ps1 OCR，每次約 0.9 秒）----------------
-_STAT = None
-
-
 def stat() -> dict:
-    global _STAT
-    if _STAT is None:
-        _STAT = subprocess.run(['wslpath', '-w', str(ROOT / 'tools' / 'gui' / 'stat.ps1')],
-                               capture_output=True, text=True).stdout.strip()
-    r = subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', _STAT],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace')
+    r = winenv.run_ps('stat.ps1')
     line = (r.stdout.strip().splitlines() or [''])[-1]
     try:
         return json.loads(line)

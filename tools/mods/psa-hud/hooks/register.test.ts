@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { format } from './register'
+import { format, statPathFromCwd } from './register'
 
 const OK = '{"ok":true,"level":"0轉38級","hp":208,"mp":45,"petLevel":"0轉38級","petHp":434,"map":"奇努伊的海底通路","pos":"31401:91,29"}'
 
@@ -31,4 +31,13 @@ test('stat.ps1 失敗時回報讀取失敗', async ($, on) => {
   on('clock.now', () => ({ value: 0 }))
   const { text } = await $.command.run({ command: 'psa-hud', args: '' } as never)
   expect(text).toBe('PSA: 讀取失敗 boom')
+})
+
+test('statPathFromCwd：WSL / Windows / Git Bash / 子目錄都換成 Windows 路徑', () => {
+  const want = 'C:\\games\\PrimalSA-AI\\tools\\gui\\stat.ps1'
+  expect(statPathFromCwd('/mnt/c/games/PrimalSA-AI')).toBe(want)
+  expect(statPathFromCwd('C:\\games\\PrimalSA-AI')).toBe(want)
+  expect(statPathFromCwd('C:/games/PrimalSA-AI/tools')).toBe(want)
+  expect(statPathFromCwd('/c/games/PrimalSA-AI')).toBe(want)
+  expect(statPathFromCwd('/home/x/other')).toBeUndefined()
 })
