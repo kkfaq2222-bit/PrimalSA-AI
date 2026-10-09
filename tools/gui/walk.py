@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 if hasattr(sys.stdout, 'reconfigure'):   # Windows 原生 Python 預設 cp950，中文會變亂碼
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 import winenv  # noqa: E402  平台判斷（WSL / Windows 原生）與路徑換算
+import layout  # noqa: E402  依遊戲視窗大小選座標（2880×1659 / 1920×1017）
 import psa  # noqa: E402  知識庫查詢工具：load_maps() / grid(map_id) / T('Npc')
 
 # ======== 走路常數（2026-10-09 實測；遊戲最大化客戶區 2880×1659 → 截圖 1440×830 為準）========
@@ -66,6 +67,29 @@ NPC_DY = -29                 # 點 NPC 身體：比腳下那格的螢幕座標�
 # 一般 NPC 對話框的棕底（小護士對話框實測；別的 NPC 對話框版面不同時要自己給 sig）
 SIG_NPC_DIALOG = '1360,300,107,70,44/1100,350,107,70,44'
 
+# ======== 1920×1017 版面（1920×1080 螢幕最大化 → 截圖 960×508）========
+# 上面 2880×1659 的常數不動；遊戲視窗是 1920×1017 時（layout.py 判斷）改用這組。
+# 2026-10-09 實測（31401 奇努伊的海底通路）：UI 依高度縮放（×0.613），但地圖畫面依寬度縮放（×0.667）。
+LAYOUT = layout.resolve()
+if LAYOUT == '1920x1017':
+    ME = (477, 251)                  # 角色腳下（截圖看約 480,250；3 / 5 / 8 格點擊都落在正確格子）
+    TILE_X = (21.2, -15.2)           # 實測：走 3 / 5 格前後截圖比對，畫面平移 42.4×30.4 px / 格（= 32,23 × 0.667）
+    TILE_Y = (21.2, 15.2)
+    NPC_DY = -19                     # 實測：醫院小護士（-29 × 0.667）
+    PANEL_RIGHT = 250                # 左側任務 / 組隊面板、「詳情」「<」到 x≈248
+    UI_RECTS = [
+        (0, 0, PANEL_RIGHT, 508),    # 左側：角色 HUD、EXP、任務 / 組隊面板、詳情、<
+        (0, 0, 960, 92),             # 上排：HP / 寵物框（含下方漩渦鈕到 y≈82）、商城…LuckyCard、地圖名、傳送鈕
+        (0, 330, 335, 508),          # 左下：喇叭 / 信封 / 鈴鐺、聊天區、表情…發送
+        (0, 430, 960, 508),          # 底部按鈕列（切換…外掛、<）
+        (870, 85, 960, 140),         # 右上小地圖圖示
+        (870, 370, 960, 508),        # 右下遇敵鈕
+        (950, 0, 960, 508),          # 右邊界
+    ]
+    PRIMER_XY = (822, 11)            # 右上狀態列（wifi / 時間那一列）；實測點了沒副作用，換地圖後當引子有效
+    PRIMER = f'click {PRIMER_XY[0]} {PRIMER_XY[1]}; wait 100'
+    SIG_NPC_DIALOG = '900,205,107,70,44/700,215,107,70,44'   # 對話框棕底（小護士實測；別的 NPC 版面不同時自己給 sig）
+
 
 def log(msg: str) -> None:
     print(time.strftime('%H:%M:%S'), msg, flush=True)
@@ -93,8 +117,8 @@ def prime() -> None:
 
 # ---------------- 座標換算 ----------------
 def screen(dx: int, dy: int) -> tuple[int, int]:
-    """相對角色 (dx, dy) 格的截圖座標"""
-    return (ME[0] + TILE_X[0] * dx + TILE_Y[0] * dy, ME[1] + TILE_X[1] * dx + TILE_Y[1] * dy)
+    """相對角色 (dx, dy) 格的截圖座標（1920×1017 的每格位移不是整數，四捨五入）"""
+    return (round(ME[0] + TILE_X[0] * dx + TILE_Y[0] * dy), round(ME[1] + TILE_X[1] * dx + TILE_Y[1] * dy))
 
 
 def safe(sx: int, sy: int) -> bool:
@@ -359,6 +383,8 @@ def npc_steps(npc: tuple[int, int], at: tuple[int, int], sig: str = SIG_NPC_DIAL
     """點 NPC 開對話的 seq 片段：點她 → 輪詢對話框出現 → ifok 做 then（例：'click 948 460' 按對話框按鈕）。
     直接點 NPC 會自己走過去開對話（3 格外也行），但必須停穩再點（走路中點常變成點地面）；
     NPC 在左側面板底下（x < 400）點不到，要先走到別的格子。"""
+    if not sig:
+        raise ValueError(f'{LAYOUT} 版面還沒有 NPC 對話框的特徵色（SIG_NPC_DIALOG），請自己給 sig')
     nx, ny = npc_screen(npc, at, dy)
     if not safe(nx, ny):
         raise ValueError(f'NPC {npc} 在 {at} 看出去的點擊位置 {nx},{ny} 會落在 UI 上，先走近一點')

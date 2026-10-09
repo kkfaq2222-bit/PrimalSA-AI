@@ -312,11 +312,13 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     # 取畫面中間一圈 20×14 個取樣點（避開角色本身，角色待機動畫會動），先等「開始動」（多數點變色），
     # 再等連續 2 張幾乎不變（< 6% 的點變色）。印出「still <毫秒>」或「timeout <毫秒>」；一直沒開始動印「nomove <毫秒>」。
     $sw = [Diagnostics.Stopwatch]::StartNew(); $startMs = if ($A2) { [int]$A2 } else { 600 }
+    # 取樣點以 2880×1659 為準，依客戶區大小等比例縮放（1920×1017 等其他版面；2880×1659 時倍率 1，與原本相同）
+    $sx = $r.R / 2880; $sy = $r.B / 1659
     $pts = New-Object System.Collections.ArrayList
     for ($i = 0; $i -lt 20; $i++) { for ($j = 0; $j -lt 14; $j++) {
       $x = 900 + $i * 55; $y = 300 + $j * 70
       if ($x -gt 1280 -and $x -lt 1600 -and $y -gt 500 -and $y -lt 950) { continue }
-      [void]$pts.Add(@($x, $y)) } }
+      [void]$pts.Add(@([int]($x * $sx), [int]($y * $sy))) } }
     $full = New-Object System.Drawing.Bitmap $r.R, $r.B
     $prev = $null; $moved = $false; $still = 0; $res = 'timeout'
     while ($sw.ElapsedMilliseconds -lt [int]$A1) {

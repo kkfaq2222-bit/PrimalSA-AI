@@ -2,7 +2,8 @@
 # 用法：stat.ps1   → 印出一行 JSON：{"ok":true,"level":"0轉25級","hp":115,"mp":100,"hpPct":23,"mpPct":100,"petLevel":...,"petHp":...,"map":"...","pos":"1000:92,99"}
 #       stat.ps1 -Shot <out.png> [-ShotWidth 960]   → 另外存一張縮小的整窗截圖
 # 要看即時遊戲畫面用鏡像視窗 mirror.ps1（mirror.sh）。
-# 區域座標 = 客戶區 2880×1659 的像素（截圖座標 ×2）；視窗大小不同時回 ok=false。
+# 區域座標 = 客戶區像素（截圖座標 ×2）。支援兩種視窗大小（版面 $L）：2880×1659（原本的基準）、1920×1017（1920×1080 螢幕最大化）；
+# 其他大小回 ok=false。
 param([string]$Shot, [int]$ShotWidth = 960)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Drawing, System.Runtime.WindowsRuntime
@@ -32,7 +33,20 @@ $h = $proc.MainWindowHandle
 # 最小化時 Unity 不繪製，這裡不去還原（不打擾使用者），直接回報
 if ([WS]::IsIconic($h)) { Out-Json @{ ok = $false; error = '遊戲視窗最小化' } }
 $r = New-Object WS+RECT; [WS]::GetClientRect($h, [ref]$r) | Out-Null
-if ($r.R -ne 2880 -or $r.B -ne 1659) { Out-Json @{ ok = $false; error = "視窗大小 $($r.R)x$($r.B)，需要最大化 2880x1659" } }
+# 各版面的 OCR 區域（x, y, 寬, 高, 放大倍數）與血條 / 魔條掃描線
+# 1920×1017：UI 約為 2880×1659 的 0.613 倍（依高度縮放、貼邊對齊），2026-10-09 從截圖量測；字小所以 OCR 放大倍數調高
+$Layouts = @{
+  '2880x1659' = @{ lv = 150, 186, 180, 46, 2; hp = 340, 92, 200, 44, 2; mp = 340, 166, 200, 38, 2
+                   plv = 560, 158, 160, 46, 2; php = 750, 92, 200, 44, 2
+                   pos = 2220, 150, 360, 46, 3; pos2 = 2250, 178, 300, 34, 3
+                   barX0 = 344; barX1 = 532; hpY = 112; mpY = 180 }
+  '1920x1017' = @{ lv = 110, 122, 84, 29, 4; hp = 211, 60, 124, 26, 3; mp = 230, 104, 86, 21, 3
+                   plv = 354, 101, 98, 30, 3; php = 466, 60, 124, 26, 3
+                   pos = 1530, 98, 190, 30, 4; pos2 = 1545, 113, 185, 22, 4   # pos2（地圖名折兩行）是換算值，未實測
+                   barX0 = 214; barX1 = 332; hpY = 72; mpY = 113; retryZoom = 2, 3, 4, 5 }   # MP 兩位數 Windows OCR 常讀不到 → 看 mpPct
+}
+$L = $Layouts["$($r.R)x$($r.B)"]
+if (-not $L) { Out-Json @{ ok = $false; error = "視窗大小 $($r.R)x$($r.B)，只支援 2880x1659 或 1920x1017（請最大化遊戲視窗）" } }
 
 $full = New-Object System.Drawing.Bitmap $r.R, $r.B
 $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
@@ -89,15 +103,21 @@ function Lv($s) {
 }
 
 # 區域（客戶區像素）：人物等級 / HP / MP、寵物等級 / HP / MP、地圖名、地圖ID:座標
-$lvT   = Ocr 150 186 180 46
-$hpT   = Ocr 340 92 200 44
-$mpT   = Ocr 340 166 200 38
-$plvT  = Ocr 560 158 160 46
-$phpT  = Ocr 750 92 200 44
+# 版面有 retryZoom 時（1920×1017：字小，Windows OCR 對同一張圖偶爾整個回空字串），讀不到數字就換放大倍數再試
+function OcrAt($a, [bool]$light = $true) {
+  $t = Ocr $a[0] $a[1] $a[2] $a[3] $a[4] $light
+  foreach ($z in $L.retryZoom) { if ($t -match '\d') { break }; $t = Ocr $a[0] $a[1] $a[2] $a[3] $z $light }
+  $t
+}
+$lvT   = OcrAt $L.lv
+$hpT   = OcrAt $L.hp
+$mpT   = OcrAt $L.mp
+$plvT  = OcrAt $L.plv
+$phpT  = OcrAt $L.php
 # 座標行：一般在 y≈150；地圖名太長折成兩行時往下移到 y≈172（上面還壓著第二行字）→ 兩個位置都試
 function Pos($t) { $m = [regex]::Match($t, '(\d{3,6})[:：.](\d+)[,，.](\d+)'); if ($m.Success) { "$($m.Groups[1].Value):$($m.Groups[2].Value),$($m.Groups[3].Value)" } else { '' } }
-$posT = Ocr 2220 150 360 46 3 $false; $pos = Pos $posT
-if (-not $pos) { $posT = Ocr 2250 178 300 34 3 $false; $pos = Pos $posT }
+$posT = OcrAt $L.pos $false; $pos = Pos $posT
+if (-not $pos) { $posT = OcrAt $L.pos2 $false; $pos = Pos $posT }
 # 地圖名用地圖 ID 查 knowledge/data/tables/MapName.jsonl（OCR 讀名牌常漏字）
 $mapT = ''
 if ($pos -match '^(\d+):') {
@@ -110,7 +130,7 @@ if ($pos -match '^(\d+):') {
 # 條內部 x 344～532（截圖 172～266）；HP 中線 y 112、MP 中線 y 180。數字是白字黑邊，不會被當成棕色。
 # 掃到的像素大多不是「填滿色 / 空槽色 / 白字 / 黑邊」時（HUD 被蓋住、其他畫面）回 null。
 function Bar([int]$y, [bool]$red) {
-  $x0 = 344; $x1 = 532; $end = $null; $good = 0; $n = 0
+  $x0 = $L.barX0; $x1 = $L.barX1; $end = $null; $good = 0; $n = 0
   for ($x = $x0; $x -le $x1; $x += 2) {
     $c = $full.GetPixel($x, $y); $n++
     $empty = [Math]::Abs($c.R - 123) -lt 22 -and [Math]::Abs($c.G - 97) -lt 20 -and [Math]::Abs($c.B - 65) -lt 20
@@ -123,8 +143,8 @@ function Bar([int]$y, [bool]$red) {
   if ($null -eq $end) { $end = $x1 + 2 }
   [int][Math]::Round(100 * ($end - $x0) / ($x1 + 2 - $x0))
 }
-$hpPct = Bar 112 $true
-$mpPct = Bar 180 $false
+$hpPct = Bar $L.hpY $true
+$mpPct = Bar $L.mpY $false
 $full.Dispose()
 Out-Json ([ordered]@{
   ok = $true; level = (Lv $lvT); hp = (Num $hpT); mp = (Num $mpT); hpPct = $hpPct; mpPct = $mpPct

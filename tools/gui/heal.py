@@ -15,7 +15,8 @@ import argparse
 import sys
 import time
 
-from walk import PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
+import layout
+from walk import LAYOUT, PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
 
 # 練級傳送分頁的目的地：名稱 → (截圖座標 x, y, 抵達地圖 ID)；見 .claude/skills/psa-game-ui/ui/transfer.md
 SPOTS = {
@@ -24,7 +25,10 @@ SPOTS = {
     '波拉島2': (1165, 326, 502),
     '地雷區': (1165, 400, 60049),
     '地雷區2': (1165, 468, 60050),
+    '海主人隧道': (862, 656, 31401),
 }
+SPOT_XY = {500: (212, 344), 31401: (91, 29)}   # 練級傳送抵達點（31401 於 2026-10-09 實測兩次）
+TELEPORT_BTN = (1340, 65)            # 主畫面右上圓形傳送鈕
 TAB_TOWN, TAB_LEVEL = (259, 196), (259, 314)
 SAMUGIL = (750, 507)                 # 尼斯大陸分頁的「薩姆吉爾」→ 1000:92,99
 VILLAGE, HOSPITAL = 1000, 1005
@@ -61,6 +65,35 @@ BARS = [(258, 56), (258, 90)]        # 血條 / 魔條最右端（滿的時候�
 # 「取消遇敵」（原地遇敵開著）圖示是紅色龍頭；關著是灰色圖示
 ENC_PROBES = [(1365, 645), (1380, 630), (1360, 632), (1388, 640)]
 # 引子點擊 PRIMER、角色螢幕座標、每格位移、每次最多格數、左側面板限制：見 walk.py
+
+# ======== 1920×1017 版面（截圖 960×508）：2026-10-09 在 31401 → 薩姆吉爾 → 醫院 → 31401 實際走一趟量的 ========
+# 上面 2880×1659 的常數不動；layout.py 判斷是 1920×1017 時改用這組。
+if LAYOUT == '1920x1017':
+    SPOTS = {
+        '柯奧4F龜洞': (567, 216, 11004),
+        '波拉島': (718, 138, 500),
+        '波拉島2': (759, 198, 502),
+        '地雷區': (759, 245, 60049),
+        '地雷區2': (759, 288, 60050),
+        '海主人隧道': (571, 405, 31401),      # 實測
+    }
+    TELEPORT_BTN = (905, 38)
+    TAB_TOWN, TAB_LEVEL = (192, 118), (192, 190)
+    SAMUGIL = (500, 312)
+    HEAL_BUTTON = (650, 283)
+    ENCOUNTER = (913, 400)
+    SIG_PANEL = '832,48,167,52,28/835,51,171,52,33'        # 面板右上 ✕ 的紅色筆畫
+    SIG_TAB = {TAB_TOWN: '150,118,249,175,68', TAB_LEVEL: '150,190,251,177,70'}
+    # HUD：外掛鈕 ASS 紅字（NPC 對話框開著時整個 UI 隱藏 → 0,0,0）。左上寵物框旁邊會透出場景，不能當特徵
+    SIG_HUD = '872,455,255,0,0/876,455,255,0,0'
+    SIG_DIALOG = '620,272,229,197,159/860,272,229,197,155/900,205,107,70,44/700,215,107,70,44'
+    SIG_ENC_ON = '910,386,201,12,0/920,390,177,8,0'
+    SIG_ENC_OFF = '910,386,201,12,0!/920,390,177,8,0!'
+    SIG_ARRIVE = {VILLAGE: '640,150,153,163,86/600,300,213,219,211/400,110,123,201,96'}   # 1000:92,99（其他抵達點用 OCR）
+    SIG_HOSPITAL = '800,250,0,0,0/700,330,0,0,0/650,420,0,0,0/480,110,103,129,135'
+    SIG_NO_BATTLE = '481,168,177,244,10!'                  # 頭上 VS 牌綠框
+    BARS = [(164, 36), (164, 57)]
+    ENC_PROBES = [(910, 386), (920, 390), (905, 394), (925, 398)]
 
 
 def pixels(points: list[tuple[int, int]]) -> list[tuple[int, int, int]]:
@@ -102,7 +135,7 @@ def teleport_steps(tab: tuple[int, int], dest: tuple[int, int]) -> str:
     """傳送的 seq：開面板 → 等 ✕ 出現 → 切分頁 → 等分頁變橘 → 點目的地 → 等 Loading 結束、HUD 回來。
     實測：面板 / 分頁 50～150 毫秒；Loading 約 1.2～1.4 秒。"""
     # 面板沒開（例：換地圖後第一下被吃掉）就跳過後面的點擊（ifok），免得點穿面板走到別處
-    return (f'{PRIMER}; click 1340 65; waitpix 1500 {SIG_PANEL}; ifok click {tab[0]} {tab[1]}; '
+    return (f'{PRIMER}; click {TELEPORT_BTN[0]} {TELEPORT_BTN[1]}; waitpix 1500 {SIG_PANEL}; ifok click {tab[0]} {tab[1]}; '
             f'ifok waitpix 800 {SIG_TAB[tab]}; ifok click {dest[0]} {dest[1]}; ifok wait 300; ifok waitpix 6000 {SIG_HUD}')
 
 
@@ -188,7 +221,7 @@ def heal_trip(spot: str) -> None:
     talk_nurse(p)              # 走 3 格 + 點小護士 + 對話框一出現就按「恢復氣血」
     lap('醫院補血')
     # 按完不等提示動畫：等 HUD 回來（對話框自己關）→ 讀血 / 魔條最右端的顏色 → 直接傳送，同一個 seq
-    teleport(TAB_LEVEL, (sx, sy), spot_map, spot, want_xy=(212, 344) if spot_map == 500 else None,
+    teleport(TAB_LEVEL, (sx, sy), spot_map, spot, want_xy=SPOT_XY.get(spot_map),
              pre=f'waitpix 1500 {SIG_HUD}; pixel {"/".join(f"{x},{y}" for x, y in BARS)}')
     out = LAST_OUT
     full = False
@@ -224,6 +257,10 @@ def main() -> int:
     ap.add_argument('--verbose', action='store_true', help='監看時每次都印出讀數')
     ap.add_argument('--for', dest='duration', type=int, default=0, help='監看幾秒後自己結束（測試用；不會在補血途中停）')
     a = ap.parse_args()
+    # 傳送面板、醫院、遇敵鈕的座標與特徵色量過 2880×1659、1920×1017；別的版面會點錯，先擋下來
+    if layout.current() not in layout.SUPPORTED:
+        log(f"heal.py 不支援 {layout.current()} 版面（只量過 2880×1659、1920×1017），見 ui/layout-1920x1017.md")
+        return 2
     if not a.watch:
         heal_trip(a.spot)
         return 0
