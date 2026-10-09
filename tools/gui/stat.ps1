@@ -1,10 +1,9 @@
 ﻿# 讀主畫面 HUD 的數值（背景截圖 PrintWindow + Windows 內建 OCR；不搶焦點、不讀遊戲記憶體）
 # 用法：stat.ps1   → 印出一行 JSON：{"ok":true,"level":"0轉25級","hp":115,"mp":100,"petLevel":...,"petHp":...,"map":"...","pos":"1000:92,99"}
-#       stat.ps1 -Shot <out.png> [-ShotWidth 960]   → 另外存一張縮小的整窗截圖（psa-hud mod 的「開原圖」）
-#       stat.ps1 -Blocks <out.txt> [-BlocksWidth 100] → 把畫面縮成 寬×(2×列) 像素，每列一行 rrggbb 十六進位
-#                                                       （psa-hud 用「▀」上下兩色畫在終端機 pane 裡）
+#       stat.ps1 -Shot <out.png> [-ShotWidth 960]   → 另外存一張縮小的整窗截圖
+# 要看即時遊戲畫面用鏡像視窗 mirror.ps1（mirror.sh）。
 # 區域座標 = 客戶區 2880×1659 的像素（截圖座標 ×2）；視窗大小不同時回 ok=false。
-param([string]$Shot, [int]$ShotWidth = 960, [string]$Blocks, [int]$BlocksWidth = 100)
+param([string]$Shot, [int]$ShotWidth = 960)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Drawing, System.Runtime.WindowsRuntime
 Add-Type @"
@@ -15,15 +14,6 @@ public class WS {
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint f);
   public struct RECT { public int L,T,R,B; }
-  // 每列像素轉成一行 rrggbb 十六進位
-  public static string Hex(System.Drawing.Bitmap b) {
-    var sb = new System.Text.StringBuilder(b.Width * b.Height * 6 + b.Height);
-    for (int y = 0; y < b.Height; y++) {
-      for (int x = 0; x < b.Width; x++) { var c = b.GetPixel(x, y); sb.Append(c.R.ToString("x2")).Append(c.G.ToString("x2")).Append(c.B.ToString("x2")); }
-      sb.Append('\n');
-    }
-    return sb.ToString();
-  }
   // 二值化：light=true 取亮白字（HUD 數字），false 取深色字（地圖名牌）；字 → 黑、其他 → 白
   public static void Binarize(System.Drawing.Bitmap b, bool light) {
     for (int y = 0; y < b.Height; y++) for (int x = 0; x < b.Width; x++) {
@@ -56,15 +46,6 @@ if ($Shot) {
   # 先寫暫存檔再改名，避免終端機讀到寫一半的圖
   $tmp = "$Shot.tmp"; $small.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png); $small.Dispose()
   Move-Item -Force $tmp $Shot
-}
-if ($Blocks) {
-  # 終端機一格約高是寬的 2 倍，一格畫上下兩個像素 → 像素高 = 寬 × 視窗比例，取偶數
-  $bh = [int]([math]::Round($BlocksWidth * $r.B / $r.R / 2) * 2)
-  $tiny = New-Object System.Drawing.Bitmap $BlocksWidth, $bh
-  $g = [System.Drawing.Graphics]::FromImage($tiny); $g.InterpolationMode = 'HighQualityBilinear'
-  $g.DrawImage($full, 0, 0, $BlocksWidth, $bh); $g.Dispose()
-  $lines = [WS]::Hex($tiny); $tiny.Dispose()
-  $tmp = "$Blocks.tmp"; [IO.File]::WriteAllText($tmp, $lines); Move-Item -Force $tmp $Blocks
 }
 
 # WinRT OCR（PowerShell 5.1 要自己把 IAsyncOperation 轉成 Task）
