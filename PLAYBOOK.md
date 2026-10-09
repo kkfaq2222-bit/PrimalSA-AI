@@ -37,7 +37,7 @@ GameClient/          遊戲本體（唯讀，不進 git）
 knowledge/           從客戶端自動匯出的知識庫（不要手改，重新匯出會覆蓋）
 tools/extract/       匯出器：客戶端 → knowledge/
 tools/query/psa.py   知識庫查詢（道具、寵物、NPC、地圖路線…）
-tools/gui/           畫面操作工具（截圖、點擊、雙擊、拖曳、按鍵）
+tools/gui/           畫面操作工具（截圖、點擊、按鍵、等畫面、OCR 讀 HUD）+ 流程腳本（walk.py 走路、heal.py 回村補血）
 tools/web/           把知識庫做成靜態查詢網站（可選）
 .claude/skills/      操作技能：psa-game-ui（介面總說明 + ui/ 各面板）、psa-quick-team、psa-disband-team…
 notes/               遊玩紀錄、開局流程、截圖（不進 git，可能含角色資訊）
@@ -84,6 +84,13 @@ WSL 的 bash 包一層 Windows PowerShell，用 Win32 API：
 | `key '{ESC}'` / `key 文字` | 背景：特殊鍵送 WM_KEYDOWN / WM_KEYUP；一般字元只送 WM_CHAR（`PostMessageW`） | 游標完全不動。字元若連按鍵一起送，Unity 會自己 TranslateMessage 再生一個字（abc → aabbcc）；用 ANSI 版 PostMessage 中文會被截成低位元組 |
 | `info` / `max` | 視窗大小 / 最大化 | 座標只在固定視窗大小下有效 |
 | `seq "a; wait 300; b; shot"` | 同一個行程連跑多個動作 | 省掉每次啟動 PowerShell 的約 0.4 秒 |
+| `pixel "X,Y X,Y"` | 背景截圖讀指定點顏色 | 腳本判斷畫面狀態（開關圖示、血條末端），不用叫 AI 看圖 |
+| `waitpix 逾時 "x,y,r,g,b[!]/..." [容差]` | 反覆背景截圖，等到每個點都符合（`!` = 不符合）才回來，印 `ok` / `timeout` 毫秒 | **取代固定 `wait`**：面板 / 對話框 / Loading 結束一出現就做下一步。特徵點要選「只有這個畫面才有」的顏色（相近色的地面要配第二個點一起判斷） |
+| `waitstill 逾時 [開始等待]` | 取畫面中間一圈取樣點（避開角色本身的待機動畫），先等「開始動」，再等連續 2 張幾乎不變，印 `still` / `nomove` / `timeout` | 點地面走路後剛好等到走完、鏡頭停住（走路中點下一段會點偏）；`nomove` = 點擊沒讓角色走（點到 UI 或走不到的格子） |
+| `ifok` / `ifnok <指令>` | 依上一個 waitpix / waitstill 結果決定做不做 | seq 裡的條件分支：面板沒出現就不點（不會點穿面板）、走路某段沒動就跳過後面各段 |
+| `stat.ps1` | 背景截圖 + Windows 內建 OCR 讀 HUD → 一行 JSON（等級、HP / MP、`hpPct` / `mpPct` 血條比例、地圖座標） | 不用看圖就知道位置與血量；OCR 讀不到個位數，判斷血量用像素比例 |
+| `walk.py` | 讀座標 → `maps.bin` 通行格找路（每段 ≤ 10 格、點擊避開 UI、離牆遠一點、點擊次數少的方向優先）→ `seq` 連點 + `waitstill` → 終點 OCR 驗證 → 失敗改慢速逐段 | **走路只寫一份**：常數（每格位移、最多格數、UI 禁點範圍、換地圖後的引子點擊）集中在 walk.py；其他腳本 `import walk`。資料對不上的圖退回直線分段讓遊戲自己繞 |
+| `heal.py` | 關遇敵 → 傳送回村 → walk.py 走進醫院 → 點護士 → 傳送回練功點 → 開遇敵；`--watch` 看血條比例自動補 | 固定流程寫成腳本，全程用 waitpix 判斷，一趟約 21～24 秒（人工逐步截圖約 75 秒） |
 | `mirror.sh` | 常駐 WinForms 視窗 + **DWM 縮圖**（`DwmRegisterThumbnail`，Alt+Tab 預覽同一套） | 給人看的即時畫面：幀數跟遊戲同步、CPU ≈ 0.02%（舊版每幀 PrintWindow，2 幀/秒就要 0.9%）。終端機（Windows Terminal 經 ConPTY）畫不了 kitty 圖片協定，所以不放在 Claude pane 裡。DWM 合成的畫面 PrintWindow 截不到，要驗證用 CopyFromScreen |
 | `fg <指令>` | 舊做法：拉到前景 + `SetCursorPos` + `mouse_event` / SendKeys | 背景模式失靈時的備案 |
 | `end` | 還原使用者原本的前景視窗與游標 | 用過 `fg` / `max` 後要跑；背景模式不需要（跑了也無害） |

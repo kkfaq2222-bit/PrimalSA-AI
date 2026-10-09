@@ -1,5 +1,5 @@
 ﻿# 讀主畫面 HUD 的數值（背景截圖 PrintWindow + Windows 內建 OCR；不搶焦點、不讀遊戲記憶體）
-# 用法：stat.ps1   → 印出一行 JSON：{"ok":true,"level":"0轉25級","hp":115,"mp":100,"petLevel":...,"petHp":...,"map":"...","pos":"1000:92,99"}
+# 用法：stat.ps1   → 印出一行 JSON：{"ok":true,"level":"0轉25級","hp":115,"mp":100,"hpPct":23,"mpPct":100,"petLevel":...,"petHp":...,"map":"...","pos":"1000:92,99"}
 #       stat.ps1 -Shot <out.png> [-ShotWidth 960]   → 另外存一張縮小的整窗截圖
 # 要看即時遊戲畫面用鏡像視窗 mirror.ps1（mirror.sh）。
 # 區域座標 = 客戶區 2880×1659 的像素（截圖座標 ×2）；視窗大小不同時回 ok=false。
@@ -105,9 +105,29 @@ if ($pos -match '^(\d+):') {
   $line = Select-String -Path $tbl -Pattern ('^\{"ID":' + $Matches[1] + ',') -Encoding UTF8 | Select-Object -First 1
   if ($line) { $mapT = ($line.Line | ConvertFrom-Json).nameTn }
 }
+# 血條 / 魔條的填滿比例（0～100）：沿條的中線從左往右掃，第一個「空槽棕色」像素就是填滿的終點。
+# OCR 讀不出單一位數（實測 HP「1」二值化後很乾淨，Windows OCR 仍回空字串），低血判斷改看條長比較可靠。
+# 條內部 x 344～532（截圖 172～266）；HP 中線 y 112、MP 中線 y 180。數字是白字黑邊，不會被當成棕色。
+# 掃到的像素大多不是「填滿色 / 空槽色 / 白字 / 黑邊」時（HUD 被蓋住、其他畫面）回 null。
+function Bar([int]$y, [bool]$red) {
+  $x0 = 344; $x1 = 532; $end = $null; $good = 0; $n = 0
+  for ($x = $x0; $x -le $x1; $x += 2) {
+    $c = $full.GetPixel($x, $y); $n++
+    $empty = [Math]::Abs($c.R - 123) -lt 22 -and [Math]::Abs($c.G - 97) -lt 20 -and [Math]::Abs($c.B - 65) -lt 20
+    $fill = if ($red) { $c.R -gt 130 -and $c.R - $c.G -gt 60 -and $c.R - $c.B -gt 60 } else { $c.B -gt 130 -and $c.B - $c.R -gt 60 }
+    $text = ([Math]::Min($c.R, [Math]::Min($c.G, $c.B)) -gt 150) -or ([Math]::Max($c.R, [Math]::Max($c.G, $c.B)) -lt 90)
+    if ($empty -or $fill -or $text) { $good++ }
+    if ($empty -and $null -eq $end) { $end = $x }
+  }
+  if ($good -lt $n * 0.8) { return $null }
+  if ($null -eq $end) { $end = $x1 + 2 }
+  [int][Math]::Round(100 * ($end - $x0) / ($x1 + 2 - $x0))
+}
+$hpPct = Bar 112 $true
+$mpPct = Bar 180 $false
 $full.Dispose()
 Out-Json ([ordered]@{
-  ok = $true; level = (Lv $lvT); hp = (Num $hpT); mp = (Num $mpT)
+  ok = $true; level = (Lv $lvT); hp = (Num $hpT); mp = (Num $mpT); hpPct = $hpPct; mpPct = $mpPct
   petLevel = (Lv $plvT); petHp = (Num $phpT)
   map = $mapT; pos = $pos; raw = @($lvT, $hpT, $mpT, $plvT, $phpT, $posT)
 })

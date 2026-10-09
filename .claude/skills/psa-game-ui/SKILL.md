@@ -28,8 +28,13 @@ bash tools/gui/gui.sh end                  # 用過 fg / max 後還原前景視�
 bash tools/gui/gui.sh seq "click 763 760; wait 400; shot"   # 同一個行程連跑多個動作（快）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w tools/gui/stat.ps1)"   # OCR 讀 HUD → 一行 JSON（等級 / HP / MP / 寵物 / 地圖座標），不用看圖、不搶焦點
 bash tools/gui/mirror.sh                   # 給使用者看的即時畫面鏡像視窗（DWM 縮圖：幀數同遊戲、CPU ≈ 0；可縮放、右鍵 / 標題列選單置頂）
-bash tools/gui/gui.sh pixel "X,Y X,Y"      # 背景截圖讀像素顏色（腳本判斷畫面狀態用，例：遇敵開關）
-uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 150 --mp 20]   # 回村補血再回練功點（約 75 秒）；--watch 常駐監看自動補
+bash tools/gui/gui.sh pixel "X,Y X,Y"      # 背景截圖讀像素顏色（腳本判斷畫面狀態用，例：遇敵開關）；seq 裡用 X,Y/X,Y
+bash tools/gui/gui.sh seq "click 1340 65; waitpix 1500 1290,97,197,73,49; ifok click 259 314"   # 輪詢到面板出現（點顏色符合）才點下一步，取代固定 wait
+bash tools/gui/gui.sh seq "click 459 456; waitstill 4000"   # 點地面走路後等鏡頭停下來（剛好等到走完）
+uv run --no-project python tools/gui/walk.py 1000 81 66 [--exit 1005]   # 走到某地圖座標：OCR 讀起點 → maps.bin 自動找路 → 連點 + waitstill → 終點驗證（--exit = 終點是出口）
+uv run --no-project python tools/gui/walk.py --path "1000:86,88 84,81 83,73 81,66" [--exit 1005]   # 照手動 waypoint 走（沒有通行格資料的圖用）
+uv run --no-project python tools/gui/walk.py --plan 1000 81 66 [--from 92,99]   # 只印找路結果（每段要點的截圖座標），不動
+uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40 --mp 20 --every 15]   # 回村補血再回練功點（約 21～24 秒）；--watch 看血條比例（%）自動補
 ```
 - 遊戲**不能最小化**（Unity 最小化不繪製）；每個指令遇到最小化會用 SW_SHOWNOACTIVATE 還原（不搶焦點）。放在其他視窗後面沒關係。
 - **座標 = 截圖座標**：截圖固定縮成客戶區的 1/2（`-Scale 2`，不隨視窗大小變），click 內部 ×2。實測客戶區 2880×1659 → 截圖 1440×830。
@@ -37,6 +42,16 @@ uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 15
 - 只有 `fg` / `max` 會讓遊戲佔著前景（使用者打字可能打進遊戲），之後要跑 `end`。習慣上任務結束仍跑 `end`，沒狀態時它什麼都不做。
 - 背景模式 `dclick`（倉庫存入）、`key` 打字（含中文）都實測可用（2026-10-09）。`key` 語法：一般字元 = 打進輸入框；`{ESC}` `{BS}` 等 = 按鍵；`{a}` = 只按 a 鍵（快捷鍵用）。
 - `gui.ps1` 必須保持 **UTF-8 with BOM**（PowerShell 5.1 讀無 BOM 檔會把中文當 Big5，整支解析失敗）。
+
+## 移動：先用 walk.py（不要自己算座標點地面）
+- 要走到某格 → `walk.py <地圖> <x> <y>`；要走進出口 → 加 `--exit <下一張地圖>`；要點 NPC → 腳本裡用 `walk.npc_steps` / `walk.talk_npc`（直接點 NPC 會自己走過去開對話）。
+- walk.py 做的事：先點引子 1215,18（換地圖後第一下左鍵會被吃掉）→ OCR 讀起點 → 有 `knowledge/data/maps.bin` 通行格就找路
+  （每段 ≤ 10 格、點擊不落在左側面板等 UI 上、離牆遠一點、點擊次數少的方向優先）→ 一個 `seq` 連點，每段之間 `waitstill` 等鏡頭停，
+  某段沒動（`nomove`）就用 `ifok` 跳過後面 → 終點 OCR 驗證 → 沒到就從目前位置重新找路、改慢速逐段走（每段 OCR，沒動就格數減半）。
+- 通行格對不上的圖（例：醫院 1005）會自動改成直線分段讓遊戲自己繞；固定路線可以用 `--path` 寫死 waypoint。
+- 原地遇敵開著時隨時會進戰鬥（快速戰鬥只有頭上綠色 VS 牌）；戰鬥中傳送會被擋，走路會不會被擋未實測 → 要移動先關遇敵、等 VS 牌消失（heal.py 的做法），走完記得開回來。
+- 常數（每格位移、最多格數、UI 禁點範圍、每格秒數）集中在 walk.py 開頭；規則說明見 [ui/home.md](ui/home.md)「走路」。
+- 在 Python 腳本裡：`import walk`（同資料夾），`walk.walk_to(1000, 81, 66, exit_map=1005)`、`walk.walk_path(...)`、`walk.plan(...)`、`walk.prime()`（heal.py 是範例）。
 
 ## 功能索引（要做某件事時先讀對應檔）
 | 要做的事 | 讀這個 |
@@ -59,7 +74,9 @@ uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 15
 
 ## 操作迴圈
 1. `shot` → Read 圖，先判斷**目前在哪個畫面**（主畫面 / 某面板 / 對話 / 戰鬥 / 驗證）。
-2. **速度**：遊戲響應很快（面板約 0.3～0.5 秒就開好）；每次呼叫 gui.sh 要多花約 0.4 秒啟動 PowerShell。
+2. **速度**：遊戲響應很快（實測傳送面板 / 分頁 / NPC 對話框 / 遇敵圖示都在 0.05～0.15 秒內出現；傳送 Loading 1.0～2.2 秒）；每次呼叫 gui.sh 要多花約 0.4 秒啟動 PowerShell。
+   - 腳本裡能用 `waitpix`（等指定點變成某顏色）/ `waitstill`（等走路停）就不要固定 `wait`；`ifok` / `ifnok` 依上一個 waitpix 結果決定做不做，面板沒出現就不會點穿。
+   - **換地圖後第一下左鍵會被吃掉**：先點 1215,18（狀態列空白）當引子（ui/home.md「走路」；walk.py `PRIMER`）。
    - **已知流程**（座標都驗證過）：用 `seq` 把多個動作串成一次呼叫，動作之間 `wait 150～500`，只在**分歧點**（要判斷畫面才能決定下一步）和**結尾**截圖。
    - **陌生畫面**：一次一個動作，`seq "click X Y; wait 400; shot"`，看完再決定下一步。
 3. 不要盲點：至少在結尾截圖驗證；流程中途需要事後查錯的，在 seq 裡多存一張 `shot <路徑>`（不用 Read，失敗時再看）。

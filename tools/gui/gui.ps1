@@ -10,6 +10,9 @@
 #   gui.ps1 max                       最大化遊戲視窗（ui/ 座標以最大化的 2880×1659 為準）
 #   gui.ps1 end                       任務結束：把前景視窗與游標還給使用者（只有 fg 模式需要）
 #   gui.ps1 wait <毫秒>               等待（給 seq 用）
+#   gui.ps1 waitpix <逾時毫秒> "x,y,r,g,b[!] ..." [容差]  輪詢背景截圖，等到各點顏色符合（! = 不符合）才回來；印 ok/timeout 毫秒
+#   gui.ps1 waitstill <逾時毫秒> [開始等待毫秒]  點地面走路後等鏡頭停下來（印 still / nomove / timeout 毫秒）
+#   gui.ps1 ifok / ifnok <指令> ...   上一個 waitpix 成功 / 失敗才執行（seq 用），例：seq "click 462 335; waitpix 1500 948,445,229,197,155; ifok click 948 460"
 #   gui.ps1 seq "<動作>; <動作>; ..."  同一個行程連續執行多個動作，例：seq "click 763 760; wait 300; shot C:\\x.png"
 #   gui.ps1 fg <指令> ...             用舊的前景模式執行（背景模式失靈時的備案），例：fg click 763 760、seq "fg; click ..."
 # 座標系：縮圖座標 × Scale = 客戶區像素座標。Scale 預設 2。
@@ -98,6 +101,7 @@ if ([W]::IsIconic($h)) { [W]::ShowWindow($h, 4) | Out-Null; Start-Sleep -Millise
 $r = New-Object W+RECT; [W]::GetClientRect($h, [ref]$r) | Out-Null
 $p = New-Object W+POINT; [W]::ClientToScreen($h, [ref]$p) | Out-Null
 $Fg = $false
+$WaitOk = $true
 
 # ---- fg 模式：任務期間的使用者狀態（前景視窗、游標）存在檔案裡，跨多次呼叫保留，end 時還原 ----
 $stateFile = Join-Path $PSScriptRoot "..\.cache\gui-session.txt"
@@ -270,12 +274,73 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     $ok = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
     if (-not $ok) { Write-Error "PrintWindow 失敗"; exit 1 }
     # 點可以是「pixel X Y」或一個字串「pixel "X,Y X,Y ..."」（參數個數有限，多點用後者）
-    $pts = if ($A2) { @("$A1,$A2") } else { $A1 -split '\s+' | Where-Object { $_ } }
+    $pts = if ($A2) { @("$A1,$A2") } else { $A1 -split '[\s/]+' | Where-Object { $_ } }
     $out = foreach ($pt in $pts) {
       $v = $pt -split ','
       $c = $full.GetPixel([int]([double]$v[0] * $Scale), [int]([double]$v[1] * $Scale)); "$($c.R),$($c.G),$($c.B)"
     }
     $full.Dispose(); $out -join ' '
+  }
+  'waitpix' {
+    # waitpix <逾時毫秒> "x,y,r,g,b x,y,r,g,b!..." [容差，預設 30]（seq 裡用 / 分隔各點：x,y,r,g,b/x,y,r,g,b）：反覆背景截圖，等到每個點的顏色都符合才回來
+    # （點後面加 ! = 這點要「不是」這個顏色）。印出「ok <毫秒>」或「timeout <毫秒>」，給 seq 取代固定等待用。
+    $tol = if ($A3) { [int]$A3 } else { 30 }
+    $conds = New-Object System.Collections.ArrayList
+    foreach ($t in ($A2 -split '[\s/]+' | Where-Object { $_ })) {
+      $neg = $t.EndsWith('!'); $v = $t.TrimEnd('!') -split ','
+      [void]$conds.Add(@([int]([double]$v[0] * $Scale), [int]([double]$v[1] * $Scale), [int]$v[2], [int]$v[3], [int]$v[4], $neg))
+    }
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $hit = $false
+    $full = New-Object System.Drawing.Bitmap $r.R, $r.B
+    do {
+      $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
+      [W]::PrintWindow($h, $dc, 3) | Out-Null; $g.ReleaseHdc($dc); $g.Dispose()
+      $hit = $true
+      foreach ($c in $conds) {
+        $px = $full.GetPixel($c[0], $c[1])
+        $m = [Math]::Abs($px.R - $c[2]) -le $tol -and [Math]::Abs($px.G - $c[3]) -le $tol -and [Math]::Abs($px.B - $c[4]) -le $tol
+        if ($m -eq $c[5]) { $hit = $false; break }
+      }
+      if (-not $hit) { Start-Sleep -Milliseconds 20 }
+    } while (-not $hit -and $sw.ElapsedMilliseconds -lt [int]$A1)
+    $full.Dispose()
+    $script:WaitOk = $hit
+    "$(if ($hit) { 'ok' } else { 'timeout' }) $($sw.ElapsedMilliseconds)"
+  }
+  'waitstill' {
+    # waitstill <逾時毫秒> [開始等待毫秒，預設 600]：等鏡頭停下來（點地面走路後用，取代按格數估的固定等待）。
+    # 取畫面中間一圈 20×14 個取樣點（避開角色本身，角色待機動畫會動），先等「開始動」（多數點變色），
+    # 再等連續 2 張幾乎不變（< 6% 的點變色）。印出「still <毫秒>」或「timeout <毫秒>」；一直沒開始動印「nomove <毫秒>」。
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $startMs = if ($A2) { [int]$A2 } else { 600 }
+    $pts = New-Object System.Collections.ArrayList
+    for ($i = 0; $i -lt 20; $i++) { for ($j = 0; $j -lt 14; $j++) {
+      $x = 900 + $i * 55; $y = 300 + $j * 70
+      if ($x -gt 1280 -and $x -lt 1600 -and $y -gt 500 -and $y -lt 950) { continue }
+      [void]$pts.Add(@($x, $y)) } }
+    $full = New-Object System.Drawing.Bitmap $r.R, $r.B
+    $prev = $null; $moved = $false; $still = 0; $res = 'timeout'
+    while ($sw.ElapsedMilliseconds -lt [int]$A1) {
+      $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
+      [W]::PrintWindow($h, $dc, 3) | Out-Null; $g.ReleaseHdc($dc); $g.Dispose()
+      $cur = foreach ($q in $pts) { $full.GetPixel($q[0], $q[1]).ToArgb() }
+      if ($prev) {
+        $diff = 0; for ($k = 0; $k -lt $cur.Count; $k++) { if ($cur[$k] -ne $prev[$k]) { $diff++ } }
+        $frac = $diff / $cur.Count
+        if (-not $moved) { if ($frac -gt 0.3) { $moved = $true } elseif ($sw.ElapsedMilliseconds -gt $startMs) { $res = 'nomove'; break } }
+        elseif ($frac -lt 0.06) { $still++; if ($still -ge 2) { $res = 'still'; break } } else { $still = 0 }
+      }
+      $prev = $cur
+    }
+    $full.Dispose(); $script:WaitOk = ($res -eq 'still')
+    "$res $($sw.ElapsedMilliseconds)"
+  }
+  'ifok' {
+    # ifok <指令> ...：上一個 waitpix 成功才做（seq 裡用：等到對話框出現就點按鈕，沒出現就跳過）
+    if ($script:WaitOk) { Invoke-Gui $A1 $A2 $A3 $A4 $A5 } else { "skip $A1" }
+  }
+  'ifnok' {
+    # ifnok <指令> ...：上一個 waitpix 失敗才做（例：遇敵圖示已經是目標狀態就不點）
+    if (-not $script:WaitOk) { Invoke-Gui $A1 $A2 $A3 $A4 $A5 } else { "skip $A1" }
   }
   'wait' { Start-Sleep -Milliseconds ([int]$A1) }
   'seq' {
