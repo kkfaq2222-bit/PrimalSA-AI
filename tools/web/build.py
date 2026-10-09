@@ -304,20 +304,22 @@ def npc_pos(nid):
 
 # ---------------- 輸出 ----------------
 def doc_list():
-    """從 knowledge/README.md 的「全部文件」清單取標題 / 說明；README 沒列到的檔案也補上"""
+    """標題用各文件自己的 H1；說明取 knowledge/README.md「全部文件」清單（去掉與標題重複的開頭）"""
     meta = {}
     for line in open(os.path.join(KB, 'README.md'), encoding='utf-8'):
         m = re.match(r'- \[([^\]]+)\]\([^)]+\) — (.*)', line.strip())
-        if m:
-            t, _, d = m.group(2).partition('：')
-            meta[m.group(1)] = (t, d)
+        if m: meta[m.group(1)] = m.group(2)
     out = [['README.md', '知識庫索引', '分類目錄、全部文件清單、查詢方法']]
     for dp, _, fs in sorted(os.walk(KB)):
         for fn in sorted(fs):
             if not fn.endswith('.md'): continue
             rel = os.path.relpath(os.path.join(dp, fn), KB).replace(os.sep, '/')
             if rel == 'README.md': continue
-            t, d = meta.get(rel, (fn[:-3], ''))
+            with open(os.path.join(dp, fn), encoding='utf-8') as f:
+                h1 = next((l[2:].strip() for l in f if l.startswith('# ')), '')
+            d = meta.get(rel, '')
+            t = h1 or d.partition('：')[0] or fn[:-3]
+            if d.startswith(t): d = d[len(t):].lstrip('：: ')
             out.append([rel, t, d])
     return out
 

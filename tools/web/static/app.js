@@ -261,14 +261,20 @@ async function drawMap(id, d, tx, ty, hasTarget) {
 }
 
 // ---------------- 文件 ----------------
+const DOC_GROUP = {
+  '': '索引', items: '道具', pets: '寵物 / 怪物', skills: '技能', world: '世界 / 地圖 / NPC', quests: '任務 / 腳本',
+  crafting: '合成 / 製作', economy: '經濟 / 商店 / 活動', text: '遊戲文字', overview: '總覽 / 技術資料',
+};
 function renderDocs() {
   document.title = '全部文件 - 精靈王石器資料庫';
   const groups = {};
   for (const d of DOCS.docs) (groups[d[0].includes('/') ? d[0].split('/')[0] : ''] ||= []).push(d);
   let h = '<h1 style="font-size:22px">全部文件</h1><p class="muted">由 knowledge/ 自動產生的分類文件；大型表格頁可以用頁內篩選。</p>';
-  for (const [g, list] of Object.entries(groups)) {
-    h += `<h2 style="font-size:16px;margin-top:20px">${esc(g || '索引')}</h2><div class="grid2">` +
-      list.map((d) => `<a href="#/doc/${d[0]}"><b>${esc(d[1])}</b><span>${esc(d[0])}</span></a>`).join('') + '</div>';
+  const order = Object.keys(DOC_GROUP);
+  const entries = Object.entries(groups).sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
+  for (const [g, list] of entries) {
+    h += `<h2 style="font-size:16px;margin-top:20px">${esc(DOC_GROUP[g] || g)}</h2><div class="grid2">` +
+      list.map((d) => `<a href="#/doc/${d[0]}" title="${esc(d[0])}"><b>${esc(d[1].replace(/^(道具|寵物)：/, ''))}</b><span>${esc(d[2] || d[0])}</span></a>`).join('') + '</div>';
   }
   $app.innerHTML = h;
 }
