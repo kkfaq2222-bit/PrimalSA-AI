@@ -28,10 +28,10 @@ PrimalSA-AI/
     schemadump/        SchemaDump.cs：從 HotUpdate.dll 抽 Tabtoy 欄位對照與列舉（ReflectionOnly，不執行遊戲程式）
     query/psa.py       知識庫查詢工具（搜尋、交叉查詢、跨地圖路線、通行格）
     gui/gui.sh         遊戲畫面操作（截圖、點擊、拖曳、按鍵）；用法與按鈕地圖見 .claude/skills/psa-game-ui/
-    web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並推到 gh-pages 分支發布 Pages
+    web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
     .cache/            匯出時的暫存（HotUpdate.dll 等），可刪
 ```
-GitHub：`dk880842/psa-wiki`（公開），網站 https://dk880842.github.io/psa-wiki/ 。`.gitignore` 排除 `GameClient/`、`tools/.cache/`、`site/`、`notes/`，不可把遊戲客戶端或帳號資料推上去。
+網站：Cloudflare Pages 專案 `psa-wiki`（https://psa-wiki.pages.dev/），只上傳 site/；原始碼不放公開 repo。`.gitignore` 排除 `GameClient/`、`tools/.cache/`、`site/`、`notes/`。
 
 ## 3. 鐵則（必須遵守）
 1. **`GameClient/` 是唯讀的**：不得新增、修改、刪除、搬移、重新命名其中任何檔案或資料夾，也不要把任何輸出寫進去。

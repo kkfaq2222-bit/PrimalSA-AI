@@ -202,7 +202,7 @@ async function drawMap(id, d, tx, ty, hasTarget) {
   const cells = m.cells || (m.cells = await inflate(m.raw));
   const { w, h } = m;
   const box = document.getElementById('mapbox');
-  let z = Math.max(1, Math.min(10, Math.floor((box.clientWidth - 2) / w)));
+  let z = Math.max(1, Math.min(20, Math.floor((box.clientWidth - 2) / w), Math.floor(600 / h) || 1));
   const css = getComputedStyle(document.documentElement);
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
   const col = dark ? ['', '#5b5a52', '#2b4a6b', '#26262b'] : ['', '#e9e3d3', '#a9c6e3', '#6d685e'];
@@ -255,7 +255,7 @@ async function drawMap(id, d, tx, ty, hasTarget) {
   };
   cv.onclick = (ev) => { const { hit } = near(ev); if (hit) location.hash = `#/${hit[0]}/${hit[1]}`; };
   document.querySelectorAll('.zoom').forEach((b) => b.onclick = () => {
-    z = Math.max(1, Math.min(16, z + (+b.dataset.z) * (z >= 4 ? 2 : 1)));
+    z = Math.max(1, Math.min(24, z + (+b.dataset.z) * (z >= 4 ? 2 : 1)));
     paint();
   });
 }
