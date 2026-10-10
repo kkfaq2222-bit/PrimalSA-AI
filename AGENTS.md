@@ -120,6 +120,7 @@ PrimalSA-AI/
    uv run --no-project python tools/query/psa.py pet 烏力           # 成長檔 / 屬性 / 技能 / 取得
    uv run --no-project python tools/query/psa.py npc 老村長         # 位置 / 販售 / 腳本對話 / 任務
    uv run --no-project python tools/query/psa.py map 1000           # NPC / 出口 / 入口
+   uv run --no-project python tools/query/psa.py steps 2031         # 任務每一步：NPC @ 座標、對話 / 戰鬥 / 打怪（單人逃跑解任務用）
    uv run --no-project python tools/query/psa.py route 1000 92 99 1006   # 跨地圖路線（只算地圖出口）
    uv run --no-project python tools/query/psa.py grid 1000 92 99 10      # 座標附近通行格
    ```

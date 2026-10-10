@@ -21,7 +21,7 @@ AI 只透過「截圖 → 看圖 → 點擊 / 按鍵 → 再截圖確認」操�
 ```bash
 bash tools/gui/gui.sh info                 # 視窗大小
 bash tools/gui/gui.sh max                  # 最大化 → 客戶區 2880×1659（ui/ 座標的基準）
-bash tools/gui/gui.sh shot [out.png]       # 預設存 tools/.cache/shot.png，再用 Read 看圖
+bash tools/gui/gui.sh shot [out.png]       # 預設存 tools/.cache/shot.png，再用 Read 看圖（不能存到 /tmp，WSL 路徑會 GDI+ Save 例外；用預設路徑或 Windows 可寫路徑）
 bash tools/gui/gui.sh click X Y [right]
 bash tools/gui/gui.sh dclick X Y          # 雙擊（倉庫存入）
 bash tools/gui/gui.sh drag X1 Y1 X2 Y2
@@ -38,6 +38,8 @@ uv run --no-project python tools/gui/walk.py 1000 81 66 [--exit 1005]   # 走到
 uv run --no-project python tools/gui/walk.py --path "1000:86,88 84,81 83,73 81,66" [--exit 1005]   # 照手動 waypoint 走（沒有通行格資料的圖用）
 uv run --no-project python tools/gui/walk.py --plan 1000 81 66 [--from 92,99]   # 只印找路結果（每段要點的截圖座標），不動
 uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40 --mp 20 --every 15]   # 回村補血再回練功點（約 21～24 秒）；--watch 看血條比例（%）自動補
+uv run --no-project python tools/gui/heal.py --no-return   # 補完血停在醫院，不傳回練功點、不開遇敵（解任務被打飛後用）
+uv run --no-project python tools/gui/quest.py --solo --task 任務名   # 單人逃跑：遇怪按逃跑，到 NPC ESC 對話框退出碼 20，被打飛退出碼 21；--fight = 戰鬥步按自動戰鬥（見 /psa-quest-solo）
 uv run --no-project python tools/gui/petwatch.py [--once] [--interval 30] [--target-level 77]   # 監測 5 人金布伊等級，≥ 門檻換回迪基格斯（內含補血檢查 + 維持原地遇敵，不要和 heal.py --watch 同跑）
 ```
 
@@ -74,10 +76,12 @@ uv run --no-project python tools/gui/errlog.py list
 |---|---|
 | 認主畫面按鈕、收合、面板關不掉 | [ui/home.md](ui/home.md) |
 | 5 個角色組一隊 | **`/psa-quick-team` skill**（介面參考 [ui/team.md](ui/team.md)） |
+| 開始 / 恢復練功（選練功區、傳送、開遇敵、5 人快速 + 自動戰鬥檢查） | **`/psa-grind-start` skill** |
 | 解散隊伍 | **`/psa-disband-team` skill**（介面參考 [ui/team.md](ui/team.md)） |
 | 確認誰是「當前」角色 | [ui/team.md](ui/team.md) |
 | 看角色屬性 / 抗性 / 潛力點 | [ui/role.md](ui/role.md) |
 | 看任務進度、任務詳情、自動巡路解任務（`tools/gui/quest.py --task 任務名`；檢測方針：黃色「?」優先，否則 OCR 核對追蹤列表任務名再點；`ocr.ps1` / `findmark.ps1`） | [ui/quest.md](ui/quest.md) |
+| **單人逃跑解任務**（DKB0 單人跑 NPC、遇怪逃跑 → 組隊對話 / 打；紅暴 2031；`quest.py --solo / --fight`、`psa.py steps`、`heal.py --no-return`） | **`/psa-quest-solo` skill**（介面參考 [ui/quest.md](ui/quest.md#單人逃跑解任務questpy---solo----fight2026-10-10流程見-psa-quest-solo-skill)） |
 | 背包、道具、倉庫、材料圖鑑 | [ui/bag.md](ui/bag.md) |
 | 寵物出戰 / 騎乘 / 休息、寵物技能 | [ui/pet.md](ui/pet.md) |
 | 傳送到別的地圖 / 練級點 | [ui/transfer.md](ui/transfer.md) |
