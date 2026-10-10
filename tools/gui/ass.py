@@ -2,20 +2,21 @@
 """外掛 ASS 左欄戰鬥設定的讀 / 設工具（只用標準庫，經 walk.gui → winenv → gui.ps1；背景操作）。
 
 用法（專案根目錄；WSL / Windows 原生指令相同）：
-  uv run --no-project python tools/gui/ass.py get DKB0                    # 印五項狀態（開 / 關）
-  uv run --no-project python tools/gui/ass.py get DKB0 自動逃跑 自動戰鬥     # 只印指定項目
-  uv run --no-project python tools/gui/ass.py set DKB0 自動逃跑 on 自動戰鬥 on 快速戰鬥 off
+  uv run --no-project python tools/gui/ass.py get DKB0                    # 印四項狀態（開 / 關）
+  uv run --no-project python tools/gui/ass.py get DKB0 原地遇敵 自動戰鬥     # 只印指定項目
+  uv run --no-project python tools/gui/ass.py set DKB0 原地遇敵 on 自動戰鬥 on 快速戰鬥 off
   uv run --no-project python tools/gui/ass.py pet DKB0 get                # 戰寵 首次動作（勾選 + 值）/ 一般動作（值）
   uv run --no-project python tools/gui/ass.py pet DKB0 first 防禦          # 首次動作 = 防禦 並勾選
   uv run --no-project python tools/gui/ass.py pet DKB0 first off normal 攻擊   # 首次動作取消勾選（值不動）、一般動作 = 攻擊
 角色：DKB0 / DKB02 / DKB03 / DKB04 / DKB05（不分大小寫）。
-項目：原地遇敵(encounter) / 自動逃跑(flee) / 快速戰鬥(fast) / 自動戰鬥(auto) / 夥伴助戰(partner)。
-流程：開外掛 → 驗證面板真的開了 → 選角色並驗證 → pixel 讀五項 → （set：只點與目標不同的，再讀確認）→ 關面板（X 1318,90）並驗證。
+項目：原地遇敵(encounter) / 快速戰鬥(fast) / 自動戰鬥(auto) / 夥伴助戰(partner)。
+（2026-10-10 起不再支援外掛「自動逃跑」：使用者要求外掛自動逃跑一律不用、不看那個勾選框；逃跑改由 quest.py 手動按戰鬥畫面逃跑鈕。）
+流程：開外掛 → 驗證面板真的開了 → 選角色並驗證 → pixel 讀四項 → （set：只點與目標不同的，再讀確認）→ 關面板（X 1318,90）並驗證。
 安全：每次點面板內座標前都先 pixel 驗證面板還開著（面板沒開時點這些座標會穿透到地面讓角色走掉）；
       主畫面看不到外掛鈕（對話 / 載入中）或被擋 → 等待重試，最多 OPEN_TIMEOUT 秒，失敗回報、不亂點。
 退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色 / 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）/
         8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
-戰鬥中保護（2026-10-10 碧青洞窟事故：BOSS 戰開始 1 秒後外掛自動逃跑被打開 → 隊長脫隊）：get / set / pet 一律先判斷是不是戰鬥中
+戰鬥中保護（2026-10-10 碧青洞窟事故：BOSS 戰開始 1 秒後外掛設定被改動 → 隊長脫隊）：get / set / pet 一律先判斷是不是戰鬥中
   （戰鬥畫面像素 = battleguard.screen_in_battle，或 quest.py 寫的鎖檔 tools/.cache/battle.lock 有效〔pid 活著且 30 分鐘內〕），
   是 → 不開面板、不改任何勾選，等戰鬥結束（連續 2 次讀到非戰鬥才算，最多 BATTLE_WAIT=90 秒）再做；逾時回退出碼 8。
   --no-wait：戰鬥中不等，直接回退出碼 8（排程 / 腳本不想卡住時用）。面板已經開著時視為不在戰鬥（外掛面板戰鬥中打不開）。
@@ -41,8 +42,8 @@ HUD_PROBE = (1300, 745, 254, 0, 0)   # 主畫面外掛鈕紅字（同 quest.SIG_
 
 ROLES = {'DKB0': (137, 151), 'DKB02': (298, 151), 'DKB03': (461, 151), 'DKB04': (137, 204), 'DKB05': (298, 204)}
 # 左欄戰鬥設定勾選框（框心）；每個角色各自設定
-ITEMS = {'原地遇敵': (146, 343), '自動逃跑': (315, 343), '快速戰鬥': (484, 343), '自動戰鬥': (146, 400), '夥伴助戰': (315, 400)}
-ALIASES = {'encounter': '原地遇敵', 'flee': '自動逃跑', 'escape': '自動逃跑', 'fast': '快速戰鬥', 'quick': '快速戰鬥',
+ITEMS = {'原地遇敵': (146, 343), '快速戰鬥': (484, 343), '自動戰鬥': (146, 400), '夥伴助戰': (315, 400)}
+ALIASES = {'encounter': '原地遇敵', 'fast': '快速戰鬥', 'quick': '快速戰鬥',
            'auto': '自動戰鬥', 'partner': '夥伴助戰', 'assist': '夥伴助戰'}
 
 # 面板開著的特徵：右上橘 X + 五個角色圓鈕（選中 0,0,0、沒選中 197,227,255；有 EXP 橫幅可能蓋住 DKB03，容許 1 個不符）
@@ -171,7 +172,7 @@ def select_role(role: str) -> bool:
 
 
 def read_checks(items=None) -> dict | None:
-    """面板開著、角色已選好時讀五項（或指定項）勾選狀態：True = 開；讀不到回 None"""
+    """面板開著、角色已選好時讀四項（或指定項）勾選狀態：True = 開；讀不到回 None"""
     items = list(items or ITEMS)
     cols = _px([ITEMS[i] for i in items])
     if not cols:

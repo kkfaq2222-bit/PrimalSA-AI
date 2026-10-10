@@ -3,7 +3,7 @@
 1. 戰鬥畫面像素特徵（SIG_BATTLE / VS 牌）與 screen_in_battle()：一次 gui pixel 判斷現在是不是戰鬥畫面。
 2. 戰鬥鎖檔 tools/.cache/battle.lock：quest.py 在戰鬥中寫入（pid + 開始時間），戰鬥結束 / 程式結束刪除；
    ass.py 看到「pid 還活著且不是太舊」的鎖檔就視為戰鬥中，不開外掛面板、不改勾選（2026-10-10 碧青洞窟事故：
-   BOSS 戰開始 1 秒後外掛「自動逃跑」被打開 → 隊長脫隊、進度不一致）。
+   BOSS 戰開始 1 秒後外掛設定被改動 → 隊長脫隊、進度不一致）。
 """
 import json
 import os

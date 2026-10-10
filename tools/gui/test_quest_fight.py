@@ -9,6 +9,7 @@ import quest  # noqa: E402
 import battleguard  # noqa: E402
 import tempfile as _tf
 battleguard.LOCK_FILE = Path(_tf.mkdtemp()) / 'battle.lock'      # 測試用鎖檔位置，不碰真正的 tools/.cache/battle.lock
+REAL_READ_SCREEN = quest.read_screen                             # 同上：真的 read_screen（測像素分類）
 REAL_CHECK_TEAM = quest.check_team                               # run() 會把 quest.check_team 換成假的；真函式留著測像素邏輯
 
 IDLE = {'state': 'idle', 'gold': 0, 'full': False, 'cmd': False, 'auto_off': False}
@@ -64,19 +65,10 @@ def fake_team(size, tag=''):
     return TEAM['ret']
 
 
-ASS = {'rc': 0, 'st': {'原地遇敵': False, '自動逃跑': False, '快速戰鬥': False, '自動戰鬥': True, '夥伴助戰': False}, 'calls': 0}
-
-
-def fake_ass(role):
-    ASS['calls'] += 1
-    return ASS['rc'], (dict(ASS['st']) if ASS['rc'] == 0 else None), 'fake'
-
-
 def run(argv, sim):
     quest.time.time, quest.time.sleep = sim.time, sim.sleep
     quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: (5510, 50, 17)
     quest.walk.gui = sim.gui
-    quest.ass.get_states = fake_ass
     quest.check_team = fake_team
     quest.snap = lambda tag: 'sim.png'
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
@@ -99,7 +91,7 @@ def has(sim, prefix):
 ok = True
 print('(a) 沒點 NPC 就進戰鬥（20 秒後）：逃跑、不開自動戰鬥')
 s = Sim(battle_at=20.0, auto_on=False)
-rc = run(['--fight', '--no-click', '--manual-escape', '--max-seconds', '60'], s)
+rc = run(['--fight', '--no-click', '--max-seconds', '60'], s)
 ok &= check('exit 0（時間到）', rc == 0, f'rc={rc}')
 ok &= check('有按逃跑', bool(has(s, 'click 1283 168')))
 ok &= check('沒按自動戰鬥', not has(s, 'click 1380 600'))
@@ -119,64 +111,46 @@ ok &= check('按對話左鈕 + 自動戰鬥、沒逃跑', bool(has(s, 'click 948
 
 print('(c) 自動戰鬥開著遇小怪：先關再逃')
 s = Sim(battle_at=20.0, auto_on=True)
-rc = run(['--fight', '--no-click', '--manual-escape', '--max-seconds', '60'], s)
+rc = run(['--fight', '--no-click', '--max-seconds', '60'], s)
 seq = [c[1] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 1283 168'))]
 ok &= check('順序：關自動 → 逃跑', seq == ['click 1380 600', 'click 1283 168'], str(seq))
 print('(c2) --solo 同樣情境')
 s = Sim(battle_at=5.0, auto_on=True)
-rc = run(['--solo', '--no-track', '--manual-escape', '--max-seconds', '40'], s)
+rc = run(['--solo', '--no-track', '--max-seconds', '40'], s)
 seq = [c[1] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 1283 168'))]
 ok &= check('--solo 順序：關自動 → 逃跑', seq == ['click 1380 600', 'click 1283 168'], str(seq))
 
-print('(c3) --solo 預設：外掛自動逃跑，腳本不按任何戰鬥鈕、戰鬥 12 秒後結束')
-ASS['st']['自動逃跑'] = True
-s = Sim(battle_at=5.0, auto_on=True, boss_ends=12.0)
-ASS['calls'] = 0
-rc = run(['--solo', '--no-track', '--max-seconds', '40'], s)
-ok &= check('讀過外掛設定', ASS['calls'] == 1)
-ok &= check('沒按逃跑 / 自動戰鬥鈕', not has(s, 'click 1283 168') and not has(s, 'click 1380 600'), str(s.clicks))
-ok &= check('exit 0（時間到，沒超時）', rc == 0, f'rc={rc}')
-print('(c4) --solo 戰鬥 40 秒不結束 → 退出碼 27')
-s = Sim(battle_at=5.0, auto_on=True, boss_ends=400.0)
-rc = run(['--solo', '--no-track', '--max-seconds', '200'], s)
-ok &= check('exit 27，約 35 秒', rc == quest.EXIT_ESCAPE_TIMEOUT and 34 <= s.t - 1000 <= 40, f'rc={rc} t={s.t - 1000:.0f}')
-ok &= check('沒按任何鈕', not has(s, 'click 1283 168') and not has(s, 'click 1380 600'))
-print('(c5) --solo 外掛設定不符 / 讀不到 → 29，沒動作')
-for desc, patch in (('自動逃跑關', {'自動逃跑': False}), ('自動戰鬥關', {'自動戰鬥': False})):
-    s = Sim(battle_at=5.0)
-    ASS['st'].update(patch)
-    rc = run(['--solo', '--no-track', '--max-seconds', '40'], s)
-    ok &= check(f'{desc} → 29 且沒點任何東西', rc == quest.EXIT_ASS_SETUP and not s.clicks, f'rc={rc}')
-    ASS['st'].update({'自動逃跑': True, '自動戰鬥': True})
-ASS['rc'] = 2
-s = Sim(battle_at=5.0)
-rc = run(['--solo', '--no-track', '--max-seconds', '40'], s)
-ok &= check('讀不到 → 29', rc == quest.EXIT_ASS_SETUP and not s.clicks, f'rc={rc}')
-ASS['rc'] = 0
-s = Sim(battle_at=5.0, boss_ends=5.0)
-ASS['calls'] = 0
-rc = run(['--solo', '--no-track', '--skip-ass-check', '--max-seconds', '20'], s)
-ok &= check('--skip-ass-check 不讀外掛', ASS['calls'] == 0 and rc == 0, f'rc={rc}')
-print('(c6) --fight 自動逃跑開著 → 28，不點 NPC')
-s = Sim()
-rc = run(['--fight', '--npc', '53,17', '--max-seconds', '60'], s)
-ok &= check('exit 28、沒任何點擊', rc == quest.EXIT_ESCAPE_ON and not s.clicks, f'rc={rc} clicks={s.clicks}')
-print('(c7) --fight（--no-click，自動逃跑關）：小怪（20 秒後才進戰鬥）用自動戰鬥打完、不逃跑')
-ASS['st']['自動逃跑'] = False
+print('(c3) 外掛自動逃跑相關已全部移除：沒有 --manual-escape / --skip-ass-check、退出碼 27 / 28 / 29、讀外掛的程式')
+for flag in ('--manual-escape', '--skip-ass-check'):
+    s = Sim()
+    try:
+        run(['--solo', '--no-track', flag, '--max-seconds', '10'], s)
+        rejected = False
+    except SystemExit as e:
+        rejected = e.code == 2
+    ok &= check(f'{flag} 已移除（argparse 拒絕）', rejected)
+ok &= check('沒有 EXIT_ESCAPE_TIMEOUT / EXIT_ESCAPE_ON / EXIT_ASS_SETUP / SOLO_BATTLE_MAX / check_ass_setup / import ass',
+            not any(hasattr(quest, n) for n in ('EXIT_ESCAPE_TIMEOUT', 'EXIT_ESCAPE_ON', 'EXIT_ASS_SETUP', 'SOLO_BATTLE_MAX', 'check_ass_setup', 'ass')))
+print('(c4) --solo 戰鬥 400 秒不結束：不再有 27 超時，只到 --max-seconds 結束（0）；第一輪就逃跑，不刷新角色')
+s = Sim(battle_at=5.0, auto_on=False, boss_ends=400.0)
+rc = run(['--solo', '--no-track', '--max-seconds', '100'], s)
+ok &= check('exit 0（時間到）、有逃跑', rc == 0 and bool(has(s, 'click 1283 168')), f'rc={rc}')
+ok &= check('--solo 不刷新角色（沒點切換 850,765 / 763,760）', not has(s, 'click 850 765') and not has(s, 'click 763 760'), str(s.clicks))
+print('(c5) --fight --no-click：路上小怪（20 秒後才進戰鬥，不在 15 秒時間窗）→ 手動逃跑、不開自動、不刷新')
 s = Sim(battle_at=20.0, auto_on=False, boss_ends=10.0)
 rc = run(['--fight', '--no-click', '--max-seconds', '60'], s)
-ok &= check('小怪：按自動戰鬥、沒按逃跑', len(has(s, 'click 1380 600')) == 1 and not has(s, 'click 1283 168'), str(s.clicks))
-print('(c8) --fight --no-click --manual-escape：舊行為（小怪先關自動再逃）')
-ASS['st']['自動逃跑'] = True
-s = Sim(battle_at=20.0, auto_on=True)
-ASS['calls'] = 0
-rc = run(['--fight', '--no-click', '--manual-escape', '--max-seconds', '60'], s)
-seq = [c[1] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 1283 168'))]
-ok &= check('不讀外掛、關自動 → 逃跑', ASS['calls'] == 0 and seq == ['click 1380 600', 'click 1283 168'], f'{seq} calls={ASS["calls"]}')
-ASS['st']['自動逃跑'] = True
-
+ok &= check('小怪：按逃跑、沒按自動戰鬥、沒刷新', bool(has(s, 'click 1283 168')) and not has(s, 'click 1380 600') and not has(s, 'click 850 765'), str(s.clicks))
+print('(c6) --fight 任務 / BOSS 戰（點 NPC 後 3 秒開打）：自動戰鬥 + 刷新角色（完整戰鬥切換 850,765；打完前每 REFRESH_GAP 秒一次）')
+s = Sim(battle_at=3.0, auto_on=False, boss_ends=20.0)
+rc = run(['--fight', '--npc', '53,17', '--max-seconds', '120'], s)
+seq = [c[1].split(';')[0] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 850 765', 'click 1283 168'))]
+ok &= check('順序：先自動戰鬥，再刷新；沒逃跑', seq[:2] == ['click 1380 600', 'click 850 765'] and 'click 1283 168' not in seq, str(seq))
+ok &= check('20 秒的戰鬥刷新 2~3 次（不是每秒一次）', 2 <= seq.count('click 850 765') <= 3, str(seq))
+ok &= check('刷新用 waitpix + ifok click 910 578', any('waitpix' in c[1] and 'ifok click 910 578' in c[1] for c in s.clicks))
+s = Sim(battle_at=3.0, auto_on=False, boss_ends=10.0)
+rc = run(['--fight', '--npc', '53,17', '--no-refresh', '--max-seconds', '120'], s)
+ok &= check('--no-refresh 不刷新（仍開自動戰鬥）', not has(s, 'click 850 765') and len(has(s, 'click 1380 600')) == 1)
 print('(d) 點 NPC 後沒反應')
-ASS['st']['自動逃跑'] = False
 s = Sim()
 rc = run(['--fight', '--npc', '53,17', '--max-seconds', '120'], s)
 ok &= check('exit 22', rc == quest.EXIT_NO_NPC, f'rc={rc} t={s.t - 1000:.0f}s')
@@ -405,7 +379,11 @@ four = dict(ALL5, DKB04='other')
 j = quest.judge_team(four, 5)
 ok &= check('judge 4 人（DKB04 單人）不符且說明點名 DKB04', (not j[0]) and 'DKB04' in j[1].split('不在隊')[1], j[1])
 ok &= check('judge 兩個隊長 / 無隊長 不符', not quest.judge_team(dict(ALL5, DKB02='leader'), 5)[0] and not quest.judge_team(dict(ALL5, DKB0='member'), 5)[0])
-ok &= check('--team-size 4 時 4 人隊（另 1 人不在線）仍要 0 個 other', not quest.judge_team(four, 4)[0])
+ok &= check('--team-size 4：4 人隊 + 另 1 人單人（DKB04 other）→ 通過（單人卡片不算錯）', quest.judge_team(four, 4)[0])
+ok &= check('--team-size 5 + 1 人單人 → 仍不符（5 人都要在隊）', not quest.judge_team(four, 5)[0])
+ok &= check('--team-size 4 但只有 3 人在隊 → 不符', not quest.judge_team(dict(four, DKB05='other'), 4)[0])
+ok &= check('--team-size 2：隊長 + 1 隊員，其餘 3 張單人 → 通過', quest.judge_team({'DKB0': 'leader', 'DKB02': 'member', 'DKB03': 'other', 'DKB04': 'other', 'DKB05': 'other'}, 2)[0])
+ok &= check('隊長是單人（全 other，沒有隊長）→ 不符', not quest.judge_team({r: 'other' for r in ALL5}, 4)[0])
 
 
 class PanelGame:
@@ -449,7 +427,6 @@ for nm, kinds, opens, want in [('5 人', ALL5, True, True), ('4 人', four, True
         ok &= check(f'{nm}：用 ✕ 1064,208 關面板', any(c.startswith('click 1064 208') for c in pg.clicks), str(pg.clicks))
 
 print('(n) --fight 4 人隊 → 不點 NPC，退出碼 30；5 人 → 照常點')
-ASS['st']['自動逃跑'] = False
 TEAM['ret'], TEAM['calls'] = (False, "隊長 ['DKB0']、隊員 ['DKB02', 'DKB03', 'DKB05']、不在隊 / 單人 / 離線 ['DKB04']"), []
 s = Sim(battle_at=3.0)
 rc = run(['--fight', '--npc', '53,17', '--max-seconds', '60'], s)
@@ -477,7 +454,7 @@ s = Script([IDLE, IDLE])
 TEAM['ret'] = (False, "不在隊 ['DKB03']")
 rc = run2(['--task', 'x', '--max-seconds', '60'], s)
 ok &= check('exit 32 且沒有點擊（find_marker / track_task 沒被呼叫）', rc == quest.EXIT_TEAM_LOST and not s.clicks and len(TEAM['calls']) == 1, f'rc={rc} {s.clicks}')
-for extra in (['--no-track'], ['--solo', '--no-track', '--skip-ass-check']):
+for extra in (['--no-track'], ['--solo', '--no-track']):
     TEAM['calls'] = []
     s = Script([IDLE, IDLE, IDLE, IDLE])
     rc = run2(extra + ['--max-seconds', '4'], s)
@@ -513,7 +490,6 @@ class LockSim(Sim):
 
 
 s = LockSim(battle_at=3.0, auto_on=False, boss_ends=8.0)
-ASS['st']['自動逃跑'] = False
 rc = run(['--fight', '--no-click', '--max-seconds', '60'], s)
 bat = [x for st_, x in seen if st_ == 'battle']
 ok &= check('戰鬥畫面第 2 次讀起鎖檔都有效（第 1 次讀到戰鬥時才剛寫鎖）', len(bat) >= 2 and all(bat[1:]), str(bat))
@@ -583,6 +559,186 @@ ok &= check('exit 31 且沒點擊', rc == quest.EXIT_STEP_UNKNOWN and not s.clic
 s = Sim(battle_at=3.0)
 rc = run(['--fight', '--step', '5', '--at', '57,47', '--task', '碧青洞窟', '--max-seconds', '30'], s)
 ok &= check('--step 5（隱含 --npc auto）→ 通過隊伍檢查後點 NPC', rc == 0 and bool(s.clicks), f'rc={rc}')
+
+
+# ---- 2026-10-10 外掛自動逃跑移除後新增：OCR 步驟比對 / 選擇對象面板 / 底部關閉列 / 刷新角色規則 ----
+print('(q) --npc auto：OCR 把「9樓」讀成「婁」（2026-10-10 17:30 事故，相似度 0.67 → 退出碼 31）')
+quest.event = lambda m, shot=None: None
+INCIDENT = [('碧青洞窟', 309), ('通過碧青婁的', 341), ('通過碧青婁的扌覜戈', 341)]
+with_ocr(INCIDENT)
+quest.read_pos = lambda: (21208, 31, 16)
+a_ = ns()
+ok &= check('在 8 樓 21208 → 步 2（水的守護獸 30,16）', quest.resolve_npc(a_) == (30, 16) and a_.npc_map == 21208)
+quest.read_pos = lambda: (21214, 30, 41)
+a_ = ns()
+ok &= check('在 14 樓 21214 → 步 3（NPC 不同的相似步驟，用所在地圖分辨）→ 30,40', quest.resolve_npc(a_) == (30, 40) and a_.npc_map == 21214)
+quest.read_pos = lambda: (21215, 25, 31)
+a_ = ns()
+ok &= check('在第三張圖（兩個候選的地圖都不符）→ 31，不誤配', quest.resolve_npc(a_) is None and a_.resolve_rc == 31)
+quest.read_pos = lambda: None
+a_ = ns()
+ok &= check('讀不到所在地圖 → 31', quest.resolve_npc(a_) is None and a_.resolve_rc == 31)
+quest.read_pos = lambda: (21208, 31, 16)
+a_ = ns(at='31,16')
+ok &= check('手動給 --at（不知地圖）+ 相似步驟 NPC 不同 → 31', quest.resolve_npc(a_) is None and a_.resolve_rc == 31)
+with_ocr([('碧青洞窟', 309), ('通過碧青9樓的', 341)])
+quest.read_pos = lambda: None
+ok &= check('被截斷但數字讀對「通過碧青9樓的」→ 步 2，不需要地圖', quest.resolve_npc(ns()) == (30, 16))
+with_ocr([('碧青洞窟', 309), ('通過碧青14樓的', 341)])
+ok &= check('被截斷「通過碧青14樓的」→ 步 3（30,40）', quest.resolve_npc(ns()) == (30, 40))
+with_ocr([('碧青洞窟', 309), ('尋找水蒼洞窟賢', 341)])
+quest.read_pos = lambda: (21308, 20, 11)
+a_ = ns()
+ok &= check('步 9 / 10 同文字同地圖、NPC 不同（賢者看門人 / 賢者）→ 仍 31（地圖分不出）', quest.resolve_npc(a_) is None and a_.resolve_rc == 31)
+with_ocr([('碧青洞窟', 309), ('通過碧青婁的', 341)])
+quest.read_pos = lambda: (21208, 31, 16)
+ok &= check('step_score：完整相符 1.0 > 骨架相符；骨架相同的步 2/3 差 < 0.05（平手）',
+            quest.step_score('通過碧青9樓的挑戰', '通過碧青9樓的挑戰') == 1.0 and abs(quest.step_score('通過碧青婁的', '通過碧青9樓的挑戰') - quest.step_score('通過碧青婁的', '通過碧青14樓的挑戰')) < 0.05)
+ok &= check('step_score：太短的前綴（< 5 字）不當前綴用', quest.step_score('尋找女神', '尋找女神艾妮基') < 0.8)
+ok &= check('step_score：不相干文字低分', quest.step_score('完全不相干的文字', '通過碧青9樓的挑戰') < 0.5)
+
+print('(r) 選擇對象面板（樣本 tools/.cache/quest-log/172356-no-npc.png 離線算出的黃色色塊）')
+SAMPLE_BLOBS = [dict(x=775, y=62, w=4, h=6, n=8), dict(x=720, y=292, w=7, h=9, n=22), dict(x=1353, y=265, w=4, h=3, n=6),
+                dict(x=1171, y=331, w=14, h=4, n=21), dict(x=1208, y=337, w=15, h=15, n=50), dict(x=1138, y=337, w=11, h=14, n=37),
+                dict(x=1154, y=337, w=15, h=14, n=71), dict(x=1189, y=336, w=2, h=7, n=10), dict(x=1193, y=335, w=2, h=6, n=9),
+                dict(x=1131, y=338, w=5, h=9, n=18), dict(x=1172, y=339, w=15, h=11, n=41), dict(x=1185, y=342, w=5, h=5, n=15),
+                dict(x=1193, y=342, w=9, h=4, n=19), dict(x=1174, y=364, w=4, h=3, n=8), dict(x=1264, y=364, w=5, h=3, n=7),
+                dict(x=205, y=451, w=24, h=15, n=124), dict(x=261, y=582, w=18, h=18, n=233), dict(x=760, y=747, w=44, h=18, n=329)]
+pt = quest.pick_select_card(SAMPLE_BLOBS)
+ok &= check('黃字名字「水的守護獸」→ 點第 1 張卡片頭像（x≈1170、y≈289），場景 / UI 的黃色塊都不算', pt is not None and abs(pt[0] - 1171) <= 6 and abs(pt[1] - 289) <= 4, str(pt))
+second = [dict(b, x=b['x'] + 90) for b in SAMPLE_BLOBS if 1100 < b['x'] < 1250 and 320 < b['y'] < 350]
+pt2 = quest.pick_select_card(second)
+ok &= check('NPC 在第 2 格（黃字右移 90）→ 點第 2 格，不寫死第一格', pt2 is not None and abs(pt2[0] - 1261) <= 6 and pt2[1] == pt[1], str(pt2))
+row2 = [dict(b, y=b['y'] + 100) for b in SAMPLE_BLOBS if 1100 < b['x'] < 1250 and 320 < b['y'] < 350]
+pt3 = quest.pick_select_card(row2)
+ok &= check('NPC 在第 2 排（y+100）→ y 跟著下移', pt3 is not None and pt3[1] == pt[1] + 100, str(pt3))
+ok &= check('沒有黃字（全是隊友白字）→ None，不亂點', quest.pick_select_card([b for b in SAMPLE_BLOBS if not (1100 < b['x'] < 1250 and 320 < b['y'] < 350)]) is None and quest.pick_select_card([]) is None)
+
+SELECT_COL = {(x, y): (r, g, b) for x, y, r, g, b in quest.SIG_SELECT}
+HUD_COL = {(x, y): (r, g, b) for x, y, r, g, b in quest.SIG_HUD}
+
+
+def fake_pixel_gui(colors):
+    return lambda *args, **k: ' '.join('%d,%d,%d' % colors.get(tuple(int(v) for v in p.split(',')), (60, 90, 60)) for p in args[1].split()) if args[0] == 'pixel' else ''
+
+
+quest.gui = fake_pixel_gui({**SELECT_COL, **HUD_COL})
+ok &= check('read_screen：選擇面板 + HUD 紅字 → state select（不是 idle）', REAL_READ_SCREEN()['state'] == 'select')
+quest.gui = fake_pixel_gui(dict(HUD_COL))
+ok &= check('read_screen：只有 HUD 紅字 → idle', REAL_READ_SCREEN()['state'] == 'idle')
+quest.gui = fake_pixel_gui({**{k: v for k, v in list(SELECT_COL.items())[:-1]}, **HUD_COL})
+ok &= check('read_screen：選擇面板少 1 點 → 不判 select', REAL_READ_SCREEN()['state'] == 'idle')
+
+SELECT = dict(IDLE, state='select')
+quest.ps_json = lambda script, *args: {'ok': True, 'blobs': SAMPLE_BLOBS}
+
+
+def clicks_at(s, x, y):
+    return [c for c in s.clicks if c[1] == f'click {x} {y}']
+
+
+print('(r2) 對話步：點 NPC / 黃問號後跳出選擇面板 → 點黃字卡片，再按對話框')
+s = Script([IDLE, SELECT, IDLE, DIALOG, IDLE, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--no-track', '--stop-after-dialog', '--max-seconds', '60'], s)
+card = [c for c in s.clicks if c[1].startswith('click 117')]
+ok &= check('點了黃字卡片，之後按對話左鈕，exit 0', rc == 0 and len(card) == 1 and bool(has(s, 'click 948 461')) and s.clicks.index(card[0]) < s.clicks.index(has(s, 'click 948 461')[0]), f'rc={rc} {s.clicks}')
+print('(r3) --fight：點 NPC 後跳出選擇面板（不是 22「沒點到 NPC」）；點了之後 NPC_WAIT 重新計時')
+s = Script([IDLE] * 10 + [SELECT] + [IDLE] * 8 + [DIALOG] + [IDLE] * 20)
+rc = run2(['--fight', '--npc', '53,17', '--at', '50,17', '--max-seconds', '120'], s)
+ok &= check('有點卡片、有按對話左鈕、退出碼不是 22（沒面板處理的話第 12 秒就會 22）', bool(card_ := [c for c in s.clicks if c[1].startswith('click 117')]) and bool(has(s, 'click 948 461')) and rc != quest.EXIT_NO_NPC, f'rc={rc} {len(s.clicks)}')
+print('(r4) 找不到黃字 → 不點任何卡片，當不認得，3 次 + 5 秒後退出碼 2（交給使用者）')
+quest.ps_json = lambda script, *args: {'ok': True, 'blobs': []}
+s = Script([SELECT])
+rc = run2(['--no-track', '--max-seconds', '60'], s)
+ok &= check('exit 2、沒點任何東西', rc == 2 and not s.clicks, f'rc={rc} {s.clicks}')
+quest.ps_json = lambda script, *args: {'ok': True, 'blobs': SAMPLE_BLOBS}
+print('(r5) 點了面板還在（連續 > SELECT_MAX_TRIES 輪）→ 不再一直點，改走不認得（退出碼 2）')
+s = Script([SELECT])
+rc = run2(['--no-track', '--max-seconds', '60'], s)
+ok &= check(f'最多點 {quest.SELECT_MAX_TRIES} 次，exit 2', rc == 2 and len([c for c in s.clicks if c[1].startswith('click 117')]) == quest.SELECT_MAX_TRIES, f'rc={rc} n={len(s.clicks)}')
+
+print('(s) 底部「關閉」列 + 5 頭像：刷新前先點左側關閉 510,745')
+ROW_BTN = {(x, y): (r, g, b) for x, y, r, g, b in quest.SIG_CLOSE_ROW}
+
+
+class RowGame:
+    """假遊戲：底部關閉列可見 / 不可見；點關閉 510,745 隱藏（eat = 前幾下被吃掉）"""
+
+    def __init__(self, visible=True, eat=0, stuck=False):
+        self.visible, self.eat, self.stuck, self.clicks = visible, eat, stuck, []
+
+    def gui(self, *args, note=''):
+        if args[0] == 'seq':
+            self.clicks.append(args[1])
+            if args[1].startswith('click 510 745'):
+                if self.eat > 0:
+                    self.eat -= 1
+                elif not self.stuck:
+                    self.visible = False
+            return ''
+        if args[0] == 'pixel':
+            out = []
+            for p in args[1].split():
+                xy = tuple(int(v) for v in p.split(','))
+                if xy in ROW_BTN:
+                    out.append(ROW_BTN[xy] if self.visible else (30, 120, 60))
+                elif xy in quest.CLOSE_ROW_DARK:
+                    out.append((50, 46, 37) if self.visible else (200, 200, 200))
+                else:
+                    out.append((0, 0, 0))
+            return ' '.join('%d,%d,%d' % c for c in out)
+        return ''
+
+
+for nm, g, want_close, want_switch in [('有列 → 點關閉後才按切換', RowGame(True), 1, True), ('第一下被吃掉 → 點第 2 下', RowGame(True, eat=1), 2, True),
+                                       ('沒有列 → 不點關閉直接切換', RowGame(False), 0, True), ('關不掉 → 不點切換（會點到頭像）', RowGame(True, stuck=True), quest.REFRESH_GAP and 2, False)]:
+    quest.gui = g.gui
+    r = quest.refresh_characters(True)
+    cl = [i for i, c in enumerate(g.clicks) if c.startswith('click 510 745')]
+    sw = [i for i, c in enumerate(g.clicks) if c.startswith('click 850 765')]
+    ok &= check(nm, len(cl) == want_close and bool(sw) == want_switch and r == want_switch and (not sw or not cl or cl[-1] < sw[0]), f'{g.clicks}')
+g = RowGame(False)
+quest.gui = g.gui
+quest.refresh_characters(False)
+ok &= check('快速戰鬥（主畫面）刷新用 763,760', any(c.startswith('click 763 760') for c in g.clicks) and not any(c.startswith('click 850 765') for c in g.clicks))
+quest.gui = RowGame(True).gui
+ok &= check('close_row_visible：有列 True / 讀不到 None', quest.close_row_visible() is True and (setattr(quest, 'gui', lambda *a, **k: 'x') or quest.close_row_visible() is None))
+
+print('(t) 刷新角色規則（should_refresh 純函式 + 整合）')
+A = argparse.Namespace
+
+
+def sr(a, boss, full=True, auto_off=False, since=99):
+    return quest.should_refresh(a, boss, full, auto_off, since)
+
+
+ok &= check('組隊預設：每場（路上遇敵 boss=False 也刷新）', sr(A(solo=False, fight=False, no_refresh=False), False))
+ok &= check('--solo：任務戰鬥（boss）也不會有（solo 不當 boss）；路上小怪不刷新', not sr(A(solo=True, fight=False, no_refresh=False), False))
+ok &= check('--fight：路上小怪不刷新、任務 / BOSS 戰刷新', not sr(A(solo=False, fight=True, no_refresh=False), False) and sr(A(solo=False, fight=True, no_refresh=False), True))
+ok &= check('--no-refresh 全部不刷新', not sr(A(solo=False, fight=False, no_refresh=True), False) and not sr(A(solo=False, fight=True, no_refresh=True), True))
+ok &= check('完整戰鬥自動戰鬥還關著 → 先不刷新；快速戰鬥沒有自動戰鬥鈕 → 照刷', not sr(A(solo=False, fight=False, no_refresh=False), False, True, True) and sr(A(solo=False, fight=False, no_refresh=False), False, False, False))
+ok &= check('同一場未滿 REFRESH_GAP 秒不重刷', not sr(A(solo=False, fight=False, no_refresh=False), False, since=3.0))
+QUICK = dict(IDLE, state='battle', full=False)
+FULL_ON = {'state': 'battle', 'gold': 0, 'full': True, 'cmd': False, 'auto_off': False}
+quest.gui = lambda *a, **k: ''
+print('(t2) 預設模式整合：完整戰鬥（自動戰鬥先開、再刷新）/ 快速戰鬥 / 兩場各刷新一次')
+s = Script([IDLE, FULL_CMD_OFF, FULL_CMD_OFF, FULL_ON, FULL_ON, IDLE, IDLE, QUICK, QUICK, IDLE])
+rc = run2(['--no-track', '--max-seconds', '12'], s)
+seq = [c[1].split(';')[0] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 850 765', 'click 763 760'))]
+ok &= check('完整戰鬥：先按自動戰鬥、自動開了才刷新（850,765）一次；第二場快速戰鬥刷新（763,760）一次', seq == ['click 1380 600', 'click 850 765', 'click 763 760'], str(seq))
+s = Script([IDLE, FULL_ON, IDLE, IDLE, IDLE])
+rc = run2(['--no-track', '--no-refresh', '--max-seconds', '4'], s)
+ok &= check('--no-refresh 預設模式不刷新', not has(s, 'click 850 765'))
+print('(t3) --solo / --fight 快速戰鬥（只看到 VS 牌）：--solo 只能等；--fight 任務戰鬥刷新、路上小怪不刷新')
+s = Script([IDLE, QUICK, QUICK, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--solo', '--no-track', '--max-seconds', '6'], s)
+ok &= check('--solo 快速戰鬥：不刷新也不逃（沒有點擊）', not s.clicks, str(s.clicks))
+s = Script([IDLE, QUICK, QUICK, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--fight', '--no-click', '--max-seconds', '6'], s)
+ok &= check('--fight --no-click（任務時間窗內）快速戰鬥 → 刷新 763,760 一次', len(has(s, 'click 763 760')) == 1, str(s.clicks))
+s = Script([IDLE] * 20 + [QUICK, QUICK, IDLE, IDLE, IDLE])
+rc = run2(['--fight', '--no-click', '--max-seconds', '25'], s)
+ok &= check('--fight --no-click 20 秒後的路上小怪（快速戰鬥）→ 不刷新', not has(s, 'click 763 760') and not has(s, 'click 850 765'), str(s.clicks))
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)
