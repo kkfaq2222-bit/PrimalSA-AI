@@ -10,3 +10,4 @@ __pycache__/
 # 遊玩紀錄 / 本機筆記（可能含角色資訊）
 notes/
 tools/mods/*/.claude-plugin/types/
+.wrangler/

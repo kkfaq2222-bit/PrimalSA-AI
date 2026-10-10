@@ -1,0 +1,2414 @@
+[
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "102-sea30",
+  "truth": "對話框",
+  "mark_truth": null,
+  "sec": 0.8744621276855469,
+  "bytes": 447681,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "對話框",
+      "probabilities": {
+       "對話框": 0.9729,
+       "獲得物品或獎勵提示": 0.0023,
+       "主畫面閒置": 0.0056,
+       "背包或倉庫面板": 0.002,
+       "寵物面板": 0.0019,
+       "傳送地圖面板": 0.0018,
+       "輔助設定面板": 0.0016,
+       "任務詳情面板": 0.0024,
+       "載入畫面": 0.002,
+       "戰鬥中": 0.0019,
+       "答題或驗證視窗": 0.0028,
+       "其他": 0.0028
+      },
+      "confidence": 0.9418
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.8487
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0074
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "209-chief2",
+  "truth": "對話框",
+  "mark_truth": null,
+  "sec": 0.8938949108123779,
+  "bytes": 496171,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "對話框",
+      "probabilities": {
+       "對話框": 0.9673,
+       "獲得物品或獎勵提示": 0.0022,
+       "主畫面閒置": 0.0049,
+       "背包或倉庫面板": 0.002,
+       "寵物面板": 0.002,
+       "傳送地圖面板": 0.0017,
+       "輔助設定面板": 0.0018,
+       "任務詳情面板": 0.0086,
+       "載入畫面": 0.0021,
+       "戰鬥中": 0.0019,
+       "答題或驗證視窗": 0.003,
+       "其他": 0.0025
+      },
+      "confidence": 0.9299
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.6402
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0071
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "213-track",
+  "truth": "對話框",
+  "mark_truth": null,
+  "sec": 0.718034029006958,
+  "bytes": 454341,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "對話框",
+      "probabilities": {
+       "對話框": 0.9696,
+       "獲得物品或獎勵提示": 0.0024,
+       "主畫面閒置": 0.0063,
+       "背包或倉庫面板": 0.0022,
+       "寵物面板": 0.0022,
+       "傳送地圖面板": 0.0021,
+       "輔助設定面板": 0.0017,
+       "任務詳情面板": 0.0028,
+       "載入畫面": 0.0024,
+       "戰鬥中": 0.0021,
+       "答題或驗證視窗": 0.0031,
+       "其他": 0.0031
+      },
+      "confidence": 0.9348
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.806
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0085
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "97-try-abu20",
+  "truth": "對話框",
+  "mark_truth": null,
+  "sec": 0.9221110343933105,
+  "bytes": 440891,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "對話框",
+      "probabilities": {
+       "對話框": 0.975,
+       "獲得物品或獎勵提示": 0.0021,
+       "主畫面閒置": 0.0047,
+       "背包或倉庫面板": 0.0018,
+       "寵物面板": 0.0019,
+       "傳送地圖面板": 0.0016,
+       "輔助設定面板": 0.0015,
+       "任務詳情面板": 0.0026,
+       "載入畫面": 0.0019,
+       "戰鬥中": 0.0018,
+       "答題或驗證視窗": 0.0025,
+       "其他": 0.0026
+      },
+      "confidence": 0.9463
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.725
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0084
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "94-now",
+  "truth": "主畫面閒置",
+  "mark_truth": false,
+  "sec": 1.2169275283813477,
+  "bytes": 977903,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.0383,
+       "獲得物品或獎勵提示": 0.1266,
+       "主畫面閒置": 0.6561,
+       "背包或倉庫面板": 0.0029,
+       "寵物面板": 0.0024,
+       "傳送地圖面板": 0.0307,
+       "輔助設定面板": 0.0016,
+       "任務詳情面板": 0.1111,
+       "載入畫面": 0.0019,
+       "戰鬥中": 0.0095,
+       "答題或驗證視窗": 0.0018,
+       "其他": 0.0171
+      },
+      "confidence": 0.4127
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0769
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0056
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "200-start",
+  "truth": "主畫面閒置",
+  "mark_truth": true,
+  "sec": 0.8307454586029053,
+  "bytes": 628885,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.0274,
+       "獲得物品或獎勵提示": 0.1138,
+       "主畫面閒置": 0.752,
+       "背包或倉庫面板": 0.004,
+       "寵物面板": 0.0024,
+       "傳送地圖面板": 0.0212,
+       "輔助設定面板": 0.0021,
+       "任務詳情面板": 0.0452,
+       "載入畫面": 0.0028,
+       "戰鬥中": 0.0057,
+       "答題或驗證視窗": 0.0029,
+       "其他": 0.0205
+      },
+      "confidence": 0.5443
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.883
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0062
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "130-before",
+  "truth": "主畫面閒置",
+  "mark_truth": true,
+  "sec": 0.9573686122894287,
+  "bytes": 677197,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.1143,
+       "獲得物品或獎勵提示": 0.0042,
+       "主畫面閒置": 0.6199,
+       "背包或倉庫面板": 0.0053,
+       "寵物面板": 0.0031,
+       "傳送地圖面板": 0.024,
+       "輔助設定面板": 0.003,
+       "任務詳情面板": 0.1748,
+       "載入畫面": 0.0037,
+       "戰鬥中": 0.008,
+       "答題或驗證視窗": 0.0037,
+       "其他": 0.036
+      },
+      "confidence": 0.3781
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.8767
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.007
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "168-closed",
+  "truth": "主畫面閒置",
+  "mark_truth": true,
+  "sec": 0.7385625839233398,
+  "bytes": 625888,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.0518,
+       "獲得物品或獎勵提示": 0.0048,
+       "主畫面閒置": 0.7795,
+       "背包或倉庫面板": 0.0047,
+       "寵物面板": 0.0032,
+       "傳送地圖面板": 0.0079,
+       "輔助設定面板": 0.0028,
+       "任務詳情面板": 0.1,
+       "載入畫面": 0.0039,
+       "戰鬥中": 0.008,
+       "答題或驗證視窗": 0.0039,
+       "其他": 0.0295
+      },
+      "confidence": 0.587
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.8955
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0065
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "132-manor",
+  "truth": "主畫面閒置",
+  "mark_truth": false,
+  "sec": 1.048105239868164,
+  "bytes": 1003206,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.167,
+       "獲得物品或獎勵提示": 0.0023,
+       "主畫面閒置": 0.5095,
+       "背包或倉庫面板": 0.0031,
+       "寵物面板": 0.003,
+       "傳送地圖面板": 0.0244,
+       "輔助設定面板": 0.0017,
+       "任務詳情面板": 0.2645,
+       "載入畫面": 0.002,
+       "戰鬥中": 0.0034,
+       "答題或驗證視窗": 0.0021,
+       "其他": 0.017
+      },
+      "confidence": 0.3
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.1585
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0074
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "210-chief3",
+  "truth": "獲得物品或獎勵提示",
+  "mark_truth": null,
+  "sec": 1.0492217540740967,
+  "bytes": 684737,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "獲得物品或獎勵提示",
+      "probabilities": {
+       "對話框": 0.017,
+       "獲得物品或獎勵提示": 0.9352,
+       "主畫面閒置": 0.0206,
+       "背包或倉庫面板": 0.0028,
+       "寵物面板": 0.0026,
+       "傳送地圖面板": 0.0031,
+       "輔助設定面板": 0.001,
+       "任務詳情面板": 0.0048,
+       "載入畫面": 0.0014,
+       "戰鬥中": 0.0058,
+       "答題或驗證視窗": 0.0015,
+       "其他": 0.0042
+      },
+      "confidence": 0.864
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.1107
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0056
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "03-after-use",
+  "truth": "獲得物品或獎勵提示",
+  "mark_truth": null,
+  "sec": 0.9274365901947021,
+  "bytes": 633434,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "背包或倉庫面板",
+      "probabilities": {
+       "對話框": 0.0084,
+       "獲得物品或獎勵提示": 0.1544,
+       "主畫面閒置": 0.009,
+       "背包或倉庫面板": 0.7874,
+       "寵物面板": 0.0102,
+       "傳送地圖面板": 0.0045,
+       "輔助設定面板": 0.0017,
+       "任務詳情面板": 0.0046,
+       "載入畫面": 0.0015,
+       "戰鬥中": 0.0027,
+       "答題或驗證視窗": 0.0016,
+       "其他": 0.014
+      },
+      "confidence": 0.612
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0293
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.007
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "22-dkb02-bag",
+  "truth": "背包或倉庫面板",
+  "mark_truth": null,
+  "sec": 0.8295440673828125,
+  "bytes": 552370,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "背包或倉庫面板",
+      "probabilities": {
+       "對話框": 0.0043,
+       "獲得物品或獎勵提示": 0.0287,
+       "主畫面閒置": 0.0056,
+       "背包或倉庫面板": 0.9042,
+       "寵物面板": 0.0293,
+       "傳送地圖面板": 0.0026,
+       "輔助設定面板": 0.0018,
+       "任務詳情面板": 0.0029,
+       "載入畫面": 0.0021,
+       "戰鬥中": 0.003,
+       "答題或驗證視窗": 0.0025,
+       "其他": 0.013
+      },
+      "confidence": 0.8032
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0148
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.007
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "70-depot",
+  "truth": "背包或倉庫面板",
+  "mark_truth": null,
+  "sec": 1.215747356414795,
+  "bytes": 468365,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "背包或倉庫面板",
+      "probabilities": {
+       "對話框": 0.0023,
+       "獲得物品或獎勵提示": 0.0024,
+       "主畫面閒置": 0.0028,
+       "背包或倉庫面板": 0.9756,
+       "寵物面板": 0.002,
+       "傳送地圖面板": 0.0017,
+       "輔助設定面板": 0.0015,
+       "任務詳情面板": 0.0014,
+       "載入畫面": 0.0017,
+       "戰鬥中": 0.0016,
+       "答題或驗證視窗": 0.0024,
+       "其他": 0.0046
+      },
+      "confidence": 0.9475
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0354
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0067
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "50-home",
+  "truth": "寵物面板",
+  "mark_truth": null,
+  "sec": 0.8498587608337402,
+  "bytes": 624145,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "寵物面板",
+      "probabilities": {
+       "對話框": 0.0033,
+       "獲得物品或獎勵提示": 0.0037,
+       "主畫面閒置": 0.0033,
+       "背包或倉庫面板": 0.0028,
+       "寵物面板": 0.9644,
+       "傳送地圖面板": 0.0021,
+       "輔助設定面板": 0.0025,
+       "任務詳情面板": 0.0022,
+       "載入畫面": 0.0026,
+       "戰鬥中": 0.0025,
+       "答題或驗證視窗": 0.0037,
+       "其他": 0.0069
+      },
+      "confidence": 0.9238
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0166
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0055
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "90-tp-nis",
+  "truth": "傳送地圖面板",
+  "mark_truth": null,
+  "sec": 0.8575680255889893,
+  "bytes": 854493,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "傳送地圖面板",
+      "probabilities": {
+       "對話框": 0.0036,
+       "獲得物品或獎勵提示": 0.0027,
+       "主畫面閒置": 0.006,
+       "背包或倉庫面板": 0.0023,
+       "寵物面板": 0.0022,
+       "傳送地圖面板": 0.9686,
+       "輔助設定面板": 0.0019,
+       "任務詳情面板": 0.0018,
+       "載入畫面": 0.0024,
+       "戰鬥中": 0.0024,
+       "答題或驗證視窗": 0.0031,
+       "其他": 0.003
+      },
+      "confidence": 0.9326
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0727
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0069
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "93-tp-hero",
+  "truth": "傳送地圖面板",
+  "mark_truth": null,
+  "sec": 1.034487009048462,
+  "bytes": 864214,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "傳送地圖面板",
+      "probabilities": {
+       "對話框": 0.0048,
+       "獲得物品或獎勵提示": 0.0038,
+       "主畫面閒置": 0.0086,
+       "背包或倉庫面板": 0.0036,
+       "寵物面板": 0.0033,
+       "傳送地圖面板": 0.9543,
+       "輔助設定面板": 0.0029,
+       "任務詳情面板": 0.0028,
+       "載入畫面": 0.0034,
+       "戰鬥中": 0.0035,
+       "答題或驗證視窗": 0.004,
+       "其他": 0.005
+      },
+      "confidence": 0.9028
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0456
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0069
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "150-ass",
+  "truth": "輔助設定面板",
+  "mark_truth": null,
+  "sec": 0.5693721771240234,
+  "bytes": 276128,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "輔助設定面板",
+      "probabilities": {
+       "對話框": 0.0037,
+       "獲得物品或獎勵提示": 0.0032,
+       "主畫面閒置": 0.0052,
+       "背包或倉庫面板": 0.0026,
+       "寵物面板": 0.003,
+       "傳送地圖面板": 0.0023,
+       "輔助設定面板": 0.9062,
+       "任務詳情面板": 0.0022,
+       "載入畫面": 0.0023,
+       "戰鬥中": 0.0025,
+       "答題或驗證視窗": 0.0033,
+       "其他": 0.0635
+      },
+      "confidence": 0.8094
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0851
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0064
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "205-quest-detail",
+  "truth": "任務詳情面板",
+  "mark_truth": null,
+  "sec": 0.7581229209899902,
+  "bytes": 402556,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "任務詳情面板",
+      "probabilities": {
+       "對話框": 0.0061,
+       "獲得物品或獎勵提示": 0.0036,
+       "主畫面閒置": 0.0053,
+       "背包或倉庫面板": 0.0034,
+       "寵物面板": 0.0035,
+       "傳送地圖面板": 0.0032,
+       "輔助設定面板": 0.0029,
+       "任務詳情面板": 0.9563,
+       "載入畫面": 0.0033,
+       "戰鬥中": 0.0035,
+       "答題或驗證視窗": 0.0042,
+       "其他": 0.0047
+      },
+      "confidence": 0.907
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0206
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0062
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "100-abu-04",
+  "truth": "載入畫面",
+  "mark_truth": null,
+  "sec": 1.1070122718811035,
+  "bytes": 868646,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "載入畫面",
+      "probabilities": {
+       "對話框": 0.0056,
+       "獲得物品或獎勵提示": 0.004,
+       "主畫面閒置": 0.0127,
+       "背包或倉庫面板": 0.0046,
+       "寵物面板": 0.0035,
+       "傳送地圖面板": 0.0034,
+       "輔助設定面板": 0.0033,
+       "任務詳情面板": 0.0034,
+       "載入畫面": 0.9429,
+       "戰鬥中": 0.0048,
+       "答題或驗證視窗": 0.0053,
+       "其他": 0.0065
+      },
+      "confidence": 0.8794
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0106
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0071
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "140-setting",
+  "truth": "其他",
+  "mark_truth": null,
+  "sec": 0.7808043956756592,
+  "bytes": 568335,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "其他",
+      "probabilities": {
+       "對話框": 0.0064,
+       "獲得物品或獎勵提示": 0.0044,
+       "主畫面閒置": 0.0246,
+       "背包或倉庫面板": 0.0046,
+       "寵物面板": 0.0048,
+       "傳送地圖面板": 0.0058,
+       "輔助設定面板": 0.0108,
+       "任務詳情面板": 0.0046,
+       "載入畫面": 0.0044,
+       "戰鬥中": 0.007,
+       "答題或驗證視窗": 0.005,
+       "其他": 0.9176
+      },
+      "confidence": 0.8288
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0099
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0056
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef-flash",
+  "name": "20-switch",
+  "truth": "其他",
+  "mark_truth": null,
+  "sec": 0.8650643825531006,
+  "bytes": 448846,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "其他",
+      "probabilities": {
+       "對話框": 0.0047,
+       "獲得物品或獎勵提示": 0.0091,
+       "主畫面閒置": 0.0256,
+       "背包或倉庫面板": 0.0017,
+       "寵物面板": 0.0039,
+       "傳送地圖面板": 0.0055,
+       "輔助設定面板": 0.0019,
+       "任務詳情面板": 0.0056,
+       "載入畫面": 0.002,
+       "戰鬥中": 0.0021,
+       "答題或驗證視窗": 0.0022,
+       "其他": 0.9357
+      },
+      "confidence": 0.8651
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0696
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0062
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "track",
+  "model": "clef-flash",
+  "name": "130-before",
+  "truth": "初入石器",
+  "sec": 0.7285861968994141,
+  "bytes": 74808,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "title": {
+      "type": "choice",
+      "choice": "初入石器",
+      "probabilities": {
+       "初入石器": 0.9619,
+       "覲見村長": 0.0083,
+       "成人儀式": 0.0064,
+       "伐木證書": 0.0083,
+       "黃金羚羊之謎": 0.0066,
+       "沒有任務": 0.0085
+      },
+      "confidence": 0.9107
+     },
+     "has_wood": {
+      "type": "noul",
+      "noul": 0.0047
+     }
+    },
+    "usage": {
+     "input_tokens": 392,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "track",
+  "model": "clef-flash",
+  "name": "211-after",
+  "truth": "覲見村長",
+  "sec": 0.4825315475463867,
+  "bytes": 77491,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "title": {
+      "type": "choice",
+      "choice": "覲見村長",
+      "probabilities": {
+       "初入石器": 0.0038,
+       "覲見村長": 0.9803,
+       "成人儀式": 0.0038,
+       "伐木證書": 0.0041,
+       "黃金羚羊之謎": 0.0034,
+       "沒有任務": 0.0046
+      },
+      "confidence": 0.9532
+     },
+     "has_wood": {
+      "type": "noul",
+      "noul": 0.0047
+     }
+    },
+    "usage": {
+     "input_tokens": 392,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "track",
+  "model": "clef-flash",
+  "name": "215-done2",
+  "truth": "成人儀式",
+  "sec": 0.49295926094055176,
+  "bytes": 73981,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "title": {
+      "type": "choice",
+      "choice": "成人儀式",
+      "probabilities": {
+       "初入石器": 0.0047,
+       "覲見村長": 0.0054,
+       "成人儀式": 0.9745,
+       "伐木證書": 0.0055,
+       "黃金羚羊之謎": 0.0046,
+       "沒有任務": 0.0053
+      },
+      "confidence": 0.9397
+     },
+     "has_wood": {
+      "type": "noul",
+      "noul": 0.0052
+     }
+    },
+    "usage": {
+     "input_tokens": 392,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "track",
+  "model": "clef-flash",
+  "name": "212-chief4",
+  "truth": "覲見村長",
+  "sec": 0.4561734199523926,
+  "bytes": 77495,
+  "out": {
+   "result": {
+    "model": "clef-flash",
+    "answers": {
+     "title": {
+      "type": "choice",
+      "choice": "覲見村長",
+      "probabilities": {
+       "初入石器": 0.0036,
+       "覲見村長": 0.9809,
+       "成人儀式": 0.0036,
+       "伐木證書": 0.004,
+       "黃金羚羊之謎": 0.0034,
+       "沒有任務": 0.0045
+      },
+      "confidence": 0.9547
+     },
+     "has_wood": {
+      "type": "noul",
+      "noul": 0.0047
+     }
+    },
+    "usage": {
+     "input_tokens": 392,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "102-sea30",
+  "truth": "對話框",
+  "mark_truth": null,
+  "sec": 1.6017084121704102,
+  "bytes": 447681,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "對話框",
+      "probabilities": {
+       "對話框": 0.9542,
+       "獲得物品或獎勵提示": 0.0031,
+       "主畫面閒置": 0.0112,
+       "背包或倉庫面板": 0.0023,
+       "寵物面板": 0.0029,
+       "傳送地圖面板": 0.0024,
+       "輔助設定面板": 0.0026,
+       "任務詳情面板": 0.0058,
+       "載入畫面": 0.0035,
+       "戰鬥中": 0.0038,
+       "答題或驗證視窗": 0.0043,
+       "其他": 0.0039
+      },
+      "confidence": 0.9026
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.9514
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0158
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "209-chief2",
+  "truth": "對話框",
+  "mark_truth": null,
+  "sec": 1.3495185375213623,
+  "bytes": 496171,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "對話框",
+      "probabilities": {
+       "對話框": 0.9548,
+       "獲得物品或獎勵提示": 0.0031,
+       "主畫面閒置": 0.0103,
+       "背包或倉庫面板": 0.0022,
+       "寵物面板": 0.0028,
+       "傳送地圖面板": 0.0023,
+       "輔助設定面板": 0.0025,
+       "任務詳情面板": 0.0072,
+       "載入畫面": 0.0034,
+       "戰鬥中": 0.0037,
+       "答題或驗證視窗": 0.004,
+       "其他": 0.0037
+      },
+      "confidence": 0.9039
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.9398
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0163
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "213-track",
+  "truth": "對話框",
+  "mark_truth": null,
+  "sec": 1.3900814056396484,
+  "bytes": 454341,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "對話框",
+      "probabilities": {
+       "對話框": 0.9476,
+       "獲得物品或獎勵提示": 0.0036,
+       "主畫面閒置": 0.0131,
+       "背包或倉庫面板": 0.0024,
+       "寵物面板": 0.0029,
+       "傳送地圖面板": 0.0027,
+       "輔助設定面板": 0.0026,
+       "任務詳情面板": 0.0056,
+       "載入畫面": 0.0055,
+       "戰鬥中": 0.0045,
+       "答題或驗證視窗": 0.0042,
+       "其他": 0.0053
+      },
+      "confidence": 0.8891
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.944
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0166
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "97-try-abu20",
+  "truth": "對話框",
+  "mark_truth": null,
+  "sec": 2.8234477043151855,
+  "bytes": 440891,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "對話框",
+      "probabilities": {
+       "對話框": 0.9577,
+       "獲得物品或獎勵提示": 0.003,
+       "主畫面閒置": 0.0098,
+       "背包或倉庫面板": 0.0023,
+       "寵物面板": 0.0027,
+       "傳送地圖面板": 0.0023,
+       "輔助設定面板": 0.0026,
+       "任務詳情面板": 0.0048,
+       "載入畫面": 0.0034,
+       "戰鬥中": 0.0037,
+       "答題或驗證視窗": 0.0042,
+       "其他": 0.0035
+      },
+      "confidence": 0.9099
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.9567
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0156
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "94-now",
+  "truth": "主畫面閒置",
+  "mark_truth": false,
+  "sec": 1.03497314453125,
+  "bytes": 977903,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.0268,
+       "獲得物品或獎勵提示": 0.0109,
+       "主畫面閒置": 0.7756,
+       "背包或倉庫面板": 0.0043,
+       "寵物面板": 0.0042,
+       "傳送地圖面板": 0.021,
+       "輔助設定面板": 0.0027,
+       "任務詳情面板": 0.1208,
+       "載入畫面": 0.0044,
+       "戰鬥中": 0.0097,
+       "答題或驗證視窗": 0.0046,
+       "其他": 0.015
+      },
+      "confidence": 0.5832
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0456
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0188
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "200-start",
+  "truth": "主畫面閒置",
+  "mark_truth": true,
+  "sec": 1.396367073059082,
+  "bytes": 628885,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.068,
+       "獲得物品或獎勵提示": 0.0162,
+       "主畫面閒置": 0.5152,
+       "背包或倉庫面板": 0.0069,
+       "寵物面板": 0.0044,
+       "傳送地圖面板": 0.0133,
+       "輔助設定面板": 0.0027,
+       "任務詳情面板": 0.3406,
+       "載入畫面": 0.0044,
+       "戰鬥中": 0.0108,
+       "答題或驗證視窗": 0.0052,
+       "其他": 0.0123
+      },
+      "confidence": 0.3312
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.9102
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0198
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "130-before",
+  "truth": "主畫面閒置",
+  "mark_truth": true,
+  "sec": 1.6881742477416992,
+  "bytes": 677197,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.1107,
+       "獲得物品或獎勵提示": 0.0109,
+       "主畫面閒置": 0.6955,
+       "背包或倉庫面板": 0.0061,
+       "寵物面板": 0.0056,
+       "傳送地圖面板": 0.0148,
+       "輔助設定面板": 0.0041,
+       "任務詳情面板": 0.1102,
+       "載入畫面": 0.0065,
+       "戰鬥中": 0.0148,
+       "答題或驗證視窗": 0.0076,
+       "其他": 0.0132
+      },
+      "confidence": 0.4644
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.8791
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0222
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "168-closed",
+  "truth": "主畫面閒置",
+  "mark_truth": true,
+  "sec": 1.6716485023498535,
+  "bytes": 625888,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.075,
+       "獲得物品或獎勵提示": 0.0152,
+       "主畫面閒置": 0.7345,
+       "背包或倉庫面板": 0.0169,
+       "寵物面板": 0.0072,
+       "傳送地圖面板": 0.0142,
+       "輔助設定面板": 0.0049,
+       "任務詳情面板": 0.0807,
+       "載入畫面": 0.0075,
+       "戰鬥中": 0.0185,
+       "答題或驗證視窗": 0.0094,
+       "其他": 0.016
+      },
+      "confidence": 0.5124
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.9382
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0201
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "132-manor",
+  "truth": "主畫面閒置",
+  "mark_truth": false,
+  "sec": 1.996551752090454,
+  "bytes": 1003206,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "主畫面閒置",
+      "probabilities": {
+       "對話框": 0.0175,
+       "獲得物品或獎勵提示": 0.007,
+       "主畫面閒置": 0.8852,
+       "背包或倉庫面板": 0.0038,
+       "寵物面板": 0.0056,
+       "傳送地圖面板": 0.0128,
+       "輔助設定面板": 0.0034,
+       "任務詳情面板": 0.0385,
+       "載入畫面": 0.0049,
+       "戰鬥中": 0.0061,
+       "答題或驗證視窗": 0.0051,
+       "其他": 0.0101
+      },
+      "confidence": 0.7663
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0638
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0167
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "210-chief3",
+  "truth": "獲得物品或獎勵提示",
+  "mark_truth": null,
+  "sec": 1.3577396869659424,
+  "bytes": 684737,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "獲得物品或獎勵提示",
+      "probabilities": {
+       "對話框": 0.045,
+       "獲得物品或獎勵提示": 0.808,
+       "主畫面閒置": 0.088,
+       "背包或倉庫面板": 0.0038,
+       "寵物面板": 0.0045,
+       "傳送地圖面板": 0.0065,
+       "輔助設定面板": 0.0023,
+       "任務詳情面板": 0.0184,
+       "載入畫面": 0.0032,
+       "戰鬥中": 0.0099,
+       "答題或驗證視窗": 0.004,
+       "其他": 0.0064
+      },
+      "confidence": 0.6326
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0893
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0137
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "03-after-use",
+  "truth": "獲得物品或獎勵提示",
+  "mark_truth": null,
+  "sec": 1.8100614547729492,
+  "bytes": 633434,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "背包或倉庫面板",
+      "probabilities": {
+       "對話框": 0.0161,
+       "獲得物品或獎勵提示": 0.2364,
+       "主畫面閒置": 0.0082,
+       "背包或倉庫面板": 0.6966,
+       "寵物面板": 0.0056,
+       "傳送地圖面板": 0.0044,
+       "輔助設定面板": 0.0026,
+       "任務詳情面板": 0.0065,
+       "載入畫面": 0.0036,
+       "戰鬥中": 0.0045,
+       "答題或驗證視窗": 0.0045,
+       "其他": 0.011
+      },
+      "confidence": 0.5001
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0498
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0103
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "22-dkb02-bag",
+  "truth": "背包或倉庫面板",
+  "mark_truth": null,
+  "sec": 1.8403136730194092,
+  "bytes": 552370,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "背包或倉庫面板",
+      "probabilities": {
+       "對話框": 0.0118,
+       "獲得物品或獎勵提示": 0.0159,
+       "主畫面閒置": 0.0084,
+       "背包或倉庫面板": 0.9245,
+       "寵物面板": 0.0061,
+       "傳送地圖面板": 0.0031,
+       "輔助設定面板": 0.0025,
+       "任務詳情面板": 0.0053,
+       "載入畫面": 0.0036,
+       "戰鬥中": 0.0043,
+       "答題或驗證視窗": 0.0049,
+       "其他": 0.0096
+      },
+      "confidence": 0.8422
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0217
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0094
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "70-depot",
+  "truth": "背包或倉庫面板",
+  "mark_truth": null,
+  "sec": 1.974846601486206,
+  "bytes": 468365,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "背包或倉庫面板",
+      "probabilities": {
+       "對話框": 0.0047,
+       "獲得物品或獎勵提示": 0.0054,
+       "主畫面閒置": 0.0045,
+       "背包或倉庫面板": 0.9627,
+       "寵物面板": 0.0026,
+       "傳送地圖面板": 0.002,
+       "輔助設定面板": 0.0018,
+       "任務詳情面板": 0.0029,
+       "載入畫面": 0.0025,
+       "戰鬥中": 0.0023,
+       "答題或驗證視窗": 0.0033,
+       "其他": 0.0053
+      },
+      "confidence": 0.9202
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0172
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0087
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "50-home",
+  "truth": "寵物面板",
+  "mark_truth": null,
+  "sec": 1.8179857730865479,
+  "bytes": 624145,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "寵物面板",
+      "probabilities": {
+       "對話框": 0.0048,
+       "獲得物品或獎勵提示": 0.0027,
+       "主畫面閒置": 0.0044,
+       "背包或倉庫面板": 0.0028,
+       "寵物面板": 0.9632,
+       "傳送地圖面板": 0.0023,
+       "輔助設定面板": 0.0022,
+       "任務詳情面板": 0.0035,
+       "載入畫面": 0.003,
+       "戰鬥中": 0.003,
+       "答題或驗證視窗": 0.0032,
+       "其他": 0.0049
+      },
+      "confidence": 0.9214
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0191
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0107
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "90-tp-nis",
+  "truth": "傳送地圖面板",
+  "mark_truth": null,
+  "sec": 1.4177839756011963,
+  "bytes": 854493,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "傳送地圖面板",
+      "probabilities": {
+       "對話框": 0.0029,
+       "獲得物品或獎勵提示": 0.0021,
+       "主畫面閒置": 0.0071,
+       "背包或倉庫面板": 0.0019,
+       "寵物面板": 0.0022,
+       "傳送地圖面板": 0.9671,
+       "輔助設定面板": 0.0018,
+       "任務詳情面板": 0.0032,
+       "載入畫面": 0.0026,
+       "戰鬥中": 0.0024,
+       "答題或驗證視窗": 0.0031,
+       "其他": 0.0036
+      },
+      "confidence": 0.9295
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0358
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0117
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "93-tp-hero",
+  "truth": "傳送地圖面板",
+  "mark_truth": null,
+  "sec": 1.9176294803619385,
+  "bytes": 864214,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "傳送地圖面板",
+      "probabilities": {
+       "對話框": 0.0033,
+       "獲得物品或獎勵提示": 0.0023,
+       "主畫面閒置": 0.0093,
+       "背包或倉庫面板": 0.0021,
+       "寵物面板": 0.0023,
+       "傳送地圖面板": 0.9609,
+       "輔助設定面板": 0.0019,
+       "任務詳情面板": 0.0039,
+       "載入畫面": 0.003,
+       "戰鬥中": 0.003,
+       "答題或驗證視窗": 0.0036,
+       "其他": 0.0044
+      },
+      "confidence": 0.9165
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0277
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.012
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "150-ass",
+  "truth": "輔助設定面板",
+  "mark_truth": null,
+  "sec": 1.4003560543060303,
+  "bytes": 276128,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "輔助設定面板",
+      "probabilities": {
+       "對話框": 0.0025,
+       "獲得物品或獎勵提示": 0.0023,
+       "主畫面閒置": 0.0047,
+       "背包或倉庫面板": 0.0018,
+       "寵物面板": 0.0025,
+       "傳送地圖面板": 0.0022,
+       "輔助設定面板": 0.8855,
+       "任務詳情面板": 0.0034,
+       "載入畫面": 0.0027,
+       "戰鬥中": 0.0033,
+       "答題或驗證視窗": 0.0034,
+       "其他": 0.0857
+      },
+      "confidence": 0.7727
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0229
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0119
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "205-quest-detail",
+  "truth": "任務詳情面板",
+  "mark_truth": null,
+  "sec": 1.6419684886932373,
+  "bytes": 402556,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "任務詳情面板",
+      "probabilities": {
+       "對話框": 0.0056,
+       "獲得物品或獎勵提示": 0.0024,
+       "主畫面閒置": 0.0047,
+       "背包或倉庫面板": 0.0021,
+       "寵物面板": 0.0025,
+       "傳送地圖面板": 0.0025,
+       "輔助設定面板": 0.0021,
+       "任務詳情面板": 0.9668,
+       "載入畫面": 0.0027,
+       "戰鬥中": 0.0025,
+       "答題或驗證視窗": 0.0032,
+       "其他": 0.0029
+      },
+      "confidence": 0.9288
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0316
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0126
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "100-abu-04",
+  "truth": "載入畫面",
+  "mark_truth": null,
+  "sec": 2.3240225315093994,
+  "bytes": 868646,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "載入畫面",
+      "probabilities": {
+       "對話框": 0.0034,
+       "獲得物品或獎勵提示": 0.0027,
+       "主畫面閒置": 0.0133,
+       "背包或倉庫面板": 0.002,
+       "寵物面板": 0.0025,
+       "傳送地圖面板": 0.0023,
+       "輔助設定面板": 0.0021,
+       "任務詳情面板": 0.0029,
+       "載入畫面": 0.9537,
+       "戰鬥中": 0.006,
+       "答題或驗證視窗": 0.0036,
+       "其他": 0.0055
+      },
+      "confidence": 0.9016
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0182
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0158
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "140-setting",
+  "truth": "其他",
+  "mark_truth": null,
+  "sec": 2.038219928741455,
+  "bytes": 568335,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "其他",
+      "probabilities": {
+       "對話框": 0.0052,
+       "獲得物品或獎勵提示": 0.0044,
+       "主畫面閒置": 0.0101,
+       "背包或倉庫面板": 0.0034,
+       "寵物面板": 0.0044,
+       "傳送地圖面板": 0.0049,
+       "輔助設定面板": 0.0068,
+       "任務詳情面板": 0.0069,
+       "載入畫面": 0.0049,
+       "戰鬥中": 0.0056,
+       "答題或驗證視窗": 0.006,
+       "其他": 0.9374
+      },
+      "confidence": 0.8681
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0278
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0135
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "scene",
+  "model": "clef",
+  "name": "20-switch",
+  "truth": "其他",
+  "mark_truth": null,
+  "sec": 2.0681045055389404,
+  "bytes": 448846,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "scene": {
+      "type": "choice",
+      "choice": "其他",
+      "probabilities": {
+       "對話框": 0.0097,
+       "獲得物品或獎勵提示": 0.0052,
+       "主畫面閒置": 0.0127,
+       "背包或倉庫面板": 0.0029,
+       "寵物面板": 0.0053,
+       "傳送地圖面板": 0.0054,
+       "輔助設定面板": 0.0038,
+       "任務詳情面板": 0.008,
+       "載入畫面": 0.0047,
+       "戰鬥中": 0.005,
+       "答題或驗證視窗": 0.0061,
+       "其他": 0.9312
+      },
+      "confidence": 0.8556
+     },
+     "mark": {
+      "type": "noul",
+      "noul": 0.0271
+     },
+     "verify": {
+      "type": "noul",
+      "noul": 0.0131
+     }
+    },
+    "usage": {
+     "input_tokens": 1169,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "track",
+  "model": "clef",
+  "name": "130-before",
+  "truth": "初入石器",
+  "sec": 2.547624349594116,
+  "bytes": 74808,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "title": {
+      "type": "choice",
+      "choice": "初入石器",
+      "probabilities": {
+       "初入石器": 0.9783,
+       "覲見村長": 0.0046,
+       "成人儀式": 0.0041,
+       "伐木證書": 0.0039,
+       "黃金羚羊之謎": 0.0031,
+       "沒有任務": 0.006
+      },
+      "confidence": 0.9486
+     },
+     "has_wood": {
+      "type": "noul",
+      "noul": 0.0161
+     }
+    },
+    "usage": {
+     "input_tokens": 392,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "track",
+  "model": "clef",
+  "name": "211-after",
+  "truth": "覲見村長",
+  "sec": 1.212226152420044,
+  "bytes": 77491,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "title": {
+      "type": "choice",
+      "choice": "覲見村長",
+      "probabilities": {
+       "初入石器": 0.003,
+       "覲見村長": 0.984,
+       "成人儀式": 0.0037,
+       "伐木證書": 0.0024,
+       "黃金羚羊之謎": 0.0024,
+       "沒有任務": 0.0045
+      },
+      "confidence": 0.9619
+     },
+     "has_wood": {
+      "type": "noul",
+      "noul": 0.0107
+     }
+    },
+    "usage": {
+     "input_tokens": 392,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "track",
+  "model": "clef",
+  "name": "215-done2",
+  "truth": "成人儀式",
+  "sec": 1.869847059249878,
+  "bytes": 73981,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "title": {
+      "type": "choice",
+      "choice": "成人儀式",
+      "probabilities": {
+       "初入石器": 0.0024,
+       "覲見村長": 0.0026,
+       "成人儀式": 0.988,
+       "伐木證書": 0.0019,
+       "黃金羚羊之謎": 0.0019,
+       "沒有任務": 0.0032
+      },
+      "confidence": 0.9715
+     },
+     "has_wood": {
+      "type": "noul",
+      "noul": 0.0108
+     }
+    },
+    "usage": {
+     "input_tokens": 392,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ },
+ {
+  "task": "track",
+  "model": "clef",
+  "name": "212-chief4",
+  "truth": "覲見村長",
+  "sec": 0.8305063247680664,
+  "bytes": 77495,
+  "out": {
+   "result": {
+    "model": "clef",
+    "answers": {
+     "title": {
+      "type": "choice",
+      "choice": "覲見村長",
+      "probabilities": {
+       "初入石器": 0.003,
+       "覲見村長": 0.9835,
+       "成人儀式": 0.0037,
+       "伐木證書": 0.0026,
+       "黃金羚羊之謎": 0.0025,
+       "沒有任務": 0.0047
+      },
+      "confidence": 0.9608
+     },
+     "has_wood": {
+      "type": "noul",
+      "noul": 0.0108
+     }
+    },
+    "usage": {
+     "input_tokens": 392,
+     "output_tokens": 0
+    }
+   },
+   "success": true,
+   "errors": [],
+   "messages": []
+  }
+ }
+]

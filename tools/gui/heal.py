@@ -16,6 +16,7 @@ import sys
 import time
 
 import layout
+import netwatch
 from walk import LAYOUT, PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
 
 # 練級傳送分頁的目的地：名稱 → (截圖座標 x, y, 抵達地圖 ID)；見 .claude/skills/psa-game-ui/ui/transfer.md
@@ -267,12 +268,13 @@ def main() -> int:
     log(f'監看中：血條 < {a.hp}% 或魔條 < {a.mp}%（連續 {a.confirm} 次）就回村補血（Ctrl+C 結束）')
     end = time.time() + a.duration if a.duration else None
     while end is None or time.time() < end:
+        netwatch.guard('heal')           # 網路異常提示 → 點確定；登入畫面 → 自動按登錄重登（失敗才 exit 10；不輸入帳密）
         hits = 0
         for i in range(a.confirm):
             s = stat()
             r = low(s, a.hp, a.mp)
             if a.verbose:
-                log(f'HP {s.get("hp")} ({s.get("hpPct")}%) MP {s.get("mp")} ({s.get("mpPct")}%) → {r}')
+                log(f'HP {s.get("hp")} ({s.get("hpPct")}%) MP {s.get("mp")} ({s.get("mpPct")}%) → {r}', act=False)
             if not r:
                 break          # 不低或讀不到：這輪不算
             hits += 1

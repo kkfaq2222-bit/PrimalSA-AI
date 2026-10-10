@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 if hasattr(sys.stdout, 'reconfigure'):   # Windows 原生 Python 預設 cp950，中文會變亂碼
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 import winenv  # noqa: E402  平台判斷（WSL / Windows 原生）與路徑換算
+import actlog  # noqa: E402  操作 log（tools/.cache/actions.log，pane 顯示）
 import layout  # noqa: E402  依遊戲視窗大小選座標（2880×1659 / 1920×1017）
 import psa  # noqa: E402  知識庫查詢工具：load_maps() / grid(map_id) / T('Npc')
 
@@ -91,13 +92,17 @@ if LAYOUT == '1920x1017':
     SIG_NPC_DIALOG = '900,205,107,70,44/700,215,107,70,44'   # 對話框棕底（小護士實測；別的 NPC 版面不同時自己給 sig）
 
 
-def log(msg: str) -> None:
+def log(msg: str, act: bool = True) -> None:
+    """印出並寫進操作 log（類別 = 執行的腳本名 walk / heal / quest；act=False 只印）"""
     print(time.strftime('%H:%M:%S'), msg, flush=True)
+    if act:
+        actlog.add(Path(sys.argv[0]).stem or 'walk', msg)
 
 
-def gui(*args: str) -> str:
-    """直接呼叫 powershell.exe -File gui.ps1（不經 bash）；WSL / Windows 原生都通"""
-    r = winenv.run_ps('gui.ps1', *args)
+def gui(*args: str, note: str = '') -> str:
+    """直接呼叫 powershell.exe -File gui.ps1（不經 bash）；WSL / Windows 原生都通。
+    動到遊戲的指令 gui.ps1 會自己寫操作 log；note = 附註用途（-Note）"""
+    r = winenv.run_ps('gui.ps1', *args, *(['-Note', note] if note else []))
     out = (r.stdout.strip() or r.stderr.strip())
     if os.environ.get('WALK_DEBUG') or os.environ.get('HEAL_DEBUG'):
         print('   ', args[0], '→', out.replace('\n', ' | '), flush=True)
@@ -357,6 +362,7 @@ def walk_to(map_id: int, x: int, y: int, start: tuple[int, int] | None = None, e
     """走到 map_id 的 (x, y)。auto = 有通行格資料就 BFS 找路（每段 ≤ MAX_TILES）；沒資料就直線分段讓遊戲自己繞。
     slow = 每段都 OCR 驗證（step_to）。exit_map / end_sig / arrive 同 walk_path。"""
     cur = _start(map_id, start)
+    actlog.add('walk', f'{map_id} {cur[0]},{cur[1]} → {x},{y}')
     pts = plan(map_id, cur, (x, y)) if auto else None
     if auto:
         log(f'自動找路 {map_id}:{cur[0]},{cur[1]} → {x},{y}：'

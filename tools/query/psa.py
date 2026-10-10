@@ -12,6 +12,7 @@
   task  <名稱|ID>                      任務詳情
   route <起點地圖> <x> <y> <終點地圖> [x y]   跨地圖路線（只算地圖出口，不含付費傳送 / 交通 NPC）
   grid  <地圖> <x> <y> [半徑=15]        印出座標附近通行格：. 可走  ~ 水/懸崖  # 障礙  (空白) 無地面  @ 目標  N NPC  W 出口
+  petimg <名稱|ID>                     寵物圖檔路徑（頭像 / 靜態圖，猜謎比對用；先跑 tools/extract/pet_images.py 匯出）
   raw   <表名> <ID>                    印出某表某 ID 的原始 JSON
 
 maps.bin 格式：'PSAMAP1' + int32 數量 + [int32 id, uint16 寬, uint16 高, int32 長度, raw deflate(每格 1 byte，索引 = y*寬+x)]
@@ -394,6 +395,9 @@ def main():
     elif c == 'task': cmd_task(key)
     elif c == 'route': cmd_route(rest)
     elif c == 'grid': cmd_grid(rest)
+    elif c == 'petimg':
+        sys.path.insert(0, os.path.join(ROOT, 'tools', 'extract'))
+        import pet_images; pet_images.print_find(key)
     elif c == 'raw': cmd_raw(rest[0], rest[1])
     else: print(__doc__)
 

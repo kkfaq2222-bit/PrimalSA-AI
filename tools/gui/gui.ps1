@@ -14,6 +14,8 @@
 #   gui.ps1 waitstill <逾時毫秒> [開始等待毫秒]  點地面走路後等鏡頭停下來（印 still / nomove / timeout 毫秒）
 #   gui.ps1 ifok / ifnok <指令> ...   上一個 waitpix 成功 / 失敗才執行（seq 用），例：seq "click 462 335; waitpix 1500 948,445,229,197,155; ifok click 948 460"
 #   gui.ps1 seq "<動作>; <動作>; ..."  同一個行程連續執行多個動作，例：seq "click 763 760; wait 300; shot C:\\x.png"
+#   -Note "用途"                       任何指令後面可加，附註寫進操作 log（gui.sh 用環境變數 PSA_NOTE）
+#   操作 log：click / dclick / drag / key / max / end 會寫一行到 tools/.cache/actions.log（只留最新 100 行，psa-hud pane 顯示）；shot / pixel / wait* 不記
 #   gui.ps1 fg <指令> ...             用舊的前景模式執行（背景模式失靈時的備案），例：fg click 763 760、seq "fg; click ..."
 # 座標系：縮圖座標 × Scale = 客戶區像素座標。Scale 預設 2。
 # 背景模式（預設，2026-10-09 實測可用）：不把遊戲拉到前景，使用者可以繼續用其他視窗。
@@ -26,7 +28,7 @@
 #   - 鍵盤：PostMessage WM_KEYDOWN / WM_CHAR / WM_KEYUP，游標完全不動。
 # fg 模式：任務期間第一次 click / drag / key 時記下使用者原本的前景視窗與游標（存 tools/.cache/gui-session.txt），
 #          把遊戲拉到前景並一直留著；任務做完呼叫 end 才還原。
-param([string]$Cmd, [string]$A1, [string]$A2, [string]$A3, [string]$A4, [string]$A5, [double]$Scale = 2)
+param([string]$Cmd, [string]$A1, [string]$A2, [string]$A3, [string]$A4, [string]$A5, [double]$Scale = 2, [string]$Note = '')
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8  # 讓 WSL 收到的中文不變亂碼
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type @"
@@ -169,12 +171,25 @@ function BgKeys([string]$s) {
   }
 }
 
+# 操作 log：一行「HH:mm:ss 指令 參數 附註」，append 後裁到最新 100 行（失敗不影響操作；多程序偶爾掉一行可接受）
+$actLog = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.cache\actions.log'))
+function ActLog([string]$msg) {
+  try {
+    if ($Note) { $msg = "$msg $Note" }
+    New-Item -ItemType Directory -Force (Split-Path $actLog) | Out-Null
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::AppendAllText($actLog, "$(Get-Date -Format 'HH:mm:ss') $msg`n", $enc)
+    $lines = [IO.File]::ReadAllLines($actLog, $enc)
+    if ($lines.Count -gt 100) { [IO.File]::WriteAllText($actLog, (($lines | Select-Object -Last 100) -join "`n") + "`n", $enc) }
+  } catch { }
+}
+
 function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
  switch ($Cmd) {
   'fg' {
     # fg <指令> ...：這一個指令用前景模式；seq 裡單獨一個 fg 則之後都用前景模式
     if (-not $A1) { $script:Fg = $true; break }
-    $old = $script:Fg; $script:Fg = $true
+    $old = $script:Fg; $script:Fg = $true; ActLog "fg $A1"
     Invoke-Gui $A1 $A2 $A3 $A4 $A5
     $script:Fg = $old
   }
@@ -206,6 +221,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       BgMsg $up 0 $A1 $A2
       BgEnd
     }
+    ActLog "click $A1,$A2$(if ($A3) { ' ' + $A3 })"
     "click $A1,$A2" + $(if (-not $script:Fg -and [Guard]::Swallowed) { "（擋下使用者滑鼠 $([Guard]::Swallowed) 次）" })
   }
   'dclick' {
@@ -226,6 +242,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       BgMsg 0x0202 0 $A1 $A2
       BgEnd
     }
+    ActLog "dclick $A1,$A2"
     "dclick $A1,$A2"
   }
   'drag' {
@@ -248,14 +265,16 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       BgMsg 0x0202 0 $A3 $A4
       BgEnd
     }
+    ActLog "drag $A1,$A2 -> $A3,$A4"
     "drag $A1,$A2 -> $A3,$A4"
   }
   'max' {
     # 最大化一定會把遊戲帶到前景；做完要 end
-    Focus; [W]::ShowWindow($h, 3) | Out-Null; Start-Sleep -Milliseconds 800
+    ActLog 'max'; Focus; [W]::ShowWindow($h, 3) | Out-Null; Start-Sleep -Milliseconds 800
     [W]::GetClientRect($h, [ref]$r) | Out-Null; "client=$($r.R)x$($r.B)"
   }
   'key' {
+    ActLog "key $A1"
     if ($script:Fg) { Focus; [System.Windows.Forms.SendKeys]::SendWait($A1) } else { BgKeys $A1 }
     "key $A1"
   }
@@ -266,6 +285,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     [W]::SetCursorPos([int]$v[1], [int]$v[2]) | Out-Null
     $prev = [IntPtr][int64]$v[0]
     if ($prev -ne [IntPtr]::Zero -and $prev -ne $h) { SetFg $prev }
+    ActLog 'end 還原前景'
     "end: 已還原前景視窗與游標"
   }
   'pixel' {

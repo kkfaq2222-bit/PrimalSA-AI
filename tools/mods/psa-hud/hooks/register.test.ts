@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { format, statPathFromCwd } from './register'
+import { errEntries, errLine, format, logPathFromCwd, statPathFromCwd } from './register'
 
 const OK = '{"ok":true,"level":"0轉38級","hp":208,"mp":45,"petLevel":"0轉38級","petHp":434,"map":"奇努伊的海底通路","pos":"31401:91,29"}'
 
@@ -40,4 +40,34 @@ test('statPathFromCwd：WSL / Windows / Git Bash / 子目錄都換成 Windows �
   expect(statPathFromCwd('C:/games/PrimalSA-AI/tools')).toBe(want)
   expect(statPathFromCwd('/c/games/PrimalSA-AI')).toBe(want)
   expect(statPathFromCwd('/home/x/other')).toBeUndefined()
+})
+
+test('errEntries：只取最新 100 筆、最新在前、略過空行與壞行', () => {
+  const text = Array.from({ length: 120 }, (_, i) => JSON.stringify({ id: i + 1, ts: 0, error: `e${i + 1}`, fix: null, source: null })).join('\n') + '\n\nnot json\n'
+  const l = errEntries(text)
+  expect(l.length).toBe(100)
+  expect(l[0]?.id).toBe(120)
+  expect(l[99]?.id).toBe(21)
+})
+
+test('errLine：有改進顯示 → 改進，沒有標待改進', () => {
+  const ts = new Date(2026, 9, 9, 23, 18).getTime()
+  const a = errLine({ id: 9, ts, error: '空等', fix: '閒置結束', source: 'quest' })
+  expect(a.head).toBe('10/09 23:18 #9 [quest] 空等')
+  expect(a.fix).toBe('→ 改進：閒置結束')
+  expect(a.pending).toBe(false)
+  const b = errLine({ id: 10, ts, error: 'x', fix: null, source: null })
+  expect(b.fix).toBe('→ 待改進')
+  expect(b.pending).toBe(true)
+})
+
+test('format：OCR 讀不到數字時改用血條比例', () => {
+  expect(format({ ok: true, level: '0轉5級', hp: null, mp: null, hpPct: 80, mpPct: 100 })).toBe('0轉5級  HP 80%  MP 100%')
+  expect(format({ ok: true, hp: null, mp: null })).toContain('讀不到 HUD')
+})
+
+test('logPathFromCwd：WSL / Windows / Git Bash 都接到 tools/.cache/errlog.jsonl', () => {
+  expect(logPathFromCwd('/mnt/c/games/PrimalSA-AI/tools')).toBe('/mnt/c/games/PrimalSA-AI/tools/.cache/errlog.jsonl')
+  expect(logPathFromCwd('C:\\games\\PrimalSA-AI')).toBe('C:\\games\\PrimalSA-AI/tools/.cache/errlog.jsonl')
+  expect(logPathFromCwd('/home/x')).toBeUndefined()
 })

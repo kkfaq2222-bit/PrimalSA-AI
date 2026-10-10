@@ -38,7 +38,18 @@ uv run --no-project python tools/gui/walk.py 1000 81 66 [--exit 1005]   # 走到
 uv run --no-project python tools/gui/walk.py --path "1000:86,88 84,81 83,73 81,66" [--exit 1005]   # 照手動 waypoint 走（沒有通行格資料的圖用）
 uv run --no-project python tools/gui/walk.py --plan 1000 81 66 [--from 92,99]   # 只印找路結果（每段要點的截圖座標），不動
 uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40 --mp 20 --every 15]   # 回村補血再回練功點（約 21～24 秒）；--watch 看血條比例（%）自動補
+uv run --no-project python tools/gui/petwatch.py [--once] [--interval 30] [--target-level 77]   # 監測 5 人金布伊等級，≥ 門檻換回迪基格斯（內含補血檢查 + 維持原地遇敵，不要和 heal.py --watch 同跑）
 ```
+
+操作 log：click / dclick / drag / key / max / end（含 seq 裡的）以及 walk.py / heal.py / quest.py 的動作，都會寫一行到 `tools/.cache/actions.log`（只留最新 100 行，不進 git；寫入程式 `tools/gui/actlog.py`），背景記錄用，psa-hud pane 不顯示它（pane 顯示下面的錯誤 / 改進紀錄）。想附註用途：`PSA_NOTE="對話確認" bash tools/gui/gui.sh click 948 461`（Python 呼叫 `walk.gui(..., note="...")`）；shot / pixel / wait* 不記。
+
+錯誤 / 改進紀錄（psa-hud pane 顯示這個）：遇到錯誤、失誤、卡關（點錯、工具中斷、誤判、漏做、白等）時，**當下**用 `tools/gui/errlog.py` 記一筆；之後改了程式 / 流程 / 文件，再補上改進。沒改進的會在 pane 標「待改進」。
+```
+uv run --no-project python tools/gui/errlog.py add "錯誤描述" [--fix "改進"] [--source quest]   # 印出 #id
+uv run --no-project python tools/gui/errlog.py fix <id|last> "改進內容"
+uv run --no-project python tools/gui/errlog.py list
+```
+存 `tools/.cache/errlog.jsonl`（最新 100 筆，不進 git）；Python 裡 `import errlog; i = errlog.add(...); errlog.fix(i, ...)`。一筆寫一件事、寫具體（發生什麼 + 為什麼），改進寫「改了什麼檔 / 之後怎麼做」。
 - 遊戲**不能最小化**（Unity 最小化不繪製）；每個指令遇到最小化會用 SW_SHOWNOACTIVATE 還原（不搶焦點）。放在其他視窗後面沒關係。
 - **座標 = 截圖座標**：截圖固定縮成客戶區的 1/2（`-Scale 2`，不隨視窗大小變），click 內部 ×2。實測客戶區 2880×1659 → 截圖 1440×830。
 - `ui/` 的座標只在這個大小有效。**每次開始操作先跑 `info`**，不是 2880×1659 就跑 `max`；`max` 後仍不同（換螢幕 / 解析度）時不要等比例換算（UI 縮放與錨點會變，例：1436×1644 時背包在 558,790），以新截圖重新目測。
@@ -48,6 +59,7 @@ uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40
 - `gui.ps1` 必須保持 **UTF-8 with BOM**（PowerShell 5.1 讀無 BOM 檔會把中文當 Big5，整支解析失敗）。
 
 ## 移動：先用 walk.py（不要自己算座標點地面）
+- **鏡頭高度一律拉到最左**（設置 → 畫面設置，見 [ui/setting.md](ui/setting.md)）：walk.py 的每格位移只在這個鏡頭下準，與視窗大小無關；滾輪會改鏡頭高度，**不要在遊戲畫面上滾滾輪**。走路 / 補血一直走錯格時先檢查這個。
 - 要走到某格 → `walk.py <地圖> <x> <y>`；要走進出口 → 加 `--exit <下一張地圖>`；要點 NPC → 腳本裡用 `walk.npc_steps` / `walk.talk_npc`（直接點 NPC 會自己走過去開對話）。
 - walk.py 做的事：先點引子 1215,18（換地圖後第一下左鍵會被吃掉）→ OCR 讀起點 → 有 `knowledge/data/maps.bin` 通行格就找路
   （每段 ≤ 10 格、點擊不落在左側面板等 UI 上、離牆遠一點、點擊次數少的方向優先）→ 一個 `seq` 連點，每段之間 `waitstill` 等鏡頭停，
@@ -65,7 +77,7 @@ uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40
 | 解散隊伍 | **`/psa-disband-team` skill**（介面參考 [ui/team.md](ui/team.md)） |
 | 確認誰是「當前」角色 | [ui/team.md](ui/team.md) |
 | 看角色屬性 / 抗性 / 潛力點 | [ui/role.md](ui/role.md) |
-| 看任務進度、任務詳情 | [ui/quest.md](ui/quest.md) |
+| 看任務進度、任務詳情、自動巡路解任務（`tools/gui/quest.py --task 任務名`；檢測方針：黃色「?」優先，否則 OCR 核對追蹤列表任務名再點；`ocr.ps1` / `findmark.ps1`） | [ui/quest.md](ui/quest.md) |
 | 背包、道具、倉庫、材料圖鑑 | [ui/bag.md](ui/bag.md) |
 | 寵物出戰 / 騎乘 / 休息、寵物技能 | [ui/pet.md](ui/pet.md) |
 | 傳送到別的地圖 / 練級點 | [ui/transfer.md](ui/transfer.md) |
@@ -73,6 +85,7 @@ uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40
 | 自動戰鬥、補血、抓寵、遇敵 | [ui/ass.md](ui/ass.md) |
 | 聊天、信件、通知、排行榜、家族 | [ui/social.md](ui/social.md) |
 | 商城、交易所、抽獎（多為紅區） | [ui/shop.md](ui/shop.md) |
+| 「網路異常，是否重連?」提示、斷線後登入畫面（`tools/gui/netwatch.py`；已接進 quest / petwatch / heal --watch；點確定會回登入畫面 → 自動按「登錄」重登（使用者授權，只按登錄；欄位空 / 錯誤提示 / 連 3 次失敗才停手）） | [ui/network.md](ui/network.md) |
 | 沒見過的畫面、答題驗證 | [ui/todo.md](ui/todo.md) |
 全部清單與「依情境找」見 [ui/README.md](ui/README.md)。學到新畫面或新流程時，照 README 的「新增 / 更新規則」寫進對應檔並更新兩邊索引。
 
@@ -105,6 +118,7 @@ uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40
 任務條目（點了可能自動尋路）屬於執行任務，使用者沒交代任務時不點。
 
 **出現答題 / 驗證視窗（npcanswer，選項是圖片）→ 立刻停手並通知使用者**（鐵則 5）。
+**出現「網路異常，是否重連?」→ 跑 `netwatch.py --once`（或腳本內建 guard）點確定；點完會回到登入畫面，netwatch 會自動按「登錄」（使用者授權：只點登錄 / 一鍵全登，帳密由遊戲自動帶入，AI 絕不輸入或讀取帳密；帳密欄空、登錄後有任何提示 / 驗證視窗、連續 3 次失敗 → 停手通知使用者）**（[ui/network.md](ui/network.md)）。
 
 ## 判讀注意
 - 截圖是視窗自己的畫面，不會截到通知。背景點擊的訊息直接送進遊戲視窗，遊戲被其他視窗蓋住也點得到，不會點到別的視窗。
