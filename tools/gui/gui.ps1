@@ -247,7 +247,10 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
   }
   'info' { "client=$($r.R)x$($r.B) origin=($($p.X),$($p.Y)) scale=$Scale shot=$([int]($r.R/$Scale))x$([int]($r.B/$Scale)) foreground=$([W]::GetForegroundWindow() -eq $h)" }
   'shot' {
-    if (-not $A1) { $A1 = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.cache\shot.png")) }
+    if (-not $A1) { $A1 = 'shot.png' }
+    # 相對路徑一律解析到 tools/.cache/ 底下（單獨 shot 與 seq 內的 shot 一致；絕對路徑照用）
+    if (-not [IO.Path]::IsPathRooted($A1)) { $A1 = [IO.Path]::GetFullPath((Join-Path (Join-Path $PSScriptRoot '..\.cache') $A1)) }
+    $null = New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($A1))
     $full = New-Object System.Drawing.Bitmap $r.R, $r.B
     $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
     # 3 = PW_CLIENTONLY | PW_RENDERFULLCONTENT（DirectX 視窗要 RENDERFULLCONTENT 才不會黑畫面）
