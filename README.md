@@ -2,7 +2,7 @@
 
 《精靈王石器》（PrimalSA，韓版客戶端 `yhkrn`）的遊戲資料庫與查詢網站。
 
-- **線上查詢**：https://psa-wiki.pages.dev/（Cloudflare Pages）
+- **線上查詢**：尚未部署（`bash tools/web/deploy.sh`，預設 Cloudflare Pages 專案 `kkfaq-psa-wiki`，需先 `npx wrangler@4 login`）
   搜尋道具、寵物 / 怪物、NPC、地圖、技能、狀態、任務（繁中、簡中、韓文、ID 都可以），
   詳情頁有交叉連結（誰賣、怎麼合成、拿去做什麼、哪個任務要用、NPC 位置），地圖頁會畫出通行格、NPC 和出口。
 - **文件**：`knowledge/` 是從遊戲客戶端設定表自動匯出的分類文件（Markdown），網站上也可以瀏覽與篩選。

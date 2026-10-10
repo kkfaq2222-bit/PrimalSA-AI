@@ -34,7 +34,7 @@ PrimalSA-AI/
     web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
     .cache/            匯出時的暫存（HotUpdate.dll 等），可刪
 ```
-網站：Cloudflare Pages 專案 `psa-wiki`（https://psa-wiki.pages.dev/），只上傳 site/；原始碼在 GitHub repo https://github.com/dk880842/PrimalSA-AI（2026-10-09～10-10 曾公開、曾有 1 個 fork，2026-10-10 改回私有，2026-10-11 再改為公開）。仍照公開標準：不要 commit 帳號機密、角色私人資訊、`notes/` 遊玩紀錄；`GameClient/` 不進 repo。`.gitignore` 排除 `GameClient/`、`tools/.cache/`、`site/`、`notes/`。
+網站：Cloudflare Pages 專案 `kkfaq-psa-wiki`（尚未部署；`tools/web/deploy.sh`，只上傳 site/；可用 `CF_PAGES_PROJECT` 改專案名）。原始碼在 GitHub repo https://github.com/kkfaq2222-bit/PrimalSA-AI（公開；本專案由 kkfaq2222-bit 獨立維護，不再與其他帳號的 repo 同步）。仍照公開標準：不要 commit 帳號機密、角色私人資訊、`notes/` 遊玩紀錄；`GameClient/` 不進 repo。`.gitignore` 排除 `GameClient/`、`tools/.cache/`、`site/`、`notes/`。
 
 ## 3. 鐵則（必須遵守）
 1. **`GameClient/` 是唯讀的**：不得新增、修改、刪除、搬移、重新命名其中任何檔案或資料夾，也不要把任何輸出寫進去。

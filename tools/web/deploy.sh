@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 建置靜態網站並發布到 Cloudflare Pages（專案 psa-wiki → https://psa-wiki.pages.dev）
+# 建置靜態網站並發布到 Cloudflare Pages（專案 kkfaq-psa-wiki → https://kkfaq-psa-wiki.pages.dev）
 # 第一次使用前先登入：npx wrangler@4 login --browser=false
 # 用法（專案根目錄）：bash tools/web/deploy.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/site"
-PROJECT="${CF_PAGES_PROJECT:-psa-wiki}"
+PROJECT="${CF_PAGES_PROJECT:-kkfaq-psa-wiki}"
 
 uv run --no-project python "$ROOT/tools/web/build.py" --out "$OUT"
 

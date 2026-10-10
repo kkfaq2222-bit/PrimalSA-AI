@@ -1,5 +1,5 @@
-﻿# 多客戶端指定：環境變數 PSA_EXE_MATCH 可以填「角色 1 的名字」或「客戶端資料夾名」。
-# 名字對照放 tools/.cache/clients.json（不進 git），格式：{"角色1名字": "gameClient", "角色2名字": "PrimalSA222"}
+﻿# 多客戶端指定：環境變數 PSA_EXE_MATCH 可以填「帳號代號」或「客戶端資料夾名」。
+# 名字對照放 tools/.cache/clients.json（不進 git），格式：{"kkfaq11111": "gameClient", "kkfaq22222": "PrimalSA222"}
 # 挑選順序：資料夾名完全相等優先（PrimalSA 不會誤中 PrimalSA222）；沒有才退回路徑子字串比對。
 function Resolve-PsaClient([string]$m) {
   if (-not $m) { return $m }
