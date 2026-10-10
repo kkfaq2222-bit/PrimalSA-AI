@@ -23,6 +23,7 @@
 ## 工具：tools/gui/netwatch.py
 - `netwatch.guard('腳本名')`：腳本迴圈每輪呼叫。已接進 `quest.py`（畫面判斷為 unknown 時先交給它）、`petwatch.py`（每輪）、`heal.py --watch`（每輪）。偵測到「網路異常」提示 → 點確定；偵測到登入畫面 → 自動 `relogin()`（檢查帳密欄非空 → 登錄 → 一鍵全登 → 等載入 → `recover`），成功回傳 `reconnected`（各腳本重設狀態：quest 重找追蹤、petwatch 立刻重掃）；失敗（上面 3 種情況）才 halt → `sys.exit(10 / 11)`。walk.py 沒有長迴圈，未接。
 - 「帳密欄非空」= 在帳號框 700-900,400-425、密碼框 690-880,484-502 數深棕色像素（≥10 個），**只判斷有沒有字，不讀內容**。
+- **讀取失敗三態（2026-10-10）**：`_match` 回 True / False / None（`gui.ps1` 失敗、空輸出、`pwfail` 重試一次仍失敗 = None；waitpix / waitstill 的 PrintWindow 失敗會印 `pwfail`）。None = 「不確定」：不點、不宣告重連 / 登錄成功（`hud_ok()` 只在確定不是登入畫面時才 True）。`login_fields_filled()` 讀不到回 None，**不當成「欄位空」halt**：本輪不點登錄、回 `{'status':'ok','failed':True}`，連續 5 輪（`netwatch.json` 的 `read_fails`）讀不到才 halt（理由「讀不到帳密欄 / 遊戲畫面」）。errlog 限頻：同一段連續失敗只記一筆，恢復後補一筆「已恢復」。測試：`tools/gui/test_netwatch.py`（mock，不碰遊戲）。
 - 單獨掛機：`uv run --no-project python tools/gui/netwatch.py --watch --interval 10`（`--once` 只查一次、`--status` 看 halt 狀態）。與其他腳本共用 `netwatch.act.lock`，同時只有一方處理；`--watch` 有單例鎖 `netwatch.lock`。
 - 退出碼：10 = halt（要使用者處理）、11 = 連續失敗、2 = 版面不支援。
 - halt 檔 `tools/.cache/netwatch.halt`：halt 時寫入，之後所有腳本一啟動就退出 10，**不會自己再按登錄**（避免錯誤提示被重試）。使用者處理完 / 人類自己登入後，再跑任何腳本（或 `netwatch.py --once`）偵測到 HUD 回來會自動清除 halt；也可手動刪檔。

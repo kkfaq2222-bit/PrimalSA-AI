@@ -30,6 +30,7 @@ bash tools/gui/gui.sh fg click X Y         # 前景模式備案（背景點擊�
 bash tools/gui/gui.sh end                  # 用過 fg / max 後還原前景視窗與游標（背景模式跑了也無害）
 bash tools/gui/gui.sh seq "click 763 760; wait 400; shot"   # 同一個行程連跑多個動作（快）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\gui\stat.ps1   # （WSL 要用 "$(wslpath -w tools/gui/stat.ps1)"；Windows / Git Bash 直接給 Windows 路徑，在專案根目錄執行）OCR 讀 HUD → 一行 JSON（等級 / HP / MP / 寵物 / 地圖座標），不用看圖、不搶焦點
+uv run --no-project python tools/gui/test_netwatch.py   # netwatch 三態（True / False / None）mock 測試（離線）
 bash tools/gui/mirror.sh                   # 給使用者看的即時畫面鏡像視窗（DWM 縮圖：幀數同遊戲、CPU ≈ 0；可縮放、右鍵 / 標題列選單置頂）
 bash tools/gui/gui.sh pixel "X,Y X,Y"      # 背景截圖讀像素顏色（腳本判斷畫面狀態用，例：遇敵開關）；seq 裡用 X,Y/X,Y
 bash tools/gui/gui.sh seq "click 1340 65; waitpix 1500 1290,97,197,73,49; ifok click 259 314"   # 輪詢到面板出現（點顏色符合）才點下一步，取代固定 wait

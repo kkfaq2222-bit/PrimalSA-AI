@@ -310,11 +310,12 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       $neg = $t.EndsWith('!'); $v = $t.TrimEnd('!') -split ','
       [void]$conds.Add(@([int]([double]$v[0] * $Scale), [int]([double]$v[1] * $Scale), [int]$v[2], [int]$v[3], [int]$v[4], $neg))
     }
-    $sw = [Diagnostics.Stopwatch]::StartNew(); $hit = $false
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $hit = $false; $pwfail = $false
     $full = New-Object System.Drawing.Bitmap $r.R, $r.B
     do {
       $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
-      [W]::PrintWindow($h, $dc, 3) | Out-Null; $g.ReleaseHdc($dc); $g.Dispose()
+      $pw = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
+      if (-not $pw) { $pwfail = $true; $hit = $false; break }   # 截圖失敗：不要拿黑畫面比到逾時，印 pwfail 讓呼叫端視為「讀不到」
       $hit = $true
       foreach ($c in $conds) {
         $px = $full.GetPixel($c[0], $c[1])
@@ -325,7 +326,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     } while (-not $hit -and $sw.ElapsedMilliseconds -lt [int]$A1)
     $full.Dispose()
     $script:WaitOk = $hit
-    "$(if ($hit) { 'ok' } else { 'timeout' }) $($sw.ElapsedMilliseconds)"
+    if ($pwfail) { 'pwfail' } else { "$(if ($hit) { 'ok' } else { 'timeout' }) $($sw.ElapsedMilliseconds)" }
   }
   'waitstill' {
     # waitstill <逾時毫秒> [開始等待毫秒，預設 600]：等鏡頭停下來（點地面走路後用，取代按格數估的固定等待）。
@@ -343,7 +344,8 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     $prev = $null; $moved = $false; $still = 0; $res = 'timeout'
     while ($sw.ElapsedMilliseconds -lt [int]$A1) {
       $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
-      [W]::PrintWindow($h, $dc, 3) | Out-Null; $g.ReleaseHdc($dc); $g.Dispose()
+      $pw = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
+      if (-not $pw) { $res = 'pwfail'; break }   # 截圖失敗（同 waitpix）
       $cur = foreach ($q in $pts) { $full.GetPixel($q[0], $q[1]).ToArgb() }
       if ($prev) {
         $diff = 0; for ($k = 0; $k -lt $cur.Count; $k++) { if ($cur[$k] -ne $prev[$k]) { $diff++ } }
@@ -354,7 +356,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       $prev = $cur
     }
     $full.Dispose(); $script:WaitOk = ($res -eq 'still')
-    "$res $($sw.ElapsedMilliseconds)"
+    if ($res -eq 'pwfail') { 'pwfail' } else { "$res $($sw.ElapsedMilliseconds)" }
   }
   'ifok' {
     # ifok <指令> ...：上一個 waitpix 成功才做（seq 裡用：等到對話框出現就點按鈕，沒出現就跳過）
