@@ -52,10 +52,19 @@ class Sim:
         return dict(IDLE)
 
 
+ASS = {'rc': 0, 'st': {'原地遇敵': False, '自動逃跑': False, '快速戰鬥': False, '自動戰鬥': True, '夥伴助戰': False}, 'calls': 0}
+
+
+def fake_ass(role):
+    ASS['calls'] += 1
+    return ASS['rc'], (dict(ASS['st']) if ASS['rc'] == 0 else None), 'fake'
+
+
 def run(argv, sim):
     quest.time.time, quest.time.sleep = sim.time, sim.sleep
     quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: (5510, 50, 17)
     quest.walk.gui = sim.gui
+    quest.ass.get_states = fake_ass
     quest.snap = lambda tag: 'sim.png'
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
     quest.layout.current = lambda: '2880x1659'
@@ -77,7 +86,7 @@ def has(sim, prefix):
 ok = True
 print('(a) 沒點 NPC 就進戰鬥（20 秒後）：逃跑、不開自動戰鬥')
 s = Sim(battle_at=20.0, auto_on=False)
-rc = run(['--fight', '--no-click', '--max-seconds', '60'], s)
+rc = run(['--fight', '--no-click', '--manual-escape', '--max-seconds', '60'], s)
 ok &= check('exit 0（時間到）', rc == 0, f'rc={rc}')
 ok &= check('有按逃跑', bool(has(s, 'click 1283 168')))
 ok &= check('沒按自動戰鬥', not has(s, 'click 1380 600'))
@@ -97,16 +106,64 @@ ok &= check('按對話左鈕 + 自動戰鬥、沒逃跑', bool(has(s, 'click 948
 
 print('(c) 自動戰鬥開著遇小怪：先關再逃')
 s = Sim(battle_at=20.0, auto_on=True)
-rc = run(['--fight', '--no-click', '--max-seconds', '60'], s)
+rc = run(['--fight', '--no-click', '--manual-escape', '--max-seconds', '60'], s)
 seq = [c[1] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 1283 168'))]
 ok &= check('順序：關自動 → 逃跑', seq == ['click 1380 600', 'click 1283 168'], str(seq))
 print('(c2) --solo 同樣情境')
 s = Sim(battle_at=5.0, auto_on=True)
-rc = run(['--solo', '--no-track', '--max-seconds', '40'], s)
+rc = run(['--solo', '--no-track', '--manual-escape', '--max-seconds', '40'], s)
 seq = [c[1] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 1283 168'))]
 ok &= check('--solo 順序：關自動 → 逃跑', seq == ['click 1380 600', 'click 1283 168'], str(seq))
 
+print('(c3) --solo 預設：外掛自動逃跑，腳本不按任何戰鬥鈕、戰鬥 12 秒後結束')
+ASS['st']['自動逃跑'] = True
+s = Sim(battle_at=5.0, auto_on=True, boss_ends=12.0)
+ASS['calls'] = 0
+rc = run(['--solo', '--no-track', '--max-seconds', '40'], s)
+ok &= check('讀過外掛設定', ASS['calls'] == 1)
+ok &= check('沒按逃跑 / 自動戰鬥鈕', not has(s, 'click 1283 168') and not has(s, 'click 1380 600'), str(s.clicks))
+ok &= check('exit 0（時間到，沒超時）', rc == 0, f'rc={rc}')
+print('(c4) --solo 戰鬥 40 秒不結束 → 退出碼 27')
+s = Sim(battle_at=5.0, auto_on=True, boss_ends=400.0)
+rc = run(['--solo', '--no-track', '--max-seconds', '200'], s)
+ok &= check('exit 27，約 35 秒', rc == quest.EXIT_ESCAPE_TIMEOUT and 34 <= s.t - 1000 <= 40, f'rc={rc} t={s.t - 1000:.0f}')
+ok &= check('沒按任何鈕', not has(s, 'click 1283 168') and not has(s, 'click 1380 600'))
+print('(c5) --solo 外掛設定不符 / 讀不到 → 29，沒動作')
+for desc, patch in (('自動逃跑關', {'自動逃跑': False}), ('自動戰鬥關', {'自動戰鬥': False})):
+    s = Sim(battle_at=5.0)
+    ASS['st'].update(patch)
+    rc = run(['--solo', '--no-track', '--max-seconds', '40'], s)
+    ok &= check(f'{desc} → 29 且沒點任何東西', rc == quest.EXIT_ASS_SETUP and not s.clicks, f'rc={rc}')
+    ASS['st'].update({'自動逃跑': True, '自動戰鬥': True})
+ASS['rc'] = 2
+s = Sim(battle_at=5.0)
+rc = run(['--solo', '--no-track', '--max-seconds', '40'], s)
+ok &= check('讀不到 → 29', rc == quest.EXIT_ASS_SETUP and not s.clicks, f'rc={rc}')
+ASS['rc'] = 0
+s = Sim(battle_at=5.0, boss_ends=5.0)
+ASS['calls'] = 0
+rc = run(['--solo', '--no-track', '--skip-ass-check', '--max-seconds', '20'], s)
+ok &= check('--skip-ass-check 不讀外掛', ASS['calls'] == 0 and rc == 0, f'rc={rc}')
+print('(c6) --fight 自動逃跑開著 → 28，不點 NPC')
+s = Sim()
+rc = run(['--fight', '--npc', '53,17', '--max-seconds', '60'], s)
+ok &= check('exit 28、沒任何點擊', rc == quest.EXIT_ESCAPE_ON and not s.clicks, f'rc={rc} clicks={s.clicks}')
+print('(c7) --fight（--no-click，自動逃跑關）：小怪（20 秒後才進戰鬥）用自動戰鬥打完、不逃跑')
+ASS['st']['自動逃跑'] = False
+s = Sim(battle_at=20.0, auto_on=False, boss_ends=10.0)
+rc = run(['--fight', '--no-click', '--max-seconds', '60'], s)
+ok &= check('小怪：按自動戰鬥、沒按逃跑', len(has(s, 'click 1380 600')) == 1 and not has(s, 'click 1283 168'), str(s.clicks))
+print('(c8) --fight --no-click --manual-escape：舊行為（小怪先關自動再逃）')
+ASS['st']['自動逃跑'] = True
+s = Sim(battle_at=20.0, auto_on=True)
+ASS['calls'] = 0
+rc = run(['--fight', '--no-click', '--manual-escape', '--max-seconds', '60'], s)
+seq = [c[1] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 1283 168'))]
+ok &= check('不讀外掛、關自動 → 逃跑', ASS['calls'] == 0 and seq == ['click 1380 600', 'click 1283 168'], f'{seq} calls={ASS["calls"]}')
+ASS['st']['自動逃跑'] = True
+
 print('(d) 點 NPC 後沒反應')
+ASS['st']['自動逃跑'] = False
 s = Sim()
 rc = run(['--fight', '--npc', '53,17', '--max-seconds', '120'], s)
 ok &= check('exit 22', rc == quest.EXIT_NO_NPC, f'rc={rc} t={s.t - 1000:.0f}s')

@@ -10,12 +10,17 @@
         --every 1.0（輪詢秒數；2026-10-10 起預設 1 秒，所有「連續 N 次」的規則已改成以秒計，見 IDLE_CONFIRM_SECS 等常數）、--no-track（不主動點任務追蹤，只處理對話 / 戰鬥）、--no-refresh（戰鬥不按刷新角色）、
         --no-clef（不用 Clef 加速層；也可設環境變數 PSA_NO_CLEF=1。預設有 token 就用，失敗 / 額度用完自動退回 OCR 與規則，見 ui/quest.md「Clef 加速層」）、
         --stop-after-rewards N（領到第 N 次「獲得物品」確認窗後停；避免自動接下一個任務。成人儀式 = 2）
-  --solo   單人逃跑風格（/psa-quest-solo）：遇怪進完整戰鬥畫面 → 按右上角「逃跑」1283,168（失敗下一輪再按）；到 NPC 跳出對話框 → ESC 關掉（不按任何選項）後停下，退出碼 20；
-           被打飛（回到薩姆吉爾村 1000 儲存點附近）→ 退出碼 21。要先確認快速戰鬥 / 自動戰鬥 / 原地遇敵 / 自動逃跑都關（完整戰鬥畫面才有逃跑鈕）。
+  --solo   單人逃跑風格（/psa-quest-solo）：2026-10-10 起一律用外掛「自動戰鬥 + 自動逃跑」（DKB0），腳本遇敵只等、不按逃跑鈕；
+           啟動時用 ass.py 讀 DKB0，自動逃跑 / 自動戰鬥任一沒開 → 退出碼 29（不動設定；先 `ass.py set DKB0 自動逃跑 on 自動戰鬥 on`）；
+           一場戰鬥超過 30 秒（SOLO_BATTLE_MAX）沒結束 → 退出碼 27（自動逃跑可能沒生效）；
+           到 NPC 跳出對話框 → ESC 關掉（不按任何選項）後停下，退出碼 20；被打飛（回到薩姆吉爾村 1000 儲存點附近）→ 退出碼 21。
+  --manual-escape  舊版手動逃跑（外掛失效時的備案）：--solo 遇怪按戰鬥畫面右上「逃跑」1283,168、--fight 小怪先關自動戰鬥再逃跑；
+           要先把 DKB0 的原地遇敵 / 自動逃跑 / 快速戰鬥 / 自動戰鬥都關（完整戰鬥畫面才有逃跑鈕）；不檢查外掛設定
+  --skip-ass-check  --solo / --fight 不讀外掛設定（呼叫端已確認；不建議）
   --stop-after-dialog  對話步（組隊後單步）：按完對話框、閒置滿 2.5 秒（連續 2 次以上）就結束退出碼 0（有獲得物品視窗的步驟改用 --stop-after-rewards 1）
   --fight  戰鬥步（假設已站在 NPC 旁，**不點追蹤、不巡路**）：--npc X,Y（NPC 地圖座標）或 --npc auto（--task 的任務步驟找戰鬥步 NPC）→ 依自己座標算畫面位置點 NPC（--at X,Y 可手動給自己座標）
            → 對話框按左鈕 → 開打。戰鬥分類：開始時距離最後一次點 NPC / 按對話框 <= QUEST_BATTLE_WINDOW(15) 秒 = BOSS 戰（確保自動戰鬥開，打完閒置滿 IDLE_CONFIRM_SECS 秒（且連續 2 次）印「BOSS 戰結束」退出碼 0，不繼續巡路）；
-           否則 = 小怪（自動戰鬥開著就先關，下指令階段按逃跑）。已手動點過 NPC 用 --no-click。
+           否則 = 小怪：自動逃跑已關（點 NPC 前先用 ass.py 讀 DKB0，自動逃跑是開的 → 不點 NPC，退出碼 28）→ 和 BOSS 一樣按自動戰鬥打完，不手動逃（--manual-escape 才改回舊的關自動 + 逃跑）。已手動點過 NPC（--no-click）時不讀外掛。
            點 NPC 後 12 秒沒對話框也沒戰鬥 → 退出碼 22（沒點到 NPC）；對話後 15 秒沒開打 → 23；被打飛 21。
            範例：quest.py --fight --task 英雄島前傳 --npc auto --max-seconds 300
   --disband-after  這步完成（搭配 --stop-after-dialog / --stop-after-rewards）後立刻解散隊伍；分頁沒切到組隊 / 選單沒彈出 / 解散後隊長紅標還在 → 不亂點，退出碼 26；已是單人（組隊分頁沒隊長紅標）→ 不點任何東西，退出碼 0
@@ -34,7 +39,7 @@
            2. 沒有 → 在追蹤列表先用標題圖片樣板比對（titlematch，0.7 秒）、沒樣板 / 沒找到才用 OCR（ocr.ps1，成功會存樣板）找 --task 那一格，必要時捲動列表，確認標題相符才點 → 開始（繼續）巡路
   不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）
   追蹤沒反應 點了任務追蹤約 5 秒（TRACK_RETRY_SECS 重點一次、再等一輪）都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
-退出碼：20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、0 正常結束（任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：27 --solo 戰鬥 30 秒未結束（自動逃跑沒生效？）、28 --fight 點 NPC 前自動逃跑是開的、29 --solo 外掛設定不符 / 讀不到、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、0 正常結束（任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
 import argparse
@@ -50,6 +55,7 @@ import layout
 import netwatch
 import winenv
 import walk
+import ass
 from walk import ROOT, gui, log, PRIMER, stat
 import re
 
@@ -60,6 +66,11 @@ EXIT_NO_BATTLE = 23                  # --fight：有對話但 QUEST_BATTLE_WINDO
 EXIT_AUTOWALK = 24                   # --stop-after-dialog：這步對話完，遊戲自己又開始 Auto Walking（腳本沒點追蹤；呼叫端要馬上處理，例如解散）
 EXIT_BATTLE_STUCK = 25               # 組隊預設模式：完整戰鬥按了自動戰鬥好幾次仍是關的（寵物指令視窗 / 其他卡住畫面）→ 人工處理
 EXIT_DISBAND_FAIL = 26               # --disband-after：解散沒做成（分頁沒切過去 / 選單沒彈出 / 解散後畫面沒變），沒亂點
+EXIT_ESCAPE_TIMEOUT = 27             # --solo：一場戰鬥超過 SOLO_BATTLE_MAX 秒還沒結束（外掛自動逃跑可能沒生效）
+EXIT_ESCAPE_ON = 28                  # --fight：點 NPC 前發現 DKB0 外掛「自動逃跑」是開的（會把 BOSS 戰逃掉）→ 沒點 NPC
+EXIT_ASS_SETUP = 29                  # --solo：DKB0 外掛 自動逃跑 / 自動戰鬥沒開，或讀不到外掛設定（面板打不開）
+SOLO_BATTLE_MAX = 30.0               # --solo 一場戰鬥最多等幾秒（外掛自動逃跑 + 自動戰鬥；超過 = 逃不掉）
+SOLO_ROLE = 'DKB0'                   # 外掛設定要檢查 / 切換的角色（隊長）
 AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰鬥鈕
 NPC_WAIT = 12.0                      # --fight 點 NPC 後最多等幾秒看有沒有反應（走過去 + 開對話框）
 LOG_FILE = ROOT / 'notes' / 'quest-events.log'
@@ -551,6 +562,31 @@ def is_knocked(last: tuple[int, int, int] | None, cur: tuple[int, int, int] | No
     return last is not None and not near(last)
 
 
+def check_ass_setup(a) -> int:
+    """--solo：啟動時讀 DKB0 外掛，自動逃跑 + 自動戰鬥都要開（退出碼 29）；--fight（要點 NPC 時）：自動逃跑是開的 → 退出碼 28，不點 NPC。
+    --manual-escape / --skip-ass-check 不檢查。純讀，不改設定。"""
+    if a.manual_escape or a.skip_ass_check or not (a.solo or (a.fight and not a.no_click)):
+        return 0
+    rc, st, msg = ass.get_states(SOLO_ROLE)
+    if rc or not st:
+        event(f'讀不到 {SOLO_ROLE} 外掛設定（ass.py 退出碼 {rc}：{msg}）→ 不動作，退出碼 {EXIT_ASS_SETUP}')
+        return EXIT_ASS_SETUP
+    event(f'{SOLO_ROLE} 外掛：{ass.fmt(st)}')
+    if a.fight:
+        if st['自動逃跑']:
+            event(f'--fight：{SOLO_ROLE} 自動逃跑是開的（會把 BOSS 戰逃掉）→ 沒點 NPC，退出碼 {EXIT_ESCAPE_ON}；先 `ass.py set {SOLO_ROLE} 自動逃跑 off 自動戰鬥 on`')
+            print('自動逃跑是開的，沒點 NPC', flush=True)
+            return EXIT_ESCAPE_ON
+        return 0
+    if not (st['自動逃跑'] and st['自動戰鬥']):
+        event(f'--solo：{SOLO_ROLE} 自動逃跑={"開" if st["自動逃跑"] else "關"}、自動戰鬥={"開" if st["自動戰鬥"] else "關"}，兩個都要開 → 退出碼 {EXIT_ASS_SETUP}；先 `ass.py set {SOLO_ROLE} 自動逃跑 on 自動戰鬥 on`')
+        print('外掛設定不符（自動逃跑 + 自動戰鬥都要開）', flush=True)
+        return EXIT_ASS_SETUP
+    if st['快速戰鬥'] or st['原地遇敵']:
+        event(f'提醒：{SOLO_ROLE} 快速戰鬥={"開" if st["快速戰鬥"] else "關"}、原地遇敵={"開" if st["原地遇敵"] else "關"}（單人跑圖建議都關）')
+    return 0
+
+
 def resolve_npc(a) -> tuple[int, int] | None:
     """--fight 的 NPC 地圖座標：--npc X,Y，或 --npc auto（--task 的任務步驟中第一個戰鬥步的 endNpc）；失敗印原因回 None"""
     if a.npc.lower() == 'auto':
@@ -610,6 +646,8 @@ def main() -> int:
     ap.add_argument('--solo', action='store_true', help='單人逃跑風格：完整戰鬥按逃跑；到 NPC 出對話框 → ESC 後停下（退出碼 20）；被打飛退出碼 21')
     ap.add_argument('--stop-after-dialog', action='store_true', help='對話框按完、回主畫面連續閒置 2 次就結束（沒有獲得物品視窗的對話步用；組隊後單步對話用，避免自動點下一步追蹤開始巡路）')
     ap.add_argument('--disband-after', action='store_true', help='這步完成（--stop-after-dialog / --stop-after-rewards 結束）後立刻解散隊伍：切組隊分頁 → 點隊長列 → 解散，每步驗證，失敗退出碼 %d 且不亂點' % EXIT_DISBAND_FAIL)
+    ap.add_argument('--manual-escape', action='store_true', help='舊版手動逃跑（外掛自動逃跑失效時的備案）：--solo / --fight 小怪戰按戰鬥畫面逃跑鈕；不檢查外掛設定')
+    ap.add_argument('--skip-ass-check', action='store_true', help='--solo / --fight 不讀外掛設定（呼叫端已確認）')
     ap.add_argument('--fight', action='store_true', help='戰鬥步（要先站在 NPC 附近；不巡路）：點 NPC → 對話左鈕 → 開打；只有點 NPC / 按對話框後 %d 秒內開始的才是 BOSS 戰（開自動戰鬥、打完退出碼 0）；其他戰鬥是小怪（關自動戰鬥、按逃跑）；沒反應退出碼 22、對話後沒開打 23、被打飛 21' % QUEST_BATTLE_WINDOW)
     ap.add_argument('--npc', default='', help='--fight 用：NPC 的地圖座標 X,Y，或 auto（用 --task 的任務步驟找第一個戰鬥步的 NPC，同 psa.py steps）；不給 = 必須加 --no-click')
     ap.add_argument('--at', default='', help='--fight 用：自己目前的座標 X,Y（不給就 OCR 讀右上角）')
@@ -645,6 +683,9 @@ def main() -> int:
         log('沒給 --task：不知道要點哪個任務追蹤（點錯任務是之前的老問題）。請加 --task 任務名，或用 --no-track（只處理對話 / 戰鬥）')
         return 4
     clef.set_logger(event)
+    rc = check_ass_setup(a)
+    if rc:
+        return rc
     n_old = cleanup_old_shots()
     if n_old:
         event(f'清理 {n_old} 張 {SHOT_KEEP_DAYS} 天前截圖')
@@ -681,6 +722,7 @@ def main() -> int:
     last_pos_t = time.time()
     ko_pending = False           # 剛打完一場 / 讀圖中 → 下次閒置時查一次位置
     last_click_t = 0.0           # 逃跑 / 自動戰鬥鈕最後一次點擊時間（避免連點）
+    battle_t0 = 0.0              # --solo：這場戰鬥開始時間（SOLO_BATTLE_MAX）
     in_battle = False            # 戰鬥中（直到看到主畫面 / 對話 / 領獎 / 巡路才算結束；中間 unknown / panel 不重新分類）
     boss = False                 # 目前這場是不是 BOSS 戰（戰鬥開始那一刻決定，打完才重設）
     boss_seen = False            # --fight：已打過 BOSS 戰
@@ -705,12 +747,18 @@ def main() -> int:
         in_battle_new = st == 'battle' and not in_battle
         if in_battle_new:
             in_battle = True
+            battle_t0 = time.time()
             quest_battle = is_quest_battle(last_action, time.time())
             boss = quest_battle
             boss_seen = boss_seen or boss
             log(f'戰鬥開始：{"任務戰鬥（對話 / 點 NPC 後 %ds 內）" % QUEST_BATTLE_WINDOW if quest_battle else "一般遇敵（只等，不按刷新角色）"}')
             if a.fight:
-                event(f'--fight 戰鬥開始：{"BOSS 戰（點 NPC / 對話後 %.0f 秒）→ 自動戰鬥" % (time.time() - last_action) if boss else "小怪 → 關自動戰鬥並逃跑"}')
+                event(f'--fight 戰鬥開始：{"BOSS 戰（點 NPC / 對話後 %.0f 秒）→ 自動戰鬥" % (time.time() - last_action) if boss else "小怪 → %s" % ("關自動戰鬥並手動逃跑" if a.manual_escape else "自動戰鬥打完（自動逃跑已關）")}')
+        if a.solo and not a.manual_escape and in_battle and time.time() - battle_t0 > SOLO_BATTLE_MAX:
+            shot = snap('escape-timeout')
+            event(f'--solo：戰鬥已 {time.time() - battle_t0:.0f} 秒（> {SOLO_BATTLE_MAX:.0f}）還沒結束 → 外掛自動逃跑可能沒生效（退出碼 {EXIT_ESCAPE_TIMEOUT}）', shot)
+            print('自動逃跑可能沒生效：戰鬥超時', flush=True)
+            return EXIT_ESCAPE_TIMEOUT
         if guard_ko and prev_st == 'battle' and st != 'battle':
             ko_pending = True
         prev_st = st
@@ -761,13 +809,17 @@ def main() -> int:
             if a.stop_after_rewards and rewards >= a.stop_after_rewards:
                 event(f'已領 {rewards} 次獎勵視窗，停止（--stop-after-rewards）')
                 return finish(a)
+        elif st == 'battle' and a.solo and not a.manual_escape:
+            if time.time() - last_full_log > 20:
+                event(f'--solo 戰鬥中：只等外掛自動逃跑（已 {time.time() - battle_t0:.0f} 秒，上限 {SOLO_BATTLE_MAX:.0f}）')
+                last_full_log = time.time()
         elif st == 'battle' and (a.solo or a.fight):
             if not s.get('full'):
                 if not warned_quick:
                     event(f'--{"solo" if a.solo else "fight"}：遇敵但沒有完整戰鬥畫面（只看到 VS 牌 = 快速戰鬥還開著？）→ 無法逃跑 / 開自動戰鬥，只能等；請先關快速戰鬥')
                     warned_quick = True
             else:
-                act = plan_battle_action(s, a.fight and boss, time.time() - last_click_t)
+                act = plan_battle_action(s, a.fight and boss, time.time() - last_click_t, party=a.fight and not a.manual_escape)
                 if act:
                     xy = {'escape': ESCAPE_BTN, 'auto_off': AUTO_BTN, 'auto_on': AUTO_BTN}[act]
                     gui('seq', f'click {xy[0]} {xy[1]}', note={'escape': '完整戰鬥小怪 → 逃跑', 'auto_off': '小怪戰 → 先關自動戰鬥', 'auto_on': 'BOSS 戰 → 開自動戰鬥'}[act])
@@ -775,7 +827,7 @@ def main() -> int:
                     battles += 1
                     event({'escape': f'{"--solo" if a.solo else "--fight 小怪"} 戰鬥中：按逃跑（第 {battles} 次）',
                            'auto_off': '--solo / 小怪戰：自動戰鬥是開的 → 先按一下關掉，下一回合再逃',
-                           'auto_on': f'--fight BOSS 戰：自動戰鬥鈕是關的 → 按一下（第 {battles} 次）'}[act])
+                           'auto_on': f'--fight {"BOSS 戰" if boss else "小怪（自動逃跑已關，打完）"}：自動戰鬥鈕是關的 → 按一下（第 {battles} 次）'}[act])
                 elif a.fight and boss and time.time() - last_full_log > 20:
                     event('--fight BOSS 戰中（自動戰鬥已開，等打完）')
                     last_full_log = time.time()
