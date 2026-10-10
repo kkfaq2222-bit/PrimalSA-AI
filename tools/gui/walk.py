@@ -153,7 +153,7 @@ def split(a: tuple[int, int], b: tuple[int, int], lim: int = MAX_TILES) -> list[
     return [b]
 
 
-# ---------------- 讀座標（stat.ps1 OCR，每次約 0.9 秒）----------------
+# ---------------- 讀座標（stat.ps1 OCR，每次約 0.18 秒；一次性約 0.9 秒、常駐 server 約 0.18 秒）----------------
 def stat() -> dict:
     r = winenv.run_ps('stat.ps1')
     line = (r.stdout.strip().splitlines() or [''])[-1]

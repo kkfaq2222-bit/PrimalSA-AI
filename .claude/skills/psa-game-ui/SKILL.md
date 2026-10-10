@@ -33,7 +33,7 @@ bash tools/gui/gui.sh end                  # 用過 fg / max 後還原前景視�
 bash tools/gui/gui.sh seq "click 763 760; wait 400; shot"   # 同一個行程連跑多個動作（快）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\gui\stat.ps1   # （WSL 要用 "$(wslpath -w tools/gui/stat.ps1)"；Windows / Git Bash 直接給 Windows 路徑，在專案根目錄執行）OCR 讀 HUD → 一行 JSON（等級 / HP / MP / 寵物 / 地圖座標），不用看圖、不搶焦點
 uv run --no-project python tools/gui/bench.py [--ab --old-dir 舊版目錄 | --srv-ab | --server | --soak] [-n 5] [--only stat,ocr_zooms]   # 唯讀量測各指令耗時（中位數 / min / max）；--ab 與舊版交錯並比對輸出、--srv-ab 一次性 vs 常駐 server 交錯、--soak 長跑看 GDI / 記憶體；只在沒有任務在跑時用
-uv run --no-project python tools/gui/test_binarize.py   # ocr / stat 二值化（LockBits）與舊 GetPixel 版逐位元組比對（離線）；test_netwatch.py = netwatch 三態 mock 測試
+uv run --no-project python tools/gui/test_binarize.py   # ocr / stat 二值化（LockBits）與舊 GetPixel 版逐位元組比對（離線）；test_netwatch.py = netwatch 三態 mock 測試；其餘離線測試：test_winenv_server.py（server 協定）、test_quest_fight.py、test_ass.py（皆 `uv run --no-project python tools/gui/<檔名>`）、test_guard.ps1（Guard）
 bash tools/gui/mirror.sh                   # 給使用者看的即時畫面鏡像視窗（DWM 縮圖：幀數同遊戲、CPU ≈ 0；可縮放、右鍵 / 標題列選單置頂）
 bash tools/gui/gui.sh pixel "X,Y X,Y"      # 背景截圖讀像素顏色（腳本判斷畫面狀態用，例：遇敵開關）；seq 裡用 X,Y/X,Y
 bash tools/gui/gui.sh seq "click 1340 65; waitpix 1500 1290,97,197,73,49; ifok click 259 314"   # 輪詢到面板出現（點顏色符合）才點下一步，取代固定 wait
@@ -99,7 +99,7 @@ uv run --no-project python tools/gui/errlog.py list
 
 ## 操作迴圈
 1. `shot` → Read 圖，先判斷**目前在哪個畫面**（主畫面 / 某面板 / 對話 / 戰鬥 / 驗證）。
-2. **速度**：遊戲響應很快（實測傳送面板 / 分頁 / NPC 對話框 / 遇敵圖示都在 0.05～0.15 秒內出現；傳送 Loading 1.0～2.2 秒）；每次呼叫 gui.sh 要多花約 0.4 秒啟動 PowerShell。
+2. **速度**：遊戲響應很快（實測傳送面板 / 分頁 / NPC 對話框 / 遇敵圖示都在 0.05～0.15 秒內出現；傳送 Loading 1.0～2.2 秒）；每次呼叫 gui.sh 要多花約 0.4 秒啟動 PowerShell（gui.sh 維持一次性；Python 長程序可用常駐 server 省掉，見上方「常駐 server」）。
    - 腳本裡能用 `waitpix`（等指定點變成某顏色）/ `waitstill`（等走路停）就不要固定 `wait`；`ifok` / `ifnok` 依上一個 waitpix 結果決定做不做，面板沒出現就不會點穿。
    - **換地圖後第一下左鍵會被吃掉**：先點 1215,18（狀態列空白）當引子（ui/home.md「走路」；walk.py `PRIMER`）。
    - **已知流程**（座標都驗證過）：用 `seq` 把多個動作串成一次呼叫，動作之間 `wait 150～500`，只在**分歧點**（要判斷畫面才能決定下一步）和**結尾**截圖。
