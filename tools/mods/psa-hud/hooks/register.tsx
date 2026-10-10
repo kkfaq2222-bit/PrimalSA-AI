@@ -89,7 +89,8 @@ type WF<T> = { v?: T; ts?: number }
 export type WHud = {
   ok?: boolean; stale?: boolean; age_s?: number | null
   level?: WF<string>; hp?: WF<number>; hpPct?: WF<number>; mp?: WF<number>; mpPct?: WF<number>
-  pet?: { level?: WF<string>; hp?: WF<number> }
+  name?: WF<string> & { stale?: boolean; conflict?: boolean }
+  pet?: { level?: WF<string>; hp?: WF<number>; name?: WF<string> & { stale?: boolean } }
   map?: WF<string> & { id?: number }
   pos?: WF<number[]>
 }
@@ -342,8 +343,8 @@ export function format(s: Stat): string {
   // OCR 讀不到數字時改顯示血條比例（hpPct / mpPct），都沒有才是 ?
   const num = (n: number | null | undefined, pct: number | null | undefined) => (n != null ? String(n) : pct != null ? `${pct}%` : '?')
   if (!s.level && s.hp == null && s.mp == null && s.hpPct == null) return 'PSA: 讀不到 HUD（對話 / 戰鬥 / 其他畫面蓋住，或視窗被遮）'
-  const parts = [`${s.level || '?'}  HP ${num(s.hp, s.hpPct)}  MP ${num(s.mp, s.mpPct)}`]
-  if (s.petLevel || s.petHp != null) parts.push(`寵 ${s.petLevel || '?'} HP ${v(s.petHp)}`)
+  const parts = [`${s.name ? `${s.name}  ` : ''}${s.level || '?'}  HP ${num(s.hp, s.hpPct)}  MP ${num(s.mp, s.mpPct)}`]
+  if (s.petLevel || s.petHp != null) parts.push(`寵 ${s.petName ? `${s.petName} ` : ''}${s.petLevel || '?'} HP ${v(s.petHp)}`)
   if (s.map || s.pos) parts.push(`${s.map ?? ''} ${s.pos ?? ''}`.trim())
   return parts.join('  |  ')
 }
@@ -359,17 +360,25 @@ const COVER_TEXT: Record<string, string> = {
 }
 
 // state.hud → pane 第二行（和 format 同格式）；沒有任何數值 → null。stale 時加灰字（原因 · N 秒前）
+// 名字顯示：沒有欄位 → undefined（不顯示）；'?' = 不確定；舊值（stale）加結尾 ?；旁路與 OCR 不一致（conflict）加 !
+export function nameText(f?: (WF<string> & { stale?: boolean; conflict?: boolean }) | null): string | undefined {
+  if (!f) return undefined
+  const v = f.v || '?'
+  if (v === '?') return '?'
+  return `${v}${f.stale ? '?' : ''}${f.conflict ? '!' : ''}`
+}
+
 export function hudText(state: WState | null, now: number, seenAt: number): string | null {
   const h = state?.hud
   if (!h) return null
   const v = <T,>(f?: WF<T>): T | undefined => f?.v
   const pos = v(h.pos)
   const s: Stat = {
-    ok: true, level: v(h.level), hp: v(h.hp) ?? null, hpPct: v(h.hpPct) ?? null, mp: v(h.mp) ?? null, mpPct: v(h.mpPct) ?? null,
+    ok: true, name: nameText(h.name), petName: nameText(h.pet?.name), level: v(h.level), hp: v(h.hp) ?? null, hpPct: v(h.hpPct) ?? null, mp: v(h.mp) ?? null, mpPct: v(h.mpPct) ?? null,
     petLevel: v(h.pet?.level), petHp: v(h.pet?.hp) ?? null, map: v(h.map),
     pos: pos && h.map?.id != null ? `${h.map.id}:${pos[0]},${pos[1]}` : pos ? `${pos[0]},${pos[1]}` : undefined,
   }
-  if (!s.level && s.hp == null && s.mp == null && s.hpPct == null && !s.petLevel && !s.map && !s.pos) return null
+  if (!s.level && s.hp == null && s.mp == null && s.hpPct == null && !s.petLevel && !s.map && !s.pos) return null   // 只有名字不算有資料
   let t = format(s)
   if (h.stale) {
     const age = Math.round((h.age_s ?? 0) + Math.max(0, now - seenAt) / 1000)

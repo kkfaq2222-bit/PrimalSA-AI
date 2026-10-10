@@ -18,6 +18,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 os.environ.setdefault('PSA_LAYOUT', '2880x1659')     # heal / walk 匯入時會問版面；測試不碰遊戲
+import charname  # noqa: E402
 import errlog  # noqa: E402
 import heal  # noqa: E402
 import screen_sigs  # noqa: E402
@@ -48,6 +49,9 @@ def fresh_dir(name):
     watchstate.CACHE = d
     watchstate.ACK_FILE = d / 'watch.ack'
     watchstate.QUEST_LOG = d / 'quest-events.log'
+    watchstate.CONFIG_FILE = d / 'watch-config.json'
+    watchstate.CURCHAR_FILE = d / 'current-char.json'
+    watchstate.PET_AVATARS_FILE = d / 'pet-avatars.json'
     errlog.LOG = d / 'errlog.jsonl'
     for n, f in (('STATE_FILE', 'state.json'), ('LOCK_FILE', 'watch.lock'), ('STOP_FILE', 'watch.stop'), ('HUD_CFG', 'psa-hud.json'),
                  ('BATTLE_LOCK', 'battle.lock'), ('HALT_FILE', 'netwatch.halt')):
@@ -809,6 +813,158 @@ STAT_CALLS.clear()
 put_state(real_now() - 30)
 s6, t6 = heal.read_vitals(None)
 check('hud 欄位太舊（> 5 s）→ 現場 stat()', t6 is None and len(STAT_CALLS) == 1)
+
+# ---------------------------------------------------------------- 第 7 階段：人物名 / 寵物名
+# 正規化與白名單比對
+CH = ['DKB0', 'DKB02', 'DKB03', 'DKB04', 'DKB05']
+cm = charname.canon_map(CH)
+for txt, want in (('DKBO', 'DKB0'), ('DKB0', 'DKB0'), ('0KB05', 'DKB05'), ('OKBO2', 'DKB02'), ('dkb03', 'DKB03'), ('DKB 04', 'DKB04'),
+                  ('DKB', None), ('DKB06', None), ('DKB005', None), ('XKB0', None), ('', None), ('DKB0 5', 'DKB05')):
+    check(f'canon / 完全比對：{txt!r} → {want}', charname.match_texts([txt], cm) == want)
+check('同一次 OCR 命中兩個不同名字 → 不確定（None）', charname.match_texts(['DKB0', 'DKB05'], cm) is None)
+check('正規化後撞名的白名單整組丟掉', charname.canon_map(['DKBO', 'DKB0', 'AB']) == {'AB': 'AB'})
+check('只正規化首字 0 / 全部 O→0：中間的字不相似度比對', charname.match_texts(['DKB8'], cm) is None and charname.match_texts(['DKR0'], cm) is None)
+# 連續 2 次一致才採用
+nt = charname.NameTracker(CH)
+check('第 1 次讀到 → 還不採用', nt.feed(['DKBO'], 100.0) is False and nt.resolve(None, 100.0) is None)
+check('第 2 次一致 → 採用', nt.feed(['DKBO'], 103.0) is True and nt.resolve(None, 103.0)['v'] == 'DKB0')
+nt.feed(['0KB05'], 106.0)
+check('換成別的名字：第 1 次不換（沿用舊值）', nt.resolve(None, 106.0)['v'] == 'DKB0')
+nt.feed(['0KB05'], 109.0)
+check('連續 2 次 → 換新值', nt.resolve(None, 109.0)['v'] == 'DKB05')
+nt.feed(['？？'], 112.0); nt.feed(['0KB02'], 115.0); nt.feed(['？'], 118.0); nt.feed(['0KB02'], 121.0)
+check('中間讀不到 → 計數歸零（不是累積）；舊值保留', nt.resolve(None, 121.0)['v'] == 'DKB05')
+r = nt.resolve(None, 109.0 + charname.NAME_STALE_S + 1)
+check('讀不到超過 NAME_STALE_S → 沿用舊值並標 stale', r['v'] == 'DKB05' and r['stale'] is True)
+# 旁路
+nt = charname.NameTracker(CH)
+check('只有旁路 → 用旁路（src=sidecar）', nt.resolve({'name': 'DKB03', 'ts': 50.0}, 51.0) == {'v': 'DKB03', 'ts': 50.0, 'src': 'sidecar', 'stale': False})
+nt.feed(['DKB03'], 60.0, 50.0); nt.feed(['DKB03'], 64.0, 50.0)
+check('旁路與 OCR 一致 → src=both', nt.resolve({'name': 'DKB03', 'ts': 50.0}, 65.0)['src'] == 'both')
+nt.feed(['DKB04'], 70.0, 50.0); nt.feed(['DKB04'], 74.0, 50.0)
+r = nt.resolve({'name': 'DKB03', 'ts': 50.0}, 75.0)
+check('OCR 較新且不同 → OCR 勝出並標 conflict', r['v'] == 'DKB04' and r['src'] == 'ocr' and r.get('conflict') is True)
+r = nt.resolve({'name': 'DKB05', 'ts': 80.0}, 81.0)
+check('旁路較新 → 旁路勝出（conflict）', r['v'] == 'DKB05' and r['src'] == 'sidecar' and r.get('conflict') is True)
+check('旁路剛寫入 NAME_SETTLE_S 內的 OCR 讀數不採用（舊角色名牌 / 切換動畫）', nt.feed(['DKB04'], 82.0, 80.0) is False and nt.cand is None)
+# watch 整合
+def ocr_json(*names):
+    return (0, json.dumps({'ok': True, 'lines': [{'text': n, 'x': 715, 'y': 436, 'zoom': 2} for n in names]}, ensure_ascii=False) + '\n', '')
+
+
+class Fake2(Fake):
+    """多一支 ocr.ps1（名牌）；avatar 的 pixel 另外回指定指紋"""
+    ocr = (0, '{"ok": false}\n', '')
+    avatar = None
+
+    def __call__(self, script, *args, timeout=None):
+        if script == 'ocr.ps1':
+            self.calls.append((script, args, timeout))
+            self.clk.t += 0.15
+            r = self.ocr() if callable(self.ocr) else self.ocr
+            return subprocess.CompletedProcess(['x'], r[0], r[1], r[2])
+        if script == 'gui.ps1' and args and args[0] == 'pixel' and self.avatar is not None and args[1] == charname.avatar_arg():
+            self.calls.append((script, args, timeout))
+            self.clk.t += 0.05
+            return subprocess.CompletedProcess(['x'], 0, self.avatar, '')
+        return Fake.__call__(self, script, *args, timeout=timeout)
+
+
+def make2(name, chars=CH, side=None, pets=None):
+    fresh_dir(name)
+    if chars is not None:
+        watchstate.CONFIG_FILE.write_text(json.dumps({'chars': chars}), encoding='utf-8')
+    if side:
+        watchstate.CURCHAR_FILE.write_text(json.dumps(side), encoding='utf-8')
+    if pets:
+        watchstate.PET_AVATARS_FILE.write_text(json.dumps(pets), encoding='utf-8')
+    clk = Clock(); fk = Fake2(clk)
+    fk.pixel = (0, px_out('idle'), ''); fk.stat = (0, json.dumps(STAT_OK, ensure_ascii=False) + '\n', '')
+    winenv.run_ps = fk; winenv._server_wanted = lambda s: False; winenv.server_alive = lambda: True
+    w = watch.Watcher(clock=clk, mono=clk, sleep=clk.sleep)
+    assert w.acquire()[0] == 0
+    w.ocr_on = True
+    return w, clk, fk
+
+
+watch.OCR_ON = True
+w, clk, fk = make2('name1')
+fk.ocr = ocr_json('DKBO')
+run_cycles(w, clk, 14)            # 7 s：3 次 stat / ocr 週期（每 3 s）
+nm = watchstate.read()['hud']['name']
+check('名牌 OCR：連續 2 次 DKBO → hud.name = DKB0（src=ocr）', nm['v'] == 'DKB0' and nm['src'] == 'ocr' and nm['stale'] is False, str(nm))
+oc = [c for c in fk.calls if c[0] == 'ocr.ps1']
+check('ocr 參數：框 660,420,120x30、-Light 200、帶 timeout', oc and oc[0][1][:4] == ('660', '420', '120', '30') and '-Light' in oc[0][1] and oc[0][2] == watch.PS_TIMEOUT, str(oc[:1]))
+fk.ocr = ocr_json('、【bUZL)I')
+run_cycles(w, clk, 40)
+nm = watchstate.read()['hud']['name']
+check('之後讀不到 → 沿用舊值 DKB0，過 15 s 標 stale', nm['v'] == 'DKB0' and nm['stale'] is True, str(nm))
+# 白名單 / 旁路都沒有 → '?'
+w, clk, fk = make2('name2', chars=None)
+fk.ocr = ocr_json('DKB0')
+run_cycles(w, clk, 4)
+check('沒有白名單也沒有旁路 → hud.name = ?（不呼叫 ocr.ps1）', watchstate.read()['hud']['name']['v'] == '?' and not any(c[0] == 'ocr.ps1' for c in fk.calls))
+# 旁路為主：只有旁路 → 名字；OCR 同名 → both
+w, clk, fk = make2('name3', side={'name': 'DKB03', 'ts': 1_000_000.0 - 100})
+fk.ocr = ocr_json('DKB03')
+run_cycles(w, clk, 14)
+nm = watchstate.read()['hud']['name']
+check('旁路 + OCR 一致 → src=both', nm['v'] == 'DKB03' and nm['src'] == 'both', str(nm))
+w, clk, fk = make2('name4', side={'name': 'DKB03', 'ts': 1_000_000.0 - 100})
+fk.ocr = ocr_json('DKB05')
+run_cycles(w, clk, 14)
+nm = watchstate.read()['hud']['name']
+check('OCR 連續 2 次讀到別的角色且較新 → OCR 勝出、標 conflict', nm['v'] == 'DKB05' and nm.get('conflict') is True, str(nm))
+# 完整戰鬥 / 對話不讀名牌
+for sname in ('dialog', 'battle'):
+    w, clk, fk = make2('name_skip_' + sname)
+    fk.pixel = (0, px_out(sname), '')
+    fk.ocr = ocr_json('DKB0')
+    run_cycles(w, clk, 5)
+    check(f'畫面 {sname}（判成 {w.cur}）：不呼叫名牌 OCR', not any(c[0] == 'ocr.ps1' for c in fk.calls))
+# 寵物頭像：沒學過 → ?；學過 → 名字；兩隻太像 → ?
+AV = [(i * 7) % 256 for i in range(len(charname.AVATAR_PTS) * 3)]
+def av_out(vals):
+    return ' '.join(f'{vals[i]},{vals[i+1]},{vals[i+2]}' for i in range(0, len(vals), 3))
+w, clk, fk = make2('pet1', pets={'迪基格斯': [AV]})
+fk.avatar = av_out(AV); fk.ocr = ocr_json('DKB0')
+run_cycles(w, clk, 4)
+pn = watchstate.read()['hud']['pet']['name']
+check('寵物頭像比對到學過的 → 名字（src=learn）', pn['v'] == '迪基格斯' and pn['src'] == 'learn' and pn['stale'] is False, str(pn))
+other = [(v + 90) % 256 for v in AV]
+fk.avatar = av_out(other)
+run_cycles(w, clk, 4)
+check('不同的頭像（沒學過）→ ?', watchstate.read()['hud']['pet']['name']['v'] == '?')
+near = [min(255, v + 3) for v in AV]
+check('微小差異（3）仍比對到', charname.match_avatar(near and charname.parse_avatar(av_out(near)), {'迪基格斯': [AV]}) == '迪基格斯')
+check('兩隻幾乎一樣（第二名太接近）→ 不確定 None', charname.match_avatar(AV, {'A': [AV], 'B': [[min(255, v + 2) for v in AV]]}) is None)
+w, clk, fk = make2('pet2')   # 庫是空的
+fk.avatar = av_out(AV)
+run_cycles(w, clk, 4)
+check('沒有頭像庫 → 寵物名 ?（不讀頭像像素）', watchstate.read()['hud']['pet']['name']['v'] == '?' and not any(c[0] == 'gui.ps1' and c[1][0] == 'pixel' and c[1][1] == charname.avatar_arg() for c in fk.calls))
+# 零輸入：加了名牌 OCR / 頭像 pixel 後仍只有 pixel / info + stat / ocr
+w, clk, fk = make2('name_wl', pets={'迪基格斯': [AV]})
+fk.avatar = av_out(AV); fk.ocr = ocr_json('DKB0')
+run_cycles(w, clk, 10)
+check('第 7 階段零輸入：gui 只有 pixel / info、腳本只有 gui / stat / ocr',
+      {c[1][0] for c in fk.calls if c[0] == 'gui.ps1'} <= {'pixel', 'info'} and {c[0] for c in fk.calls} <= {'gui.ps1', 'stat.ps1', 'ocr.ps1'})
+check('每個呼叫都帶 timeout', all(c[2] for c in fk.calls))
+# CLI：--set-char / --learn-pet
+fresh_dir('cli7')
+watchstate.CONFIG_FILE.write_text(json.dumps({'chars': CH}), encoding='utf-8')
+check('--set-char 白名單內（O/0 容錯）→ 寫旁路檔', watch.cmd_set_char('dkbo2') == 0 and watchstate.read_current_char()['name'] == 'DKB02' and watchstate.read_current_char()['src'] == 'set-char')
+check('--set-char 不在白名單 → 2、不寫', watch.cmd_set_char('XYZ') == 2 and watchstate.read_current_char()['name'] == 'DKB02')
+fk = Fake2(Clock()); fk.pixel = (0, px_out('idle'), ''); fk.avatar = av_out(AV); winenv.run_ps = fk
+check('--learn-pet 在主畫面 → 存庫', watch.cmd_learn_pet('迪基格斯') == 0 and charname.load_avatars(watchstate.PET_AVATARS_FILE)['迪基格斯'] == [AV])
+check('--learn-pet 同樣本重複學 → 不重複存', watch.cmd_learn_pet('迪基格斯') == 0 and len(charname.load_avatars(watchstate.PET_AVATARS_FILE)['迪基格斯']) == 1)
+fk.pixel = (0, px_out('dialog'), '')
+check('--learn-pet 畫面被蓋住（對話）→ 拒絕、不取樣', watch.cmd_learn_pet('X') == 1 and 'X' not in charname.load_avatars(watchstate.PET_AVATARS_FILE))
+# 旁路 API
+fresh_dir('curchar')
+check('write_current_char / read_current_char 來回', watchstate.write_current_char('DKB04', src='test', now=lambda: 123.0) and watchstate.read_current_char() == {'name': 'DKB04', 'ts': 123.0, 'src': 'test'})
+Path(watchstate.CURCHAR_FILE).write_text('{bad')
+check('旁路檔壞掉 → None', watchstate.read_current_char() is None)
+watch.OCR_ON = False
 
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')

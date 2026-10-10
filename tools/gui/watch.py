@@ -8,6 +8,8 @@
   uv run --no-project python tools/gui/watch.py --status     印鎖與 state 摘要
   uv run --no-project python tools/gui/watch.py --stop       要求常駐 watch 結束（寫 watch.stop 與 psa-hud.json watch=false）
   uv run --no-project python tools/gui/watch.py --ack        清掉 quest 轉述的驗證警報（人工確認過畫面後）
+  uv run --no-project python tools/gui/watch.py --set-char DKB0   寫旁路檔 current-char.json（切換角色的工具點完卡片後呼叫；watch 以它為主）
+  uv run --no-project python tools/gui/watch.py --learn-pet 迪基格斯  把目前 HUD 的寵物頭像存成這個名字（只讀；沒學過的寵物顯示「?」）
   uv run --no-project python tools/gui/watch.py --unlock     刪鎖（別平台 / 已死擁有者的殘鎖；同平台擁有者還活著要加 --force）
   uv run --no-project python tools/gui/watch.py --once       讀一次畫面、印 state（不寫檔、不上鎖）
   uv run --no-project python tools/gui/watch.py --bench N    跑 N 輪印 cycle_ms 統計（不寫檔、不上鎖）
@@ -36,6 +38,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import battleguard  # noqa: E402
+import charname  # noqa: E402
 import errlog  # noqa: E402
 import screen_sigs  # noqa: E402
 import watchstate  # noqa: E402
@@ -237,6 +240,14 @@ class Watcher:
         self.q_alerts: list = []
         self.q_off = self._qlog_size()   # 啟動時記下檔案大小，只看之後新增的行
         self.last_qscan = mono()
+        # 人物名 / 寵物名（第 7 階段）
+        self.names = charname.NameTracker(watchstate.load_config().get('chars'))
+        self.side = None                 # current-char.json 內容（旁路）
+        self._side_mt = None
+        self._cfg_mt = None
+        self.pet_lib: dict = {}
+        self._pet_mt = None
+        self.pet_name = None             # {'v','ts','src'}
 
     # ---- 啟動 / 結束 ----
     def lock_info(self) -> dict:
@@ -282,6 +293,7 @@ class Watcher:
             raise _Exit(5, '收到 --stop')
         self._scan_quest_log()
         self._check_ack()
+        self._read_side()
         # 父程序看門狗（只有 hud 啟動時）
         if self.owner == 'hud' and self.mono() - self.last_ppid_check >= (5.0 if sys.platform == 'win32' else 0.0):
             self.last_ppid_check = self.mono()
@@ -577,6 +589,48 @@ class Watcher:
         r, how, ms = self._call(_ps, 'stat.ps1')
         self.ocr_ms = ms
         self.merge_stat(self._parse_stat(r), self.call_t0)
+        self._read_names()
+
+    # ---- 人物名 / 寵物名 ----
+    @staticmethod
+    def _mtime(p):
+        try:
+            return Path(p).stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def _read_side(self) -> None:
+        """旁路 current-char.json（切換角色的工具寫）：mtime 變了才重讀"""
+        mt = self._mtime(watchstate.CURCHAR_FILE)
+        if mt != self._side_mt:
+            self._side_mt = mt
+            self.side = watchstate.read_current_char()
+
+    def _reload_cfg(self) -> None:
+        mt = self._mtime(watchstate.CONFIG_FILE)
+        if mt != self._cfg_mt:
+            self._cfg_mt = mt
+            self.names.set_chars(watchstate.load_config().get('chars'))
+        mt = self._mtime(watchstate.PET_AVATARS_FILE)
+        if mt != self._pet_mt:
+            self._pet_mt = mt
+            self.pet_lib = charname.load_avatars(watchstate.PET_AVATARS_FILE)
+
+    def _read_names(self) -> None:
+        """stat 之後（同樣只在主畫面類、非完整戰鬥）：頭頂名牌 OCR 核對白名單 + 寵物頭像取樣比對。讀不到都沿用舊值"""
+        self._reload_cfg()
+        if self.names.cmap:
+            r, how, ms = self._call(_ps, 'ocr.ps1', *map(str, charname.NAME_BOX), *charname.NAME_OCR_OPTS)
+            d = self._parse_stat(r)
+            if d and d.get('ok'):
+                texts = [str(ln.get('text', '')) for ln in d.get('lines', []) if isinstance(ln, dict)]
+                self.names.feed(texts, self.clock(), self.side['ts'] if self.side else None)
+        if self.pet_lib:
+            r, how, ms = self._call(_gui, 'pixel', charname.avatar_arg())
+            if r is not None and self._kind(r) == 'ok':
+                fp = charname.parse_avatar(r.stdout)
+                if fp:
+                    self.pet_name = {'v': charname.match_avatar(fp, self.pet_lib) or '?', 'ts': self.clock(), 'src': 'learn'}
 
     @staticmethod
     def _parse_stat(r):
@@ -644,6 +698,12 @@ class Watcher:
                     pass
         if self.hud_raw:
             out['raw'] = self.hud_raw
+        nm = self.names.resolve(self.side, now)
+        out['name'] = nm or {'v': '?', 'ts': None, 'src': None, 'stale': True}
+        if pet or self.pet_name:
+            pn = dict(self.pet_name) if self.pet_name else {'v': '?', 'ts': None, 'src': None}
+            pn['stale'] = pn.get('ts') is None or now - pn['ts'] > charname.NAME_STALE_S
+            out.setdefault('pet', {})['name'] = pn
         return out
 
     # ---- state 組裝 / 寫檔 ----
@@ -770,6 +830,51 @@ def cmd_ack() -> int:
     return 0
 
 
+def cmd_set_char(name: str) -> int:
+    """--set-char：手動 / 切換角色的工具寫旁路檔（當前角色 = name）。有白名單時名字要在白名單內（正規化後比對）"""
+    chars = watchstate.load_config().get('chars')
+    if chars:
+        hit = charname.match_texts([name], charname.canon_map(chars))
+        if not hit:
+            print(f'{name!r} 不在白名單（watch-config.json 的 chars）：{chars}', file=sys.stderr)
+            return 2
+        name = hit
+    if not watchstate.write_current_char(name, src='set-char'):
+        print('寫入 current-char.json 失敗', file=sys.stderr)
+        return 1
+    print(f'當前角色 = {name}（已寫 current-char.json；watch 以它為主，頭頂名牌 OCR 核對）')
+    return 0
+
+
+def cmd_learn_pet(name: str) -> int:
+    """--learn-pet：把「現在 HUD 上的寵物頭像」存成這個名字（只讀 pixel；畫面必須是主畫面 / 行走中，否則頭像可能被蓋住）"""
+    r = _gui('pixel', ' '.join(f'{x},{y}' for x, y in screen_sigs.points()))
+    if r.returncode != 0:
+        print(f'讀不到畫面（rc={r.returncode}）：遊戲沒開 / 最小化', file=sys.stderr)
+        return 1
+    try:
+        cols = [tuple(int(v) for v in c.split(',')) for c in r.stdout.split()]
+        st = screen_sigs.classify(dict(zip(screen_sigs.points(), cols)))['state']
+    except (ValueError, KeyError):
+        print('畫面讀取失敗', file=sys.stderr)
+        return 1
+    if st not in ('idle', 'walking'):
+        print(f'目前畫面是 {st}，不是主畫面 / 行走中（頭像可能被蓋住），不取樣', file=sys.stderr)
+        return 1
+    r = _gui('pixel', charname.avatar_arg())
+    fp = charname.parse_avatar(r.stdout) if r.returncode == 0 else None
+    if not fp:
+        print('頭像取樣失敗', file=sys.stderr)
+        return 1
+    lib = charname.load_avatars(watchstate.PET_AVATARS_FILE)
+    old = charname.match_avatar(fp, lib)
+    lib = charname.learn_avatar(lib, name, fp)
+    Path(watchstate.CACHE).mkdir(parents=True, exist_ok=True)
+    Path(watchstate.PET_AVATARS_FILE).write_text(json.dumps(lib, ensure_ascii=False), encoding='utf-8')
+    print(f'已學習寵物頭像「{name}」（庫內 {len(lib)} 隻、此隻 {len(lib[name])} 個樣本）' + (f'；注意：先前這個頭像比對到「{old}」' if old and old != name else ''))
+    return 0
+
+
 def cmd_unlock(force: bool) -> int:
     d, kind = read_lock(retries=1)
     if kind == 'none':
@@ -851,6 +956,8 @@ def main(argv=None) -> int:
     g.add_argument('--stop', action='store_true')
     g.add_argument('--unlock', action='store_true')
     g.add_argument('--ack', action='store_true')
+    g.add_argument('--set-char', metavar='NAME')
+    g.add_argument('--learn-pet', metavar='NAME')
     g.add_argument('--once', action='store_true')
     g.add_argument('--bench', type=int, metavar='N')
     ap.add_argument('--max-age', type=float, default=2.0)
@@ -870,6 +977,10 @@ def main(argv=None) -> int:
         return cmd_unlock(a.force)
     if a.ack:
         return cmd_ack()
+    if a.set_char:
+        return cmd_set_char(a.set_char)
+    if a.learn_pet:
+        return cmd_learn_pet(a.learn_pet)
     if winenv.platform_kind() == 'linux':
         print('不是 WSL / Windows，無法讀遊戲視窗', file=sys.stderr)
         return 2

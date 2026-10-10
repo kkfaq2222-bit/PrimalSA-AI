@@ -11,6 +11,9 @@ export type Stat = {
   petHp?: number | null
   map?: string
   pos?: string
+  // watch 的 state.hud 才有（stat.ps1 本身沒有）：人物名 / 寵物名（'?' = 不確定；結尾 ? = 舊值）
+  name?: string
+  petName?: string
 }
 
 // errlog.jsonl 一筆

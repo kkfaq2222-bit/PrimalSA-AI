@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   Supervisor, backoffMs, decideExit, errEntries, errLine, format, logPathFromCwd, parseState, stallThresholdMs, statPathFromCwd,
-  viewModel, watchAlive, watchPathFromCwd, hudText,
+  viewModel, watchAlive, watchPathFromCwd, hudText, nameText,
 } from './register'
 import type { SupDeps, ViewIn } from './register'
 
@@ -295,4 +295,21 @@ test('警示：提示視窗 = 黃字；verify_suspect / alerts = 紅字（verify
   expect(a.map(x => x.tone)).toEqual(['red', 'red', 'red'])
   expect(a[0]?.text).toContain('疑似答題')
   expect(a.some(x => x.text.includes('L3'))).toBe(false)
+})
+
+// ── 第 7 階段：人物名 / 寵物名顯示 ──
+test('nameText：沒有 → 不顯示；? 照舊；stale 加結尾 ?；conflict 加 !', () => {
+  expect(nameText(undefined)).toBeUndefined()
+  expect(nameText({ v: 'DKB0', ts: 1 })).toBe('DKB0')
+  expect(nameText({ v: 'DKB0', ts: 1, stale: true })).toBe('DKB0?')
+  expect(nameText({ v: 'DKB05', ts: 1, conflict: true })).toBe('DKB05!')
+  expect(nameText({ v: '?', ts: undefined })).toBe('?')
+})
+
+test('hudText：帶人物名 / 寵物名；沒學過的寵物顯示 ?；只有名字不算有資料', () => {
+  const st = { v: 1, hud: { ...HUD, name: { v: 'DKB0', ts: 1 }, pet: { ...HUD.pet, name: { v: '迪基格斯', ts: 1 } } }, screen: { state: 'idle' } }
+  expect(hudText(st, 0, 0)).toBe('DKB0  0轉77級  HP 208  MP 45  |  寵 迪基格斯 0轉77級 HP 434  |  奇努伊的海底通路 31401:91,29')
+  const unk = { v: 1, hud: { ...HUD, name: { v: '?' }, pet: { ...HUD.pet, name: { v: '?' } } }, screen: { state: 'idle' } }
+  expect(hudText(unk, 0, 0)).toBe('?  0轉77級  HP 208  MP 45  |  寵 ? 0轉77級 HP 434  |  奇努伊的海底通路 31401:91,29')
+  expect(hudText({ v: 1, hud: { ok: false, stale: true, name: { v: 'DKB0' } } }, 0, 0)).toBeNull()
 })

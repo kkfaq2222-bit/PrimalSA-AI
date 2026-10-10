@@ -24,6 +24,9 @@ HUD_CFG = CACHE / 'psa-hud.json'
 BATTLE_LOCK = CACHE / 'battle.lock'
 HALT_FILE = CACHE / 'netwatch.halt'
 ACK_FILE = CACHE / 'watch.ack'
+CONFIG_FILE = CACHE / 'watch-config.json'        # {"chars": [角色名白名單]}（不進 git）
+CURCHAR_FILE = CACHE / 'current-char.json'       # 切換角色的工具點完卡片後寫：{name, ts, src}
+PET_AVATARS_FILE = CACHE / 'pet-avatars.json'    # watch.py --learn-pet 建的寵物頭像庫
 QUEST_LOG = ROOT / 'notes' / 'quest-events.log'
 VERSION = 1
 
@@ -160,6 +163,37 @@ def hud_field(name: str, max_age: float = 5.0, path=None, now=time.time, platfor
             and now() - f['ts'] <= max_age:
         return f.get('v')
     return None
+
+
+def load_config(path=None) -> dict:
+    """watch-config.json（沒有 / 壞檔 → {}）。目前只用 chars：角色名白名單（人物名 OCR 只在白名單內完全比對）"""
+    try:
+        d = json.loads(Path(path or CONFIG_FILE).read_text(encoding='utf-8'))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_current_char(name: str, src: str = 'tool', path=None, now=time.time) -> bool:
+    """旁路：**切換當前角色的工具在點完切換面板卡片、確認切過去之後呼叫**（也可手動 `watch.py --set-char 名`）。
+    watch 以它為主、頭頂名牌 OCR 只核對；寫入失敗回 False（不影響呼叫端）"""
+    p = Path(path or CURCHAR_FILE)
+    tmp = p.with_name(p.name + f'.{os.getpid()}.tmp')
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps({'name': str(name), 'ts': now(), 'src': src}, ensure_ascii=False), encoding='utf-8')
+        os.replace(tmp, p)
+        return True
+    except OSError:
+        return False
+
+
+def read_current_char(path=None) -> dict | None:
+    try:
+        d = json.loads(Path(path or CURCHAR_FILE).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) and isinstance(d.get('name'), str) and isinstance(d.get('ts'), (int, float)) else None
 
 
 def hud_vitals(max_age: float = 5.0, newer_than: float | None = None, path=None, now=time.time, platform: str | None = None) -> dict | None:
