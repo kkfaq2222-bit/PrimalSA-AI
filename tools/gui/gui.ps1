@@ -67,9 +67,16 @@ public class Guard {
   [DllImport("user32.dll")] static extern bool PostThreadMessage(uint tid, uint m, IntPtr w, IntPtr l);
   [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandle(string n);
   [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] static extern UIntPtr SetTimer(IntPtr h, UIntPtr id, uint ms, IntPtr p);
   public struct MSG { public IntPtr h; public uint m; public IntPtr w, l; public uint t; public int x, y; }
-  static HookProc proc; static IntPtr hook; static uint tid; static System.Threading.Thread th;
+  // 每條鉤子執行緒各有自己的 Inst（hook / tid / proc 都是實例欄位）：自己裝、自己拆，
+  // 下一次 Start 不會覆蓋上一條的狀態；Stop 只對自己啟動的那條送 WM_QUIT。
+  class Inst { public HookProc proc; public IntPtr hook; public uint tid; public System.Threading.Thread th; }
+  static Inst cur;
   public static int Swallowed;
+  public static int JoinTimeouts;   // Stop() Join 逾時的累計次數（gui.ps1 讀了寫 actions.log）
+  public static int AutoUnhooked;   // 逾時自動解除（沒人呼叫 Stop）的累計次數
+  public const int MaxLifeMs = 2000;   // 鉤子最多活 2 秒，之後自己 Unhook
   static IntPtr Cb(int n, IntPtr w, IntPtr l) {
     if (n >= 0) {
       int flags = System.Runtime.InteropServices.Marshal.ReadInt32(l, 12);   // MSLLHOOKSTRUCT.flags
@@ -77,21 +84,35 @@ public class Guard {
       // 0x0202 / 0x0205 / 0x0208 = 左 / 右 / 中鍵放開
       if ((flags & 1) == 0 && m != 0x0202 && m != 0x0205 && m != 0x0208) { Swallowed++; return (IntPtr)1; }
     }
-    return CallNextHookEx(hook, n, w, l);
+    return CallNextHookEx(IntPtr.Zero, n, w, l);   // 低階鉤子 hhk 參數會被忽略，不用依賴 static hook
   }
   public static void Start() {
+    if (cur != null) Stop();   // 上一條還沒收就先收掉，避免鉤子累積
     Swallowed = 0;
+    var inst = new Inst(); cur = inst;
     var ready = new System.Threading.ManualResetEvent(false);
-    th = new System.Threading.Thread(delegate() {
-      tid = GetCurrentThreadId(); proc = Cb;
-      hook = SetWindowsHookEx(14, proc, GetModuleHandle(null), 0);   // WH_MOUSE_LL
+    inst.th = new System.Threading.Thread(delegate() {
+      inst.tid = GetCurrentThreadId(); inst.proc = Cb;
+      inst.hook = SetWindowsHookEx(14, inst.proc, GetModuleHandle(null), 0);   // WH_MOUSE_LL
+      SetTimer(IntPtr.Zero, UIntPtr.Zero, (uint)MaxLifeMs, IntPtr.Zero);   // 到時間丟 WM_TIMER 讓迴圈結束
       ready.Set();
-      MSG msg; while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) { }   // 低階鉤子要有訊息迴圈
-      UnhookWindowsHookEx(hook);
+      MSG msg;
+      while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {   // 低階鉤子要有訊息迴圈
+        if (msg.m == 0x0113) { AutoUnhooked++; break; }   // WM_TIMER：逾時自動解除
+      }
+      if (inst.hook != IntPtr.Zero) UnhookWindowsHookEx(inst.hook);   // 自己裝的自己拆（區域 inst，不會拆到別條）
     });
-    th.IsBackground = true; th.Start(); ready.WaitOne(1000);
+    inst.th.IsBackground = true; inst.th.Start(); ready.WaitOne(1000);
   }
-  public static void Stop() { if (th == null) return; PostThreadMessage(tid, 0x0012, IntPtr.Zero, IntPtr.Zero); th.Join(500); th = null; }   // WM_QUIT
+  // 回傳 false = Join 逾時（執行緒還沒收完，但它之後仍會自己拆自己的鉤子）
+  public static bool Stop() {
+    var inst = cur; cur = null;
+    if (inst == null) return true;
+    PostThreadMessage(inst.tid, 0x0012, IntPtr.Zero, IntPtr.Zero);   // WM_QUIT
+    bool ok = inst.th.Join(500);
+    if (!ok) JoinTimeouts++;
+    return ok;
+  }
 }
 "@
 [W]::SetProcessDPIAware() | Out-Null
@@ -140,7 +161,16 @@ function ToLParam($x, $y) { $cx = [int]([double]$x * $Scale); $cy = [int]([doubl
 function BgMsg($msg, $wp, $x, $y) { MoveTo $x $y; [W]::PostMessage($h, $msg, [IntPtr]$wp, (ToLParam $x $y)) | Out-Null }
 # 背景滑鼠動作開始 / 結束：鎖住使用者實體滑鼠、記下並還原使用者游標（動作期間使用者移動的量被吞掉，游標回到原位）
 function BgBegin { [Guard]::Start(); $script:saved = New-Object W+POINT; [W]::GetCursorPos([ref]$script:saved) | Out-Null; Wake }
-function BgEnd { Start-Sleep -Milliseconds 40; [W]::SetCursorPos($script:saved.X, $script:saved.Y) | Out-Null; [Guard]::Stop() }
+# BgEnd 放在 finally 裡跑：$script:saved 有值才還原游標；Guard 一定 Stop，Join 逾時寫 actions.log
+function BgEnd {
+  try {
+    Start-Sleep -Milliseconds 40
+    if ($script:saved) { [W]::SetCursorPos($script:saved.X, $script:saved.Y) | Out-Null }
+  } finally {
+    $script:saved = $null
+    if (-not [Guard]::Stop()) { ActLog "Guard Stop Join 逾時（累計 $([Guard]::JoinTimeouts) 次）" }
+  }
+}
 # 按鍵：WM_KEYDOWN / WM_KEYUP。Unity 會自己 TranslateMessage 產生 WM_CHAR（實測 {BS} 一次刪一字）
 function BgKey($vk) {
   $sc = [int64][W]::MapVirtualKey($vk, 0)
@@ -215,11 +245,12 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       [W]::mouse_event($fdn, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 60
       [W]::mouse_event($fup, 0, 0, 0, [IntPtr]::Zero)
     } else {
-      BgBegin
-      BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg $dn $mk $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg $up 0 $A1 $A2
-      BgEnd
+      try {
+        BgBegin
+        BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg $dn $mk $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg $up 0 $A1 $A2
+      } finally { BgEnd }
     }
     ActLog "click $A1,$A2$(if ($A3) { ' ' + $A3 })"
     "click $A1,$A2" + $(if (-not $script:Fg -and [Guard]::Swallowed) { "（擋下使用者滑鼠 $([Guard]::Swallowed) 次）" })
@@ -234,13 +265,14 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       }
     } else {
       # 背景模式未實測：第二下用 WM_LBUTTONDBLCLK（0x0203），照 Windows 雙擊的訊息順序送
-      BgBegin
-      BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg 0x0202 0 $A1 $A2; Start-Sleep -Milliseconds 80
-      BgMsg 0x0203 1 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg 0x0202 0 $A1 $A2
-      BgEnd
+      try {
+        BgBegin
+        BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg 0x0202 0 $A1 $A2; Start-Sleep -Milliseconds 80
+        BgMsg 0x0203 1 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg 0x0202 0 $A1 $A2
+      } finally { BgEnd }
     }
     ActLog "dclick $A1,$A2"
     "dclick $A1,$A2"
@@ -255,15 +287,16 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       }
       [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
     } else {
-      BgBegin
-      BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
-      for ($i = 1; $i -le 10; $i++) {
-        $x = [double]$A1 + ([double]$A3 - [double]$A1) * $i / 10; $y = [double]$A2 + ([double]$A4 - [double]$A2) * $i / 10
-        BgMsg 0x0200 1 $x $y; Start-Sleep -Milliseconds 30
-      }
-      BgMsg 0x0202 0 $A3 $A4
-      BgEnd
+      try {
+        BgBegin
+        BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
+        for ($i = 1; $i -le 10; $i++) {
+          $x = [double]$A1 + ([double]$A3 - [double]$A1) * $i / 10; $y = [double]$A2 + ([double]$A4 - [double]$A2) * $i / 10
+          BgMsg 0x0200 1 $x $y; Start-Sleep -Milliseconds 30
+        }
+        BgMsg 0x0202 0 $A3 $A4
+      } finally { BgEnd }
     }
     ActLog "drag $A1,$A2 -> $A3,$A4"
     "drag $A1,$A2 -> $A3,$A4"
