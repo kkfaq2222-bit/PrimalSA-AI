@@ -257,6 +257,21 @@ def heal_trip(spot: str, no_return: bool = False) -> None:
 EXIT_VERIFY = 11     # --watch 因疑似驗證視窗暫停超過 10 分鐘，已停止（見 errlog）
 
 
+def read_vitals(last_ts=None, wait: float = 6.0, sleep=time.sleep, mono=time.monotonic):
+    """--watch 讀血 / 魔條：watch 活著就讀 state.hud（欄位年齡 ≤ 5 s；要求比 last_ts 新的一筆，最多等 wait 秒，
+    watch 每 3 s 才更新一次 HUD，所以「連續 2 次」不會讀到同一筆）；watch 不可用 / 太舊 → 退回現場 stat()。
+    → (stat 格式的 dict, 這筆的 ts 或 None = 來自 stat())"""
+    t_end = mono() + (wait if last_ts is not None else 0.0)
+    while True:
+        v = watchstate.hud_vitals(5.0, newer_than=last_ts)
+        if v:
+            return {'ok': True, 'hp': v['hp'], 'mp': v['mp'], 'hpPct': v['hpPct'], 'mpPct': v['mpPct']}, v['ts']
+        if mono() >= t_end:
+            break
+        sleep(0.5)
+    return stat(), None
+
+
 def low(s: dict, hp: int, mp: int) -> bool | None:
     """看血條 / 魔條比例（stat.ps1 的 hpPct / mpPct）。讀不到（戰鬥畫面、對話框蓋住 HUD）回 None = 不判斷。
     不用 OCR 的 hp / mp 數字：個位數（例 HP 1）OCR 會回 null，以前把 null 當低血，剛補滿也會誤判。"""
@@ -297,15 +312,16 @@ def main() -> int:
             return EXIT_VERIFY
         netwatch.guard('heal')           # 網路異常提示 → 點確定；登入畫面 → 自動按登錄重登（失敗才 exit 10；不輸入帳密）
         hits = 0
+        last_ts = None
         for i in range(a.confirm):
-            s = stat()
+            s, last_ts = read_vitals(last_ts)         # watch 活著 = 讀 state.hud（0 次 stat.ps1）；否則現場 stat
             r = low(s, a.hp, a.mp)
             if a.verbose:
                 log(f'HP {s.get("hp")} ({s.get("hpPct")}%) MP {s.get("mp")} ({s.get("mpPct")}%) → {r}', act=False)
             if not r:
                 break          # 不低或讀不到：這輪不算
             hits += 1
-            if hits < a.confirm:
+            if hits < a.confirm and last_ts is None:
                 time.sleep(3)
         if hits >= a.confirm:
             log(f'血 / 魔太低（HP {s.get("hp")} {s.get("hpPct")}%，MP {s.get("mp")} {s.get("mpPct")}%），回村補血')

@@ -17,7 +17,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+os.environ.setdefault('PSA_LAYOUT', '2880x1659')     # heal / walk 匯入時會問版面；測試不碰遊戲
 import errlog  # noqa: E402
+import heal  # noqa: E402
 import screen_sigs  # noqa: E402
 import watch  # noqa: E402
 import watchstate  # noqa: E402
@@ -774,6 +776,39 @@ check('verify_suspect()：只有 alerts.kind=verify 也算', watchstate.verify_s
 watchstate.write({**base, 'ts': now - 60}, 'x')
 check('verify_suspect()：state 太舊 → None（不暫停）', watchstate.verify_suspect() is None)
 watch.OCR_ON = False
+
+# ---- heal.read_vitals：watch 活著時 0 次 stat、要求更新的一筆；不可用退回 stat ----
+fresh_dir('vitals')
+me = winenv.platform_kind()
+T = time.time()
+def put_state(ts, hp=30, mp=80, running=True, plat=None, age_hp=0.0):
+    watchstate.write({'v': 1, 'ts': T, 'seq': 1, 'watcher': {'running': running, 'platform': plat or me, 'token': 't'},
+                      'hud': {'hpPct': {'v': hp, 'ts': ts - age_hp}, 'mpPct': {'v': mp, 'ts': ts}, 'hp': {'v': 100, 'ts': ts}, 'mp': {'v': 50, 'ts': ts}}}, 'x')
+STAT_CALLS = []
+heal.stat = lambda: (STAT_CALLS.append(1), {'ok': True, 'hpPct': 99, 'mpPct': 99})[1]
+real_now = time.time
+put_state(real_now())
+s1, t1 = heal.read_vitals(None)
+check('watch 活著：read_vitals 讀 state.hud（0 次 stat）', s1['hpPct'] == 30 and s1['mpPct'] == 80 and t1 is not None and not STAT_CALLS)
+c = Clock(); put_state(t1)          # 同一筆：要求更新的一筆，等不到 → 退回 stat
+s2, t2 = heal.read_vitals(t1, wait=1.0, sleep=c.sleep, mono=c)
+check('同一筆 hud（沒有更新）等 wait 秒後退回 stat()', t2 is None and s2['hpPct'] == 99 and len(STAT_CALLS) == 1)
+STAT_CALLS.clear()
+def newer(_s):
+    put_state(real_now(), hp=25)
+s3, t3 = heal.read_vitals(t1, wait=3.0, sleep=lambda x: newer(x), mono=Clock())
+check('等到更新的一筆 → 用它（hp 25），仍 0 次 stat', s3['hpPct'] == 25 and t3 > t1 and not STAT_CALLS)
+put_state(real_now(), running=False)
+s4, t4 = heal.read_vitals(None)
+check('watch 不在（running=false）→ 現場 stat()', t4 is None and len(STAT_CALLS) == 1)
+STAT_CALLS.clear()
+put_state(real_now(), plat='windows' if me == 'wsl' else 'wsl')
+s5, t5 = heal.read_vitals(None)
+check('別平台的 state（時鐘不可比）→ 現場 stat()', t5 is None and len(STAT_CALLS) == 1)
+STAT_CALLS.clear()
+put_state(real_now() - 30)
+s6, t6 = heal.read_vitals(None)
+check('hud 欄位太舊（> 5 s）→ 現場 stat()', t6 is None and len(STAT_CALLS) == 1)
 
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')

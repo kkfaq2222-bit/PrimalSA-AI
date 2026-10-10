@@ -27,6 +27,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 ## 依情境找
 | 想做的事 | 去哪 |
 |---|---|
+| 不碰遊戲就看目前狀態（畫面種類、等級 / HP、疑似驗證警報） | `uv run --no-project python tools/gui/watch.py --get`（需 psa-hud 在跑；僅供參考，不能當點擊依據；說明見 [../SKILL.md](../SKILL.md)「即時狀態監看」） |
 | 單人逃跑解任務（跑 NPC → 組隊 → 對話 / 打；紅暴 2031） | `/psa-quest-solo` skill（介面 / 逃跑鈕座標見 [quest.md](quest.md#單人逃跑解任務questpy---solo----fight2026-10-10流程見-psa-quest-solo-skill)） |
 | 5 個角色組成一隊 | `/psa-quick-team` skill（介面參考 [team.md](team.md#快速組隊)） |
 | 解散隊伍 | `/psa-disband-team` skill（介面參考 [team.md](team.md#解散隊伍)） |

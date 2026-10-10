@@ -256,13 +256,14 @@ def main() -> int:
                 next_scan = 0.0                      # 重連後馬上重掃一輪（netwatch 已恢復原地遇敵、檢查隊伍）
             if not a.no_heal and not a.once:
                 hits = 0
+                last_ts = None
                 for i in range(2):
-                    s = heal.stat()
+                    s, last_ts = heal.read_vitals(last_ts)     # watch 活著 = 讀 state.hud；否則現場 stat
                     r = heal.low(s, a.hp, a.mp)
                     if not r:
                         break
                     hits += 1
-                    if hits < 2:
+                    if hits < 2 and last_ts is None:
                         time.sleep(3)
                 if hits >= 2:
                     log(f'血 / 魔太低（HP {s.get("hpPct")}%，MP {s.get("mpPct")}%），回村補血')

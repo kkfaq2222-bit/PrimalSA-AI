@@ -162,6 +162,29 @@ def hud_field(name: str, max_age: float = 5.0, path=None, now=time.time, platfor
     return None
 
 
+def hud_vitals(max_age: float = 5.0, newer_than: float | None = None, path=None, now=time.time, platform: str | None = None) -> dict | None:
+    """血 / 魔條比例給 heal --watch 當觸發條件：→ {'hpPct','mpPct','hp','mp','ts'}（ts = 兩個比例中較舊的那個的讀取時間）；
+    watch 沒跑 / 不同平台 / 欄位太舊 / 缺 hpPct 或 mpPct / ts 沒有比 newer_than 新 → None（呼叫端退回現場 stat）。
+    只是觸發條件：真的要補血時 heal_trip 內部照舊現場讀畫面"""
+    st = read(path)
+    if not st or not (st.get('watcher') or {}).get('running'):
+        return None
+    if (platform or _platform()) != st['watcher'].get('platform'):
+        return None
+    h = st.get('hud') or {}
+    out = {}
+    for k in ('hpPct', 'mpPct', 'hp', 'mp'):
+        f = h.get(k)
+        out[k] = f.get('v') if isinstance(f, dict) and isinstance(f.get('ts'), (int, float)) and now() - f['ts'] <= max_age else None
+    if out['hpPct'] is None or out['mpPct'] is None:
+        return None
+    ts = min(h['hpPct']['ts'], h['mpPct']['ts'])
+    if newer_than is not None and ts <= newer_than:
+        return None
+    out['ts'] = ts
+    return out
+
+
 # ---------------------------------------------------------------- 寫（只有 watch.py 用）
 def write(d: dict, token: str, path=None, retries: int = 5, sleep=time.sleep) -> bool:
     """原子寫：暫存檔名帶 token（不同實例不互踩）→ os.replace。Windows 撞上讀者開檔會 PermissionError：重試 5×10 ms，失敗回 False（跳過這輪）"""

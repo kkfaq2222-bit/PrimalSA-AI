@@ -41,7 +41,7 @@ bash tools/gui/gui.sh seq "click 459 456; waitstill 4000"   # 點地面走路後
 uv run --no-project python tools/gui/walk.py 1000 81 66 [--exit 1005]   # 走到某地圖座標：OCR 讀起點 → maps.bin 自動找路 → 連點 + waitstill → 終點驗證（--exit = 終點是出口）
 uv run --no-project python tools/gui/walk.py --path "1000:86,88 84,81 83,73 81,66" [--exit 1005]   # 照手動 waypoint 走（沒有通行格資料的圖用）
 uv run --no-project python tools/gui/walk.py --plan 1000 81 66 [--from 92,99]   # 只印找路結果（每段要點的截圖座標），不動
-uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40 --mp 20 --every 15]   # 回村補血再回練功點（約 21～24 秒）；--watch 看血條比例（%）自動補
+uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40 --mp 20 --every 15]   # 回村補血再回練功點（約 21～24 秒）；--watch 看血條比例（%）自動補（watch 活著時讀 state.hud 的 hpPct / mpPct，0 次額外 stat；不可用退回現場 stat；疑似驗證視窗暫停）
 uv run --no-project python tools/gui/heal.py --no-return   # 補完血停在醫院，不傳回練功點、不開遇敵（解任務被打飛後用）
 uv run --no-project python tools/gui/quest.py --solo --task 任務名   # 單人逃跑：遇怪按逃跑，到 NPC ESC 對話框退出碼 20，被打飛退出碼 21；--fight = 戰鬥步按自動戰鬥，退出碼 0 才是打贏（35 沒贏 / 36 不確定 / 33 對話無進展 / 34 不同圖，見 /psa-quest-solo）
 uv run --no-project python tools/gui/petwatch.py [--once] [--interval 30] [--target-level 77]   # 監測 5 人金布伊等級，≥ 門檻換回迪基格斯（內含補血檢查 + 維持原地遇敵，不要和 heal.py --watch 同跑）
@@ -101,6 +101,7 @@ uv run --no-project python tools/gui/errlog.py list
 全部清單與「依情境找」見 [ui/README.md](ui/README.md)。學到新畫面或新流程時，照 README 的「新增 / 更新規則」寫進對應檔並更新兩邊索引。
 
 ## 操作迴圈
+0. （選用）先看即時狀態：`uv run --no-project python tools/gui/watch.py --get --max-age 2`（有 psa-hud 在跑才有；沒有 / 太舊就回退碼 1，照下面 shot 流程）。給你「現在是哪種畫面、等級 / HP、有沒有警報」的**參考**，**不能當點擊依據**：點擊前一律現場 shot / pixel；`idle` 只代表「沒偵測到已知視窗」，**不代表沒有驗證視窗**；`alerts` / `verify_suspect` 出現就立刻停手回報。watch 本身零輸入（只送 pixel / info / stat），由開 psa-hud 的那個 session 管理（單一管理者）；殘鎖（別平台 / 已死）用 `watch.py --unlock`，同平台擁有者還活著要 `--stop` 或 `--unlock --force`；兩個平台同時開 session 時只有一邊有即時狀態。
 1. `shot` → Read 圖，先判斷**目前在哪個畫面**（主畫面 / 某面板 / 對話 / 戰鬥 / 驗證）。
 2. **速度**：遊戲響應很快（實測傳送面板 / 分頁 / NPC 對話框 / 遇敵圖示都在 0.05～0.15 秒內出現；傳送 Loading 1.0～2.2 秒）；每次呼叫 gui.sh 要多花約 0.4 秒啟動 PowerShell（gui.sh 維持一次性；Python 長程序可用常駐 server 省掉，見上方「常駐 server」）。
    - 腳本裡能用 `waitpix`（等指定點變成某顏色）/ `waitstill`（等走路停）就不要固定 `wait`；`ifok` / `ifnok` 依上一個 waitpix 結果決定做不做，面板沒出現就不會點穿。
