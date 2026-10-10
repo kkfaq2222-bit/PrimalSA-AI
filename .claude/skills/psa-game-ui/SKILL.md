@@ -89,6 +89,7 @@ uv run --no-project python tools/gui/errlog.py list
 | 看任務進度、任務詳情、自動巡路解任務（`tools/gui/quest.py --task 任務名`；檢測方針：黃色「?」優先，否則 OCR 核對追蹤列表任務名再點；`ocr.ps1` / `findmark.ps1`） | [ui/quest.md](ui/quest.md) |
 | **單人逃跑解任務**（DKB0 單人跑 NPC、遇怪逃跑 → 組隊對話 / 打；紅暴 2031；`quest.py --solo / --fight`、`psa.py steps`、`heal.py --no-return`） | **`/psa-quest-solo` skill**（介面參考 [ui/quest.md](ui/quest.md#單人逃跑解任務questpy---solo----fight2026-10-10流程見-psa-quest-solo-skill)） |
 | 背包、道具、倉庫、材料圖鑑 | [ui/bag.md](ui/bag.md) |
+| **交寵物類任務**（恐龍博士 2016 / 卡坦的願望 2019：外掛自動抓寵、共用倉庫分配、練寵、交任務；轉生 / 封印書後要重做） | **`/psa-pet-quest` skill** |
 | 寵物出戰 / 騎乘 / 休息、寵物技能 | [ui/pet.md](ui/pet.md) |
 | 傳送到別的地圖 / 練級點 | [ui/transfer.md](ui/transfer.md) |
 | 遊戲設定、離線時間 | [ui/setting.md](ui/setting.md) |

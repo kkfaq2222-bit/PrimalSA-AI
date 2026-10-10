@@ -11,3 +11,6 @@ __pycache__/
 notes/
 tools/mods/*/.claude-plugin/types/
 .wrangler/
+
+# 誤存的遊戲截圖
+/*.png
