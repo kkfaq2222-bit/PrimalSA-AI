@@ -144,14 +144,17 @@ class Script:
         return ''
 
 
-def run2(argv, sim):
+def run2(argv, sim, clef_ret=None):
     quest.time.time, quest.time.sleep = sim.time, sim.sleep
     quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: None
     quest.walk.gui = sim.gui
     quest.snap = lambda tag: 'sim.png'
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
     quest.layout.current = lambda: '2880x1659'
-    quest.clef.available = lambda: False
+    quest.clef.available = lambda: clef_ret is not None
+    if clef_ret is not None:
+        quest.clef_shot_bytes = lambda: b'x'
+        quest.clef.classify_scene = lambda img: dict(clef_ret)
     quest.netwatch.guard = lambda *_: {'status': 'ok'}
     quest.find_marker = lambda: (_ for _ in ()).throw(AssertionError('不該找黃問號'))
     quest.track_task = lambda *a, **k: (_ for _ in ()).throw(AssertionError('不該點追蹤'))
@@ -163,13 +166,17 @@ REWARD = dict(IDLE, state='reward')
 WALK = dict(IDLE, state='walking')
 FULL_CMD_OFF = {'state': 'battle', 'gold': 0, 'full': True, 'cmd': True, 'auto_off': True}
 
-print('(f) --stop-after-dialog：步 1 對話完（含獎勵）→ 閒置 2 次就停，沒點追蹤 / 黃問號（深紅事故）')
-s = Script([DIALOG, DIALOG, REWARD, IDLE, IDLE, DIALOG, DIALOG])
+print('(f) --stop-after-dialog：步 1 對話完（含獎勵）→ 閒置滿 2.5 秒就停，沒點追蹤 / 黃問號（深紅事故）')
+s = Script([DIALOG, DIALOG, REWARD, IDLE, IDLE, IDLE, IDLE, DIALOG, DIALOG])   # 預設 --every 1.0：閒置要滿 2.5 秒（第 4 個閒置畫面）才停
 rc = run2(['--stop-after-dialog', '--task', '深紅洞窟', '--max-seconds', '120'], s)
 ok &= check('exit 0', rc == 0, f'rc={rc}')
-ok &= check('停在步 1：只用掉 5 個畫面（沒看到步 2 的對話）', s.i == 5, f'i={s.i}')
+ok &= check('停在步 1：只用掉 7 個畫面（沒看到步 2 的對話）、花 6 秒', s.i == 7 and s.t - 1000 == 6.0, f'i={s.i} t={s.t - 1000}')
 ok &= check('沒有任何追蹤 / 問號點擊（只有對話左鈕 + 獎勵確認）', all(c[1].startswith(('click 948 461', 'click 720 572')) for c in s.clicks), str(s.clicks))
 
+print('(f1) 預設輪詢間隔 = 1.0 秒')
+s = Script([DIALOG, IDLE, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--stop-after-dialog', '--task', 'x', '--max-seconds', '120'], s)
+ok &= check('每輪 sleep 1.0（點擊時間 0.0 / 之後每秒一輪）', quest.DEFAULT_EVERY == 1.0 and s.t - 1000 == 4.0, f't={s.t - 1000}')
 print('(f2) --stop-after-dialog：步完成後遊戲自己開始 Auto Walking → 退出碼 24')
 s = Script([DIALOG, IDLE, WALK])
 rc = run2(['--stop-after-dialog', '--task', '深紅洞窟', '--max-seconds', '120'], s)
@@ -184,21 +191,48 @@ s = Script([FULL_CMD_OFF])
 rc = run2(['--no-track', '--max-seconds', '120'], s)
 ok &= check('exit 25', rc == quest.EXIT_BATTLE_STUCK and len(has(s, 'click 1380 600')) == quest.AUTO_STUCK_MAX, f'rc={rc} n={len(has(s, "click 1380 600"))}')
 
-print('(h) --disband-after')
-TEAM_PX, TASK_PX = '10,10,10 230,200,160', '230,200,160 10,10,10'   # TAB_PROBE 兩點：組隊亮 = 第二點 R>190（(130,225)=任務暗、(270,225)=組隊亮）
+print('(h) --disband-after（分頁 / 隊長紅標像素用 2026-10-10 實機量測值）')
+TAB_TEAM_PX = {'130,222': '87,68,41', '130,250': '85,65,41', '270,222': '215,185,139', '270,250': '205,173,131'}   # 組隊分頁選中
+TAB_TASK_PX = {'130,222': '213,179,128', '130,250': '211,179,128', '270,222': '90,69,41', '270,250': '87,70,41'}   # 任務分頁選中
+BADGE_RED, BADGE_NONE = '217,33,33', '245,223,187'
 
 
-def disband_sim(tab_ok=True, menu=True, done=True):
-    state = {'n': 0}
+def px_fake(tab=TAB_TEAM_PX, badges=(True, False)):
+    """gui('pixel') 假回應：4 點分頁探針 / 4 點隊長紅標（依序消耗 badges；讀不到用 'err'）"""
+    it = iter(badges)
 
     def pixel(args):
         pts = args[1].split()
-        if len(pts) == 2:                                   # TAB_PROBE
-            return '100,80,60 235,210,170' if tab_ok else '235,210,170 100,80,60'
-        state['n'] += 1                                     # list_signature：第 N 次讀取
-        n = state['n']
-        return ' '.join(['1,1,%d' % (0 if n == 1 else (1 if (n == 2 and menu) or (n == 3 and done and menu) else 0))] * 3)
+        if pts[0] == '130,222':
+            return ' '.join(tab[p] for p in pts)
+        if pts[0] == '100,306':
+            b = next(it, False)
+            return 'err' if b == 'err' else ' '.join([BADGE_RED if b else BADGE_NONE] * 4)
+        return ''
     return pixel
+
+
+print('(h0) tab_state / has_leader_badge 像素判斷')
+for nm, tab, want in [('組隊選中', TAB_TEAM_PX, 'team'), ('任務選中', TAB_TASK_PX, 'task'),
+                      ('舊探針式混雜（y=225 邊緣一點不準）', dict(TAB_TEAM_PX, **{'130,250': '213,181,131'}), None)]:
+    quest.gui = Script([IDLE], px_fake(tab)).gui
+    ok &= check(f'tab_state {nm} → {want}', quest.tab_state() == want, str(quest.tab_state()))
+quest.gui = Script([IDLE], px_fake(badges=(True, False))).gui
+ok &= check('has_leader_badge 紅標 True', quest.has_leader_badge() is True)
+ok &= check('has_leader_badge 米色 False', quest.has_leader_badge() is False)
+quest.gui = Script([IDLE], px_fake(badges=('err',))).gui
+ok &= check('has_leader_badge 讀不到 None', quest.has_leader_badge() is None)
+
+
+def disband_case(name, tab, badges, sigs, want_rc, want_btn, want_leader):
+    s = Script([IDLE], px_fake(tab, badges))
+    quest.time.time, quest.time.sleep = s.time, s.sleep
+    quest.gui, quest.snap = s.gui, lambda tag: 'sim.png'
+    quest.event = lambda m, shot=None: print(f'   {m}')
+    sig_seq(*sigs)
+    rc = quest.disband_team()
+    ok_ = rc == want_rc and bool(has(s, 'click 200 372')) == want_btn and bool(has(s, 'click 210 320')) == want_leader
+    return check(f'disband {name}', ok_, f'rc={rc} {[c[1][-14:] for c in s.clicks]}')
 
 
 def sig_seq(*vals):
@@ -206,29 +240,82 @@ def sig_seq(*vals):
     quest.list_signature = lambda: next(it)
 
 
-s = Script([IDLE], disband_sim())
-for name, tab_ok, sigs, want_rc, want_click in [
-        ('成功', True, ('a', 'b', 'c'), 0, 'click 200 372'),
-        ('分頁沒切過去 → 不點解散也不點隊長列', False, ('a', 'b', 'c'), quest.EXIT_DISBAND_FAIL, None),
-        ('選單沒彈出 → 不點解散', True, ('a', 'a', 'c'), quest.EXIT_DISBAND_FAIL, None),
-        ('解散後畫面沒變 → 未確認', True, ('a', 'b', 'b'), quest.EXIT_DISBAND_FAIL, 'click 200 372')]:
-    s = Script([IDLE], lambda args, ok_=tab_ok: '100,80,60 235,210,170' if ok_ else '235,210,170 100,80,60')
-    quest.time.time, quest.time.sleep = s.time, s.sleep
-    quest.gui, quest.snap = s.gui, lambda tag: 'sim.png'
-    quest.event = lambda m, shot=None: print(f'   {m}')
-    sig_seq(*sigs)
-    rc = quest.disband_team()
-    clicked_btn = bool(has(s, 'click 200 372'))
-    clicked_leader = bool(has(s, 'click 210 320'))
-    ok &= check(f'disband {name}', rc == want_rc and clicked_btn == (want_click is not None) and (clicked_leader or tab_ok is False), f'rc={rc} {s.clicks}')
-    if tab_ok is False:
-        ok &= check('  沒點隊長列 210,320', not clicked_leader)
+ok &= disband_case('成功（紅標消失、面板有變）', TAB_TEAM_PX, (True, False), ('a', 'b', 'c'), 0, True, True)
+ok &= disband_case('分頁沒切過去 → 不點隊長列也不點解散', TAB_TASK_PX, (True, False), ('a', 'b', 'c'), quest.EXIT_DISBAND_FAIL, False, False)
+ok &= disband_case('已是單人（無紅標）→ 不點任何東西、退出碼 0', TAB_TEAM_PX, (False,), ('a', 'b', 'c'), 0, False, False)
+ok &= disband_case('紅標讀不到 → 26 不點', TAB_TEAM_PX, ('err',), ('a', 'b', 'c'), quest.EXIT_DISBAND_FAIL, False, False)
+ok &= disband_case('選單沒彈出 → 不點解散', TAB_TEAM_PX, (True, False), ('a', 'a', 'c'), quest.EXIT_DISBAND_FAIL, False, True)
+ok &= disband_case('解散後畫面沒變 → 未確認', TAB_TEAM_PX, (True, False), ('a', 'b', 'b'), quest.EXIT_DISBAND_FAIL, True, True)
+ok &= disband_case('解散後紅標還在 → 未確認', TAB_TEAM_PX, (True, True), ('a', 'b', 'c'), quest.EXIT_DISBAND_FAIL, True, True)
 
 print('(h2) --stop-after-dialog --disband-after：停止後才解散；分頁沒切過去 → 26')
-s = Script([DIALOG, IDLE, IDLE], lambda args: '235,210,170 100,80,60')
-quest.time.time, quest.time.sleep = s.time, s.sleep
+s = Script([DIALOG, IDLE, IDLE, IDLE, IDLE], px_fake(TAB_TASK_PX))
 rc = run2(['--stop-after-dialog', '--disband-after', '--task', 'x', '--max-seconds', '60'], s)
 ok &= check('exit 26 且沒點解散', rc == quest.EXIT_DISBAND_FAIL and not has(s, 'click 200 372') and not has(s, 'click 210 320'), f'rc={rc} {s.clicks}')
+
+print('(i) 清理 3 天前截圖（暫存資料夾）')
+import os, tempfile
+from pathlib import Path as _P
+with tempfile.TemporaryDirectory() as d:
+    d = _P(d)
+    now = 10_000_000.0
+    def mk(n, age_days):
+        (d / n).write_bytes(b'x')
+        os.utime(d / n, (now - age_days * 86400, now - age_days * 86400))
+    mk('old.png', 4)
+    mk('old2.jpg', 10)
+    mk('new.png', 1)
+    mk('edge.png', 2.9)
+    mk('old.json', 30)                                  # 非圖檔不碰
+    (d / 'sub').mkdir()
+    (d / 'sub' / 'deep.png').write_bytes(b'x')
+    os.utime(d / 'sub' / 'deep.png', (now - 99 * 86400, now - 99 * 86400))   # 子資料夾內的不碰
+    n = quest.cleanup_old_shots(3, d, now)
+    left = sorted(f.name for f in d.iterdir())
+    ok &= check('刪 2 張（old.png / old2.jpg）', n == 2 and left == ['edge.png', 'new.png', 'old.json', 'sub'], f'n={n} left={left}')
+    ok &= check('子資料夾內檔案還在', (d / 'sub' / 'deep.png').exists())
+ok &= check('資料夾不存在 → 0、不丟例外', quest.cleanup_old_shots(3, _P('/nonexistent-psa-dir'), 1.0) == 0)
+calls = []
+quest.cleanup_old_shots = lambda *a, **k: (calls.append(1), 7)[1]
+s = Script([DIALOG, IDLE, IDLE, IDLE, IDLE])
+run2(['--stop-after-dialog', '--task', 'x', '--max-seconds', '60'], s)
+ok &= check('main 啟動時呼叫清理', len(calls) == 1)
+
+print('(j) Clef 驗證視窗門檻：低信心當不認得，高信心停手')
+import clef as _clef
+_clef.available = lambda: True
+_clef.prepare = lambda png, box=None, width=None: b'img'
+
+
+def fake_run(vp, scene_p=0.5):
+    def run(model, state, qs, imgs):
+        return {'scene': {'probabilities': {'戰鬥中': scene_p, '其他': 1 - scene_p}}, 'verify': {'noul': vp}}
+    return run
+
+
+for vp, want in [(0.105, False), (0.3, False), (0.6, True), (0.9, True)]:
+    _clef.run = fake_run(vp)
+    ok &= check(f'classify_scene verify={vp} → alarm {want}', _clef.classify_scene(b'x')['alarm'] is want)
+_clef.run = lambda *a: {'scene': {'probabilities': {'答題或驗證視窗': 0.95, '其他': 0.05}}, 'verify': {'noul': 0.01}}
+ok &= check('場景判驗證窗（p>=0.85）仍 alarm', _clef.classify_scene(b'x')['alarm'] is True)
+
+UNK = dict(IDLE, state='unknown')
+print('(k) quest.py：Clef verify=0.105 不立刻停手，照 3 次不認得（滿 5 秒）才停 → 鐵則 5')
+s = Script([UNK])
+rc = run2(['--no-track', '--max-seconds', '60'], s, clef_ret={'scene': None, 'p': 0.4, 'model': 'clef', 'verify_p': 0.105, 'alarm': False})
+ok &= check('exit 2 且不是第 1 次就停（>= 5 秒）', rc == 2 and s.t - 1000 >= quest.UNKNOWN_CONFIRM_SECS, f'rc={rc} t={s.t - 1000}')
+print('(k2) verify=0.9（alarm）→ 第 1 次就停')
+s = Script([UNK])
+rc = run2(['--no-track', '--max-seconds', '60'], s, clef_ret={'scene': None, 'p': 0.4, 'model': 'clef', 'verify_p': 0.9, 'alarm': True})
+ok &= check('exit 2 立刻', rc == 2 and s.t - 1000 < 1, f'rc={rc} t={s.t - 1000}')
+print('(k3) 沒有 Clef：連續 3 次不認得但沒滿 5 秒不停；滿 5 秒才停')
+s = Script([UNK])
+rc = run2(['--no-track', '--max-seconds', '60'], s)
+ok &= check('exit 2，t >= 5', rc == 2 and s.t - 1000 >= 5.0, f'rc={rc} t={s.t - 1000}')
+print('(k4) Clef 載入 / 戰鬥判斷：最多連續 CLEF_WAIT_SECS 秒不算不認得，之後照舊停手')
+s = Script([UNK])
+rc = run2(['--no-track', '--max-seconds', '300'], s, clef_ret={'scene': '戰鬥中', 'p': 0.9, 'model': 'clef-flash', 'verify_p': 0.0, 'alarm': False})
+ok &= check('exit 2，約 50 秒後', rc == 2 and quest.CLEF_WAIT_SECS <= s.t - 1000 <= quest.CLEF_WAIT_SECS + 8, f'rc={rc} t={s.t - 1000}')
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

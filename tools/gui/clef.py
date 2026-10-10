@@ -329,14 +329,17 @@ def prepare(png: bytes, box: tuple | None = None, width: int | None = None) -> b
 # ---------------- 高階介面 ----------------
 SCENE_ADOPT = 0.85
 TRACK_ADOPT = 0.9
-VERIFY_ALARM = 0.05
+# 驗證視窗警報門檻（高信心才停手）：原本 0.05 太敏感——2026-10-10 14:03 真實的「單人一般戰鬥下指令畫面」就給 0.105 而誤停；
+# 實驗（notes/clef-eval.md）21 張非驗證畫面最大 0.02，加上這張戰鬥圖 0.105，所以取 0.6。
+# 低於門檻不是放行：quest.py 當成「不認得」繼續累計（連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒照舊停手，鐵則 5 不削弱）。
+VERIFY_ALARM = 0.6
 
 
 def classify_scene(png: bytes) -> dict | None:
     """png = 遊戲視窗截圖（原樣 1440x830；內部縮 960 寬後上傳）。
     回傳 {'scene': 場景或 None, 'p': 機率, 'model': 模型, 'verify_p': 驗證視窗機率最大值, 'alarm': bool}；
     scene 為 None = 信心不足（呼叫端維持 unknown 流程）；整個失敗回 None。
-    先 Clef-flash，top < 0.85 升級 Clef 複核；verify > 0.05 在任一次呼叫出現就 alarm（只增不減）。"""
+    先 Clef-flash，top < 0.85 升級 Clef 複核；verify >= VERIFY_ALARM（0.6）在任一次呼叫出現就 alarm（只增不減）。"""
     if not available():
         return None
     try:
@@ -359,7 +362,7 @@ def classify_scene(png: bytes) -> dict | None:
         if top[1] >= SCENE_ADOPT:
             res['scene'] = scene
             break
-    res['alarm'] = res['verify_p'] > VERIFY_ALARM or res['scene'] == '答題或驗證視窗'
+    res['alarm'] = res['verify_p'] >= VERIFY_ALARM or res['scene'] == '答題或驗證視窗'
     return res
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""解任務監測：任務靠遊戲內建自動巡路（Auto Walking），這支腳本每 2.5 秒截圖判斷狀態，只處理「對話要按確認」與「戰鬥按刷新角色加速」。
+"""解任務監測：任務靠遊戲內建自動巡路（Auto Walking），這支腳本每 1 秒截圖判斷狀態，只處理「對話要按確認」與「戰鬥按刷新角色加速」。
 
 用法（專案根目錄；WSL / Windows 原生指令相同）：
   uv run --no-project python tools/gui/quest.py --task 黃金羚羊之謎   # 一直監測，最長 15 分鐘（--task = 追蹤列表上的任務名，必填）
@@ -7,22 +7,22 @@
   uv run --no-project python tools/gui/quest.py --max-seconds 600 --stop-after-rewards 2
   選項：--task 任務名（要點追蹤時，先用 OCR 認出追蹤列表每一格的標題，名稱相符才點；不符就捲動列表再找，找不到退出碼 5，絕不點其他任務。
           沒給 --task 又沒給 --no-track 會直接拒絕執行）、--no-marker（不找 NPC 頭上的黃色問號）、
-        --every 2.5（輪詢秒數）、--no-track（不主動點任務追蹤，只處理對話 / 戰鬥）、--no-refresh（戰鬥不按刷新角色）、
+        --every 1.0（輪詢秒數；2026-10-10 起預設 1 秒，所有「連續 N 次」的規則已改成以秒計，見 IDLE_CONFIRM_SECS 等常數）、--no-track（不主動點任務追蹤，只處理對話 / 戰鬥）、--no-refresh（戰鬥不按刷新角色）、
         --no-clef（不用 Clef 加速層；也可設環境變數 PSA_NO_CLEF=1。預設有 token 就用，失敗 / 額度用完自動退回 OCR 與規則，見 ui/quest.md「Clef 加速層」）、
         --stop-after-rewards N（領到第 N 次「獲得物品」確認窗後停；避免自動接下一個任務。成人儀式 = 2）
   --solo   單人逃跑風格（/psa-quest-solo）：遇怪進完整戰鬥畫面 → 按右上角「逃跑」1283,168（失敗下一輪再按）；到 NPC 跳出對話框 → ESC 關掉（不按任何選項）後停下，退出碼 20；
            被打飛（回到薩姆吉爾村 1000 儲存點附近）→ 退出碼 21。要先確認快速戰鬥 / 自動戰鬥 / 原地遇敵 / 自動逃跑都關（完整戰鬥畫面才有逃跑鈕）。
-  --stop-after-dialog  對話步（組隊後單步）：按完對話框、閒置 2 次就結束退出碼 0（有獲得物品視窗的步驟改用 --stop-after-rewards 1）
+  --stop-after-dialog  對話步（組隊後單步）：按完對話框、閒置滿 2.5 秒（連續 2 次以上）就結束退出碼 0（有獲得物品視窗的步驟改用 --stop-after-rewards 1）
   --fight  戰鬥步（假設已站在 NPC 旁，**不點追蹤、不巡路**）：--npc X,Y（NPC 地圖座標）或 --npc auto（--task 的任務步驟找戰鬥步 NPC）→ 依自己座標算畫面位置點 NPC（--at X,Y 可手動給自己座標）
-           → 對話框按左鈕 → 開打。戰鬥分類：開始時距離最後一次點 NPC / 按對話框 <= QUEST_BATTLE_WINDOW(15) 秒 = BOSS 戰（確保自動戰鬥開，打完連續閒置 2 次印「BOSS 戰結束」退出碼 0，不繼續巡路）；
+           → 對話框按左鈕 → 開打。戰鬥分類：開始時距離最後一次點 NPC / 按對話框 <= QUEST_BATTLE_WINDOW(15) 秒 = BOSS 戰（確保自動戰鬥開，打完閒置滿 IDLE_CONFIRM_SECS 秒（且連續 2 次）印「BOSS 戰結束」退出碼 0，不繼續巡路）；
            否則 = 小怪（自動戰鬥開著就先關，下指令階段按逃跑）。已手動點過 NPC 用 --no-click。
            點 NPC 後 12 秒沒對話框也沒戰鬥 → 退出碼 22（沒點到 NPC）；對話後 15 秒沒開打 → 23；被打飛 21。
            範例：quest.py --fight --task 英雄島前傳 --npc auto --max-seconds 300
-  --disband-after  這步完成（搭配 --stop-after-dialog / --stop-after-rewards）後立刻解散隊伍；分頁沒切到組隊 / 選單沒彈出 / 解散後畫面沒變 → 不亂點，退出碼 26
-  --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，連續閒置 2 次就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
+  --disband-after  這步完成（搭配 --stop-after-dialog / --stop-after-rewards）後立刻解散隊伍；分頁沒切到組隊 / 選單沒彈出 / 解散後隊長紅標還在 → 不亂點，退出碼 26；已是單人（組隊分頁沒隊長紅標）→ 不點任何東西，退出碼 0
+  --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，閒置滿 2.5 秒（連續 2 次以上）就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
   組隊預設模式（非 --solo / --fight）的完整戰鬥：自動戰鬥鈕是關的 → 按 1380,600；同一場按 4 次仍關（寵物指令視窗等）→ 退出碼 25
   模擬測試：uv run --no-project python tools/gui/test_quest_fight.py
-  事件記錄：notes/quest-events.log（每行一筆，附截圖路徑 tools/.cache/quest-log/）。
+  事件記錄：notes/quest-events.log（每行一筆，附截圖路徑 tools/.cache/quest-log/）；啟動時自動刪 tools/.cache/quest-log/ 內超過 3 天的圖檔（cleanup_old_shots）。
 
 狀態判斷（都是背景截圖讀像素，座標為 2880×1659 → 截圖 1440×830；細節與實測見 .claude/skills/psa-game-ui/ui/quest.md）：
   對話框   右側棕底 + 兩顆米色鈕 → 點左鈕 948,461（接受 / 完成 / 成人勾玉 等推進鈕；右鈕 1220,461 是「再見」不點）
@@ -32,8 +32,8 @@
   主畫面   外掛鈕紅字 ASS（沒對話框 / 巡路 / 戰鬥時）→ 檢測方針（使用者指定）：
            1. 場景裡有黃色「?」「!」任務標記 → 優先點它（findmark.ps1 找黃色色塊，點標記下方的 NPC）
            2. 沒有 → 在追蹤列表先用標題圖片樣板比對（titlematch，0.7 秒）、沒樣板 / 沒找到才用 OCR（ocr.ps1，成功會存樣板）找 --task 那一格，必要時捲動列表，確認標題相符才點 → 開始（繼續）巡路
-  不認得   連續 3 次都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）
-  追蹤沒反應 點了任務追蹤連續 2 次都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
+  不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）
+  追蹤沒反應 點了任務追蹤約 5 秒（TRACK_RETRY_SECS 重點一次、再等一輪）都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
 退出碼：20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、0 正常結束（任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -64,6 +64,15 @@ AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰�
 NPC_WAIT = 12.0                      # --fight 點 NPC 後最多等幾秒看有沒有反應（走過去 + 開對話框）
 LOG_FILE = ROOT / 'notes' / 'quest-events.log'
 SHOT_DIR = ROOT / 'tools' / '.cache' / 'quest-log'
+SHOT_KEEP_DAYS = 3                   # 啟動時清掉 SHOT_DIR 內超過幾天的圖檔
+SHOT_EXTS = ('.png', '.jpg', '.jpeg')
+
+# ---- 「連續 N 次」規則改以秒計（預設輪詢間隔 2.5 → 1.0 秒後，維持原本的實際等待時間；2026-10-10）----
+DEFAULT_EVERY = 1.0                  # --every 預設（一般 / --solo / --fight 都是；舊值 2.5 / 1.5）
+IDLE_CONFIRM_SECS = 2.5              # 連續閒置至少這麼久（且連續 >= 2 次）才算「這步結束 / 戰鬥打完」（舊：2 次 × 2.5 秒）
+UNKNOWN_CONFIRM_SECS = 5.0           # 連續 3 次不認得 + 至少這麼久才停手（舊：3 次 × 2.5 秒 ≈ 5 秒；鐵則 5 的 3 次規則仍在，只是多一道時間條件）
+TRACK_RETRY_SECS = 2.5               # 點了任務追蹤後，等這麼久沒反應才算 1 次失敗（重點一次；連續 2 次失敗退出碼 3，約 5 秒）
+CLEF_WAIT_SECS = 50.0                # Clef 判成「載入畫面 / 戰鬥中」時，最多連續這麼久不算「不認得」（舊：20 次 × 2.5 秒）
 
 # ---- 座標與特徵色（2880×1659 版面，截圖座標；2026-10-09 實測）----
 TRACKER = (205, 325)                 # 左側任務追蹤第一條：點了自動尋路到任務 NPC
@@ -272,37 +281,52 @@ def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | N
 
 
 TAB_TASK = (148, 236)                # 左側面板「任務」分頁鈕
-TAB_PROBE = ((130, 225), (270, 225))  # 選中的分頁底是亮米色（R>190），沒選中是深棕（R<120）：任務在左、組隊在右
+TAB_TEAM = (260, 236)                # 左側面板「組隊」分頁鈕
+# 分頁選中判斷（2026-10-10 組隊狀態實機量測）：選中的分頁底是亮米色（R≈205~221），沒選中是深棕（R≈80~90）；
+# 只取分頁鈕「文字上方 y=222、文字下方 y=250」兩排（y=226~246 會踩到「任務 / 組隊」字，讀數亂跳）。
+# 任務分頁 x=130、組隊分頁 x=270；四點全部一致才算（組隊選中：(130,*)≈(87,68,41) 且 (270,*)≈(215,183,135)；任務選中相反）
+TAB_PROBE = ((130, 222), (130, 250), (270, 222), (270, 250))
+# 隊長列左上角的紅色「隊」字標（組隊分頁、自己是隊長才有；四點量到 ≈(217,33,33)；任務分頁同位置是米色 ≈(245,223,187)）
+LEADER_BADGE = ((100, 306), (128, 306), (100, 312), (130, 312))
+
+
+def tab_state() -> str | None:
+    """左側面板目前分頁：'team'（組隊亮、任務暗）/ 'task'（任務亮、組隊暗）/ None（讀不準）。四點都要一致"""
+    try:
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in TAB_PROBE)).split()
+        (t1, _, _), (t2, _, _), (g1, _, _), (g2, _, _) = [tuple(int(v) for v in c.split(',')) for c in out]
+    except Exception:
+        return None
+    if min(g1, g2) > 190 and max(t1, t2) < 120:
+        return 'team'
+    if min(t1, t2) > 190 and max(g1, g2) < 120:
+        return 'task'
+    return None
+
+
+def has_leader_badge() -> bool | None:
+    """組隊分頁隊長列有沒有紅色「隊」字標（四點都是紅：R>190、G<70、B<70）；讀不到回 None"""
+    try:
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in LEADER_BADGE)).split()
+        cols = [tuple(int(v) for v in c.split(',')) for c in out]
+        if len(cols) != len(LEADER_BADGE):
+            return None
+        return all(r > 190 and g < 70 and b < 70 for r, g, b in cols)
+    except Exception:
+        return None
 
 
 def ensure_task_tab() -> None:
     """左側面板停在「組隊」分頁時追蹤列表看不到任務（OCR 只讀到「創建隊伍」→ 誤判找不到）。
     只在「組隊亮、任務暗」很明確時點「任務」分頁；讀不準就不動。"""
     try:
-        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in TAB_PROBE)).split()
-        (tr, _, _), (gr, _, _) = [tuple(int(v) for v in c.split(',')) for c in out]
-        if tr < 120 and gr > 190:
+        if tab_state() == 'team':
             gui('seq', f'click {TAB_TASK[0]} {TAB_TASK[1]}; wait 600', note='左側面板在「組隊」分頁 → 切回「任務」')
             event('左側面板在組隊分頁，已切回任務分頁')
     except Exception as e:
         log(f'ensure_task_tab 失敗：{e}')
 
 
-def tab_state() -> str | None:
-    """左側面板目前分頁：'team'（組隊亮、任務暗）/ 'task'（任務亮、組隊暗）/ None（讀不準）"""
-    try:
-        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in TAB_PROBE)).split()
-        (tr, _, _), (gr, _, _) = [tuple(int(v) for v in c.split(',')) for c in out]
-    except Exception:
-        return None
-    if gr > 190 and tr < 120:
-        return 'team'
-    if tr > 190 and gr < 120:
-        return 'task'
-    return None
-
-
-TAB_TEAM = (260, 236)                # 左側面板「組隊」分頁鈕
 DISBAND_LEADER = (210, 320)          # 組隊分頁隊長那一列
 DISBAND_BTN = (200, 372)             # 點隊長列後彈出選單的「解散隊伍」
 
@@ -310,9 +334,10 @@ DISBAND_BTN = (200, 372)             # 點隊長列後彈出選單的「解散�
 def disband_team() -> int:
     """對話步完成後立刻解散（/psa-disband-team 的自動版）。每一步都驗證，驗不過就停、不再點（寧可退出碼 26 也不亂點，
     避免點到 y≈325 的任務追蹤條目觸發自動巡路）：
-    1. 切組隊分頁 260,236 → tab_state()=='team'（沒切過去再點一次；換圖後第一下點擊常被吃掉）
-    2. 點隊長列 210,320 → 左側面板像素必須變了（選單彈出）才點解散；分頁又變回任務 = 點到別的東西 → 停
-    3. 點解散 200,372 → 面板像素再變、分頁仍是組隊才算成功"""
+    1. 切組隊分頁 260,236 → tab_state()=='team'（四點像素；沒切過去再點一次；換圖後第一下點擊常被吃掉）
+    2. 隊長列有紅色「隊」字標（has_leader_badge）才繼續；沒有 = 已是單人（只剩「創建隊伍」）或不是隊長 → 不點任何東西，退出碼 0
+    3. 點隊長列 210,320 → 左側面板像素必須變了（選單彈出）才點解散；分頁又變回任務 = 點到別的東西 → 停
+    4. 點解散 200,372 → 分頁仍是組隊、面板像素變了、隊長紅標消失才算成功"""
     for attempt in range(2):
         gui('seq', f'{PRIMER}; click {TAB_TEAM[0]} {TAB_TEAM[1]}; wait 700', note='--disband-after：切左側組隊分頁')
         if tab_state() == 'team':
@@ -320,6 +345,13 @@ def disband_team() -> int:
     else:
         event(f'--disband-after：左側分頁沒切到「組隊」（連點 2 次）→ 不點解散，退出碼 {EXIT_DISBAND_FAIL}', snap('disband-no-tab'))
         return EXIT_DISBAND_FAIL
+    badge = has_leader_badge()
+    if badge is None:
+        event(f'--disband-after：讀不到隊長紅標像素 → 不點解散，退出碼 {EXIT_DISBAND_FAIL}', snap('disband-no-badge-read'))
+        return EXIT_DISBAND_FAIL
+    if not badge:
+        event('--disband-after：組隊分頁沒有隊長紅「隊」標（已是單人，或不是隊長）→ 沒點任何東西、未解散，視為無需解散（退出碼 0）', snap('disband-already-solo'))
+        return 0
     sig0 = list_signature()
     gui('seq', f'click {DISBAND_LEADER[0]} {DISBAND_LEADER[1]}; wait 500', note='--disband-after：點隊長列')
     sig1 = list_signature()
@@ -327,10 +359,10 @@ def disband_team() -> int:
         event(f'--disband-after：點隊長列後選單沒彈出（或分頁變了）→ 不點解散，退出碼 {EXIT_DISBAND_FAIL}', snap('disband-no-menu'))
         return EXIT_DISBAND_FAIL
     gui('seq', f'click {DISBAND_BTN[0]} {DISBAND_BTN[1]}; wait 800', note='--disband-after：解散隊伍')
-    if tab_state() != 'team' or list_signature() == sig1:
-        event(f'--disband-after：點解散後畫面沒變 → 未確認解散成功，退出碼 {EXIT_DISBAND_FAIL}（請 shot 看左側是否只剩「創建隊伍」）', snap('disband-unverified'))
+    if tab_state() != 'team' or list_signature() == sig1 or has_leader_badge() is not False:
+        event(f'--disband-after：點解散後未確認成功（畫面沒變 / 隊長紅標還在）→ 退出碼 {EXIT_DISBAND_FAIL}（請 shot 看左側是否只剩「創建隊伍」）', snap('disband-unverified'))
         return EXIT_DISBAND_FAIL
-    event('--disband-after：已解散隊伍（左側組隊分頁變了；請再 shot 確認只剩「創建隊伍」）', snap('disbanded'))
+    event('--disband-after：已解散隊伍（左側組隊分頁隊長紅標消失、面板像素已變）', snap('disbanded'))
     return 0
 
 
@@ -410,6 +442,30 @@ def event(msg: str, shot: str | None = None) -> None:
         pass
 
 
+def cleanup_old_shots(days: int = SHOT_KEEP_DAYS, folder: Path = None, now: float | None = None) -> int:
+    """刪掉 folder（預設 SHOT_DIR）內修改時間超過 days 天的圖檔（.png / .jpg / .jpeg）；只看該資料夾第一層，不進子資料夾、
+    不碰其他副檔名。任何錯誤都吞掉（不影響主流程）；回傳刪掉幾張"""
+    folder = SHOT_DIR if folder is None else folder
+    now = time.time() if now is None else now
+    n = 0
+    try:
+        for f in folder.iterdir():
+            try:
+                if f.is_file() and f.suffix.lower() in SHOT_EXTS and now - f.stat().st_mtime > days * 86400:
+                    f.unlink()
+                    n += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return n
+
+
+def idle_confirmed(streak: int, since: float, now: float) -> bool:
+    """連續閒置是否已夠久：>= 2 次且從第一次閒置起 >= IDLE_CONFIRM_SECS 秒（輪詢間隔變短也維持同樣等待時間）"""
+    return streak >= 2 and now - since >= IDLE_CONFIRM_SECS
+
+
 def snap(tag: str) -> str:
     SHOT_DIR.mkdir(parents=True, exist_ok=True)
     p = SHOT_DIR / f'{time.strftime("%H%M%S")}-{tag}.png'
@@ -417,7 +473,6 @@ def snap(tag: str) -> str:
     return str(p.relative_to(ROOT))
 
 
-CLEF_WAIT_MAX = 20                   # Clef 判成「載入畫面 / 戰鬥中」時，最多連續幾次不算「不認得」（之後照舊 3 次停手）
 CLEF_WAIT_SCENES = ('載入畫面', '戰鬥中')
 
 
@@ -551,7 +606,7 @@ def click_npc(npc: tuple[int, int], a) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description='解任務監測：對話按確認、戰鬥按刷新角色、巡路停了重點任務追蹤')
     ap.add_argument('--once', action='store_true', help='只判斷一次、做一個動作就結束')
-    ap.add_argument('--every', type=float, default=None, help='輪詢間隔秒數（預設 2.5；--solo / --fight 預設 1.5）')
+    ap.add_argument('--every', type=float, default=None, help='輪詢間隔秒數（預設 1.0；連續 N 次的規則已換算成秒，見 IDLE_CONFIRM_SECS 等）')
     ap.add_argument('--solo', action='store_true', help='單人逃跑風格：完整戰鬥按逃跑；到 NPC 出對話框 → ESC 後停下（退出碼 20）；被打飛退出碼 21')
     ap.add_argument('--stop-after-dialog', action='store_true', help='對話框按完、回主畫面連續閒置 2 次就結束（沒有獲得物品視窗的對話步用；組隊後單步對話用，避免自動點下一步追蹤開始巡路）')
     ap.add_argument('--disband-after', action='store_true', help='這步完成（--stop-after-dialog / --stop-after-rewards 結束）後立刻解散隊伍：切組隊分頁 → 點隊長列 → 解散，每步驗證，失敗退出碼 %d 且不亂點' % EXIT_DISBAND_FAIL)
@@ -577,7 +632,7 @@ def main() -> int:
         log('--disband-after 只能搭配 --stop-after-dialog 或 --stop-after-rewards（不可與 --solo / --fight 並用）')
         return 4
     if a.every is None:
-        a.every = 1.5 if (a.solo or a.fight) else 2.5
+        a.every = DEFAULT_EVERY
     npc_xy = None                        # --fight：要點的 NPC 地圖座標
     if a.fight:
         a.no_track = True                # --fight 假設已站在 NPC 旁，絕不點任務追蹤巡路
@@ -590,17 +645,24 @@ def main() -> int:
         log('沒給 --task：不知道要點哪個任務追蹤（點錯任務是之前的老問題）。請加 --task 任務名，或用 --no-track（只處理對話 / 戰鬥）')
         return 4
     clef.set_logger(event)
+    n_old = cleanup_old_shots()
+    if n_old:
+        event(f'清理 {n_old} 張 {SHOT_KEEP_DAYS} 天前截圖')
     if a.no_clef:
         clef.set_enabled(False)
     else:
         clef.available()         # 啟動時檢查一次：沒 token 會在 stderr 醒目提示並寫事件 log
     end = time.time() + a.max_seconds
     clef_wait = 0                # 連續被 Clef 解釋成「載入 / 戰鬥」的 unknown 次數
+    clef_wait_t0 = 0.0           # 這一串 Clef「載入 / 戰鬥」判斷的起始時間（CLEF_WAIT_SECS 用）
     marker_fail = 0              # 連續點黃色問號沒反應的次數
     task_miss = 0
     event(f'開始監測（每 {a.every}s，最長 {a.max_seconds}s）')
     unknown = 0
+    unknown_t0 = 0.0             # 這一串不認得的第一次時間
     track_fail = 0
+    track_t = 0.0                # 最後一次點任務追蹤的時間（TRACK_RETRY_SECS）
+    idle_t0 = 0.0                # 這一串閒置的第一次時間（IDLE_CONFIRM_SECS）
     tracked = False              # 剛點過任務追蹤，還沒看到任何反應
     rewards = 0
     checked_rewards = 0          # 已做過「領獎後完整列表檢查」的獎勵次數
@@ -667,7 +729,13 @@ def main() -> int:
         if st != 'unknown':
             unknown = 0
             clef_wait = 0
-        idle_streak = idle_streak + 1 if st == 'idle' else 0
+        if st == 'idle':
+            if idle_streak == 0:
+                idle_t0 = time.time()
+            idle_streak += 1
+        else:
+            idle_streak = 0
+        idle_ok = idle_confirmed(idle_streak, idle_t0, time.time())
         if st in ('dialog', 'reward', 'battle'):
             marker_fail = 0
         if st in ('walking', 'dialog', 'reward', 'battle'):
@@ -741,7 +809,7 @@ def main() -> int:
         elif st == 'panel':
             gui('key', '{ESC}')
             event('切換角色面板殘留，ESC 關閉')
-        elif st == 'idle' and guard_ko and (ko_pending or time.time() - last_pos_t >= 12) and not (ko_pending and idle_streak < 2):
+        elif st == 'idle' and guard_ko and (ko_pending or time.time() - last_pos_t >= 12) and not (ko_pending and not idle_ok):
             # 打完一場後（或每 12 秒）查位置：被打飛回村 → 退出碼 21。剛打完的第一次閒置先略過一輪（畫面轉場中 OCR 讀不準）
             ko_pending = False
             cur = read_pos()
@@ -756,7 +824,7 @@ def main() -> int:
         elif st == 'idle' and a.fight:
             now = time.time()
             if boss_seen:
-                if idle_streak >= 2:
+                if idle_ok:
                     event(f'--fight BOSS 戰結束（對話 {dialogs}、獎勵 {rewards}），連續閒置 {idle_streak} 次 → 結束，不巡路')
                     print('BOSS 戰結束', flush=True)
                     return 0
@@ -776,21 +844,24 @@ def main() -> int:
             if st == 'walking':
                 event(f'--stop-after-dialog：步驟完成後遊戲自己開始 Auto Walking（對話 {dialogs}、獎勵 {rewards}）→ 不點任何追蹤，退出碼 {EXIT_AUTOWALK}')
                 return finish(a, EXIT_AUTOWALK)
-            if idle_streak >= 2:
+            if idle_ok:
                 event(f'步驟結束（對話 {dialogs}、獎勵 {rewards}），連續閒置 {idle_streak} 次 → 停（--stop-after-dialog，未點追蹤 / 黃問號）')
                 return finish(a)
         elif st == 'idle':
             # 做完事（對話 / 領獎）後連續 2 次閒置 = 這一步結束，馬上結束不空等（有領過獎勵，或 --no-track 時對話過）
-            if idle_streak >= 2 and not (rewards and not a.no_track and a.task and not tracked and checked_rewards < rewards) and (rewards or (a.no_track and dialogs) or (a.stop_after_dialog and dialogs)):
+            if idle_ok and not (rewards and not a.no_track and a.task and not tracked and checked_rewards < rewards) and (rewards or (a.no_track and dialogs) or (a.stop_after_dialog and dialogs)):
                 event(f'步驟結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}），連續閒置 {idle_streak} 次，提前結束')
                 return finish(a)
-            if tracked:
+            wait_track = tracked and time.time() - track_t < TRACK_RETRY_SECS     # 剛點過追蹤：給遊戲時間開始巡路，不重點、不計失敗
+            if tracked and not wait_track:
                 track_fail += 1
                 if track_fail >= 2:
                     shot = snap('no-autowalk')
                     event('點了任務追蹤兩次都沒進入巡路 / 對話 / 戰鬥 → 這個任務步驟不能自動巡路或已完成，請改手動（walk.py + 點 NPC）', shot)
                     return 3
-            if rewards > checked_rewards and not a.no_track and a.task:
+            if wait_track:
+                pass
+            elif rewards > checked_rewards and not a.no_track and a.task:
                 # 領過獎勵後第一次回到主畫面：立刻掃整個追蹤列表。目標任務不在列表 = 任務完成（不空轉）；還在 = 下一步，順便點它
                 checked_rewards = rewards
                 time.sleep(1.0)                              # 等獲得物品視窗收掉、列表刷新
@@ -798,7 +869,7 @@ def main() -> int:
                 if res is None:
                     checked_rewards = rewards - 1            # 被打斷，下次回主畫面再查
                 elif res:
-                    tracked = True
+                    tracked, track_t = True, time.time()
                     task_miss = 0
                 else:
                     shot = snap('task-done')
@@ -827,7 +898,7 @@ def main() -> int:
                 elif (res := track_task(a.task)) is None:
                     log('找追蹤時畫面變了（對話 / 戰鬥 / 領獎），交回主迴圈')
                 elif res:
-                    tracked = True
+                    tracked, track_t = True, time.time()
                     task_miss = 0
                 else:
                     if rewards:                      # 領過獎勵又找不到 = 完成
@@ -843,26 +914,29 @@ def main() -> int:
                         event(f'追蹤列表掃完（到頂 + 到底）都找不到「{a.task}」（連續 {task_miss} 次，沒領過獎勵）→ 沒點任何東西，退出', shot)
                         return 5
         elif st == 'unknown' or st == 'error':
-            if st == 'unknown' and clef_wait < CLEF_WAIT_MAX and clef.available() and (img := clef_shot_bytes()):
+            if st == 'unknown' and (clef_wait == 0 or time.time() - clef_wait_t0 < CLEF_WAIT_SECS) and clef.available() and (img := clef_shot_bytes()):
                 cr = clef.classify_scene(img)
                 if cr:
                     log(f'Clef 場景：{cr["scene"] or "信心不足"} p={cr["p"]:.2f}（{cr["model"]}）驗證窗機率 {cr["verify_p"]:.3f}')
-                    if cr['alarm']:          # 只多一道警報：verify > 0.05 或場景判驗證窗 → 馬上停手（鐵則 5）；模型說沒有不會放行任何事
+                    if cr['alarm']:          # 只多一道警報：verify >= clef.VERIFY_ALARM（高信心）或場景判驗證窗 → 馬上停手（鐵則 5）；模型說沒有不會放行任何事
                         shot = snap('UNKNOWN')
                         event(f'警告：Clef 判斷可能是答題 / 驗證視窗（verify p={cr["verify_p"]:.3f}，場景 {cr["scene"]}）→ 停止自動操作，請使用者處理', shot)
                         print('!!! 請人工檢查畫面（鐵則 5：驗證視窗不可亂猜答案）', flush=True)
                         return 2
-                    if cr['scene'] in CLEF_WAIT_SCENES and clef_wait < CLEF_WAIT_MAX:
+                    if cr['scene'] in CLEF_WAIT_SCENES and (clef_wait == 0 or time.time() - clef_wait_t0 < CLEF_WAIT_SECS):
                         clef_wait += 1
                         if clef_wait == 1:
-                            event(f'Clef 判斷為「{cr["scene"]}」（p={cr["p"]:.2f}），不算不認得（最多連續 {CLEF_WAIT_MAX} 次）')
+                            clef_wait_t0 = time.time()
+                            event(f'Clef 判斷為「{cr["scene"]}」（p={cr["p"]:.2f}），不算不認得（最多連續 {CLEF_WAIT_SECS:.0f} 秒）')
                         if a.once:
                             return 0
                         time.sleep(a.every)
                         continue
+            if unknown == 0:
+                unknown_t0 = time.time()
             unknown += 1
             log(f'不認得的畫面 {unknown}/3 {s}')
-            if unknown >= 3:
+            if unknown >= 3 and time.time() - unknown_t0 >= UNKNOWN_CONFIRM_SECS:
                 shot = snap('UNKNOWN')
                 event('警告：連續 3 次遇到不認得的畫面（可能是答題 / 防腳本驗證視窗）→ 停止自動操作，請使用者處理', shot)
                 print('!!! 請人工檢查畫面（鐵則 5：驗證視窗不可亂猜答案）', flush=True)
