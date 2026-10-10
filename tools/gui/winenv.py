@@ -552,6 +552,11 @@ def reap_orphans(alive=None, kill=None, plat: str | None = None) -> int:
     return n
 
 
+def server_alive() -> bool:
+    """唯讀：本程序的常駐 server 現在是否在跑（watch 用來判斷「下一次呼叫會不會要先重開 server」）"""
+    return _srv is not None and _srv.alive()
+
+
 def shutdown_server() -> None:
     """明確關掉本程序的常駐 server（長程序結束前呼叫，例如 quest.main 的 finally；不依賴 atexit）。沒開過 = 不做事；可重複呼叫"""
     if _srv is not None:

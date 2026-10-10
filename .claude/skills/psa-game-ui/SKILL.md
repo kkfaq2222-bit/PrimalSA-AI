@@ -49,6 +49,8 @@ uv run --no-project python tools/gui/petwatch.py [--once] [--interval 30] [--tar
 
 操作 log：click / dclick / drag / key / max / end（含 seq 裡的）以及 walk.py / heal.py / quest.py 的動作，都會寫一行到 `tools/.cache/actions.log`（只留最新 100 行，不進 git；寫入程式 `tools/gui/actlog.py`），背景記錄用，psa-hud pane 不顯示它（pane 顯示下面的錯誤 / 改進紀錄）。想附註用途：`PSA_NOTE="對話確認" bash tools/gui/gui.sh click 948 461`（Python 呼叫 `walk.gui(..., note="...")`）；shot / pixel / wait* 不記。
 
+即時狀態監看（第 2 階段已完成，psa-hud 尚未接上）：`uv run --no-project python tools/gui/watch.py` 常駐（單例鎖；同平台已有 → 退出碼 3、別平台 → 6），每 0.5 s 只送 `gui pixel / info -NoRestore 1`（**零輸入**、最小化不還原），把畫面狀態寫進 `tools/.cache/state.json`（內容變了才寫 + 每 2 s 心跳）。讀取：`watch.py --get [--max-age 3]`、`--status`；結束：`--stop`；跨平台殘鎖：`--unlock`。Python 讀取 API 在 `tools/gui/watchstate.py`（`fresh()` / `screen(max_age, after=)`）。**state 只能用來顯示 / 決定要不要再看，不能當點擊依據；idle 不代表沒有驗證視窗**（點擊前照舊現場讀圖）。注意：watch 強制用常駐 server（繞過 `DEFAULT_ON=False`）。
+
 錯誤 / 改進紀錄（psa-hud pane 顯示這個）：遇到錯誤、失誤、卡關（點錯、工具中斷、誤判、漏做、白等）時，**當下**用 `tools/gui/errlog.py` 記一筆；之後改了程式 / 流程 / 文件，再補上改進。沒改進的會在 pane 標「待改進」。
 ```
 uv run --no-project python tools/gui/errlog.py add "錯誤描述" [--fix "改進"] [--source quest]   # 印出 #id
