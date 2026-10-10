@@ -33,7 +33,7 @@ $__psa_w = New-Object IO.StreamWriter([Console]::OpenStandardOutput(), (New-Obje
 $__psa_w.AutoFlush = $false
 $__psa_r = New-Object IO.StreamReader([Console]::OpenStandardInput(), (New-Object Text.UTF8Encoding $false))
 $__psa_dir = $PSScriptRoot
-$__psa_allow = @('gui', 'ocr', 'stat', 'findmark', 'titlematch')
+$__psa_allow = @('gui', 'ocr', 'stat', 'findmark', 'titlematch', 'digitmatch')
 $__psa_state = @{ req = 0; quit = $false }
 
 function Send-Psa($__psa_obj) {

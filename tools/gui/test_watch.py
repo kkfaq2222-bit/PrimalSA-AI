@@ -26,6 +26,7 @@ import watch  # noqa: E402
 import watchstate  # noqa: E402
 import winenv  # noqa: E402
 
+watch.DIGIT_ON = False    # 既有 HUD 測試走 stat.ps1 OCR；digitmatch 路徑的測試在檔尾自己開
 watch.OCR_ON = False      # 既有測試只看 pixel / info；HUD 數值（stat.ps1）的測試在檔尾自己開
 
 fails = 0
@@ -81,6 +82,7 @@ class Fake:
         self.cost = {'info': 0.02, 'pixel': 0.09}   # 假時鐘前進秒數
         self.on_call = None
         self.stat = (0, '{"ok": false}\n', '')   # stat.ps1 的 (rc, stdout, stderr)
+        self.digit = (0, 'garbage\n', '')          # digitmatch.ps1 的 (rc, stdout, stderr)
 
     def __call__(self, script, *args, timeout=None):
         self.calls.append((script, args, timeout))
@@ -89,7 +91,7 @@ class Fake:
         cmd = args[0] if args else ''
         if self.clk:
             self.clk.t += self.cost.get(cmd, 0.05)
-        r = self.info if cmd == 'info' else (self.stat if script == 'stat.ps1' else self.pixel)
+        r = self.info if cmd == 'info' else (self.stat if script == 'stat.ps1' else (self.digit if script == 'digitmatch.ps1' else self.pixel))
         r = r() if callable(r) else r
         if isinstance(r, Exception):
             raise r
@@ -168,7 +170,7 @@ runps_in_gui = sum(1 for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
                    for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'run_ps')
 check('AST：run_ps / _oneshot 只在 _gui / _ps 裡呼叫（各一處）', not bad_sites and runps_in_gui == 2, f'{bad_sites} {runps_in_gui}')
 check('AST：沒有 subprocess.run / Popen / os.system 等其他程序呼叫', not bad_calls, str(bad_calls))
-check('GUI_ALLOWED == (pixel, info)；PS_ALLOWED == (stat.ps1, ocr.ps1)', watch.GUI_ALLOWED == ('pixel', 'info') and watch.PS_ALLOWED == ('stat.ps1', 'ocr.ps1'))
+check('GUI_ALLOWED == (pixel, info)；PS_ALLOWED == (stat.ps1, ocr.ps1, digitmatch.ps1)', watch.GUI_ALLOWED == ('pixel', 'info') and watch.PS_ALLOWED == ('stat.ps1', 'ocr.ps1', 'digitmatch.ps1'))
 
 # ---------------------------------------------------------------- 2. 鎖三種情況 + token
 fresh_dir('lock')
@@ -965,6 +967,109 @@ check('write_current_char / read_current_char 來回', watchstate.write_current_
 Path(watchstate.CURCHAR_FILE).write_text('{bad')
 check('旁路檔壞掉 → None', watchstate.read_current_char() is None)
 watch.OCR_ON = False
+
+# ---------------------------------------------------------------- digitmatch 第一順位 / 退回 stat / 自動補樣板
+import digitmatch  # noqa: E402
+import tempfile  # noqa: E402
+
+DM_RAW = json.loads((HERE / 'fixtures' / 'digitmatch_cap.json').read_text(encoding='utf-8'))
+DM_TPL = json.loads((HERE / 'fixtures' / 'digitmatch_tpl.json').read_text(encoding='utf-8'))
+DM_OUT = {'ok': True, 'layout': DM_RAW['layout'], 'ms': 100, 'hpPct': DM_RAW['hpPct'], 'mpPct': DM_RAW['mpPct'], 'fields': DM_RAW['fields']}
+DM_STAT = {'ok': True, **{k: DM_RAW['expect'][k] for k in ('level', 'hp', 'mp', 'hpPct', 'mpPct', 'petLevel', 'petHp', 'map', 'pos')},
+           'raw': ['', '', '', '', '', '']}
+dm_tmp = Path(tempfile.mkdtemp(prefix='dmtpl-'))
+digitmatch.TPL_DIR = dm_tmp
+
+
+def dm_setup(name, tpl):
+    """tpl = None → 沒有該版面樣板檔"""
+    p = digitmatch.tpl_path(DM_RAW['layout'])
+    p.unlink(missing_ok=True)
+    if tpl is not None:
+        p.write_text(json.dumps(tpl, ensure_ascii=False), encoding='utf-8')
+    w, clk, fk = make(name)
+    w._tpl = {}
+    fk.digit = (0, json.dumps(DM_OUT) + '\n', '')
+    fk.stat = (0, json.dumps(DM_STAT, ensure_ascii=False) + '\n', '')
+    return w, clk, fk
+
+
+def ncalls(fk, script):
+    return sum(1 for c in fk.calls if c[0] == script)
+
+
+watch.OCR_ON = True
+watch.DIGIT_ON = True
+# 1. 樣板齊全、補學間隔很長 → 完全不呼叫 stat；每欄來源 digit；hpPct / mpPct / map 照樣有
+watch.LEARN_EVERY = 1e9
+w, clk, fk = dm_setup('dm1', DM_TPL)
+w.last_learn = clk.t
+run_cycles(w, clk, 8)
+h = watchstate.read()['hud']
+check('digit 全成功：stat.ps1 不被呼叫', ncalls(fk, 'stat.ps1') == 0 and ncalls(fk, 'digitmatch.ps1') == 2, f"{ncalls(fk, 'stat.ps1')} {ncalls(fk, 'digitmatch.ps1')}")
+check('digit 全成功：欄位值與格式不變（含 hpPct / map / pos）',
+      h['level']['v'] == '0轉130級' and h['hp']['v'] == DM_RAW['expect']['hp'] and h['hpPct']['v'] == 65 and h['mpPct']['v'] == 100
+      and h['pet']['hp']['v'] == DM_RAW['expect']['petHp'] and h['map']['v'] == '庫塔伊洞窟地下二樓' and h['map']['id'] == 60050 and h['pos']['v'] == [24, 24]
+      and h['ok'] is True and h['stale'] is False, json.dumps(h, ensure_ascii=False)[:300])
+check('hud.src 每欄都是 digit', h['src'] and set(h['src'].values()) == {'digit'} and set(h['src']) >= {'level', 'hp', 'mp', 'hpPct', 'mpPct', 'petLevel', 'petHp', 'map', 'pos'}, str(h.get('src')))
+check('digitmatch 呼叫帶 timeout', all(c[2] == watch.PS_TIMEOUT for c in fk.calls if c[0] == 'digitmatch.ps1'))
+# 2. 缺字元樣板 → 只有讀不出的欄位用 stat 補（其餘仍 digit）
+t2 = {k: v for k, v in DM_TPL.items() if k != '4'}
+w, clk, fk = dm_setup('dm2', t2)
+w.last_learn = clk.t
+run_cycles(w, clk, 2)
+h = watchstate.read()['hud']
+need = [k for k in ('level', 'hp', 'mp', 'petLevel', 'petHp', 'pos') if digitmatch.read_fields(digitmatch.parse_capture(json.dumps(DM_OUT)), t2)[k] is None]
+check('缺樣板：該輪呼叫 stat 補', ncalls(fk, 'stat.ps1') == 1 and need, str(need))
+check('缺樣板：讀得出的欄位 digit、讀不出的 ocr', 'ocr' in h['src'].values() and h['src']['mp'] == 'digit' and h['mp']['v'] == 100, str(h['src']))
+check('缺樣板：stat 補的值正確併入', h['pos']['v'] == [24, 24] and h['hp']['v'] == DM_RAW['expect']['hp'])
+# 3. digitmatch 輸出壞掉 / 版面不支援 → 全部走 stat（等同舊行為）
+w, clk, fk = dm_setup('dm3', DM_TPL)
+fk.digit = (0, 'garbage\n', '')
+w.last_learn = clk.t
+run_cycles(w, clk, 2)
+h = watchstate.read()['hud']
+check('digitmatch 失敗 → stat 全補、來源 ocr', ncalls(fk, 'stat.ps1') == 1 and set(h['src'].values()) == {'ocr'} and h['hp']['v'] == DM_RAW['expect']['hp'], str(h.get('src')))
+fk.digit = (0, json.dumps({'ok': False, 'error': '視窗大小 1280x720，只支援 2880x1659 或 1920x1017'}) + '\n', '')
+w.last_ocr = -1e9
+w.cycle()
+check('版面不支援（ok:false）→ 仍走 stat', ncalls(fk, 'stat.ps1') == 2)
+# 4. 沒有該版面樣板（如 1920×1017 剛開始）→ 全退回 stat，並自動補學；補完後下一輪就改 digit
+watch.LEARN_EVERY = 60.0
+w, clk, fk = dm_setup('dm4', None)
+run_cycles(w, clk, 2)
+h = watchstate.read()['hud']
+learned = json.loads(digitmatch.tpl_path(DM_RAW['layout']).read_text(encoding='utf-8')) if digitmatch.tpl_path(DM_RAW['layout']).exists() else {}
+check('沒樣板：數字欄全退回 stat（ocr）；血條比例不靠樣板仍是 digitmatch 的像素掃描', all(h['src'][k] == 'ocr' for k in ('level', 'hp', 'mp', 'petHp', 'pos')) and h['src']['hpPct'] == 'digit' and h['hp']['v'] == DM_RAW['expect']['hp'], str(h.get('src')))
+check('沒樣板：背景補學 → 樣板檔出現 fixture 內有的字元', set('01369:,') <= set(learned) and w.dm_n['learned'] > 20, f"{sorted(learned)} {w.dm_n}")
+n_dm, n_st = ncalls(fk, 'digitmatch.ps1'), ncalls(fk, 'stat.ps1')
+check('補學多截 1 張圖（共 2 次 digitmatch）', n_dm == 2 and n_st == 1, f'{n_dm} {n_st}')
+clk.t += 3.1
+w.cycle()
+h = watchstate.read()['hud']
+check('補學後下一輪改用 digit（stat 不再被呼叫，間隔未到）', ncalls(fk, 'stat.ps1') == 1 and set(h['src'].values()) == {'digit'} or h['src']['hp'] == 'digit', str(h.get('src')))
+# 5. 補學頻率：每分鐘最多一次 stat
+for _ in range(20):
+    clk.t += 3.1
+    w.cycle()
+check('補學頻率：65 s 內 stat 只多一次（< LEARN_EVERY 不補學）', ncalls(fk, 'stat.ps1') in (2, 3), str(ncalls(fk, 'stat.ps1')))
+# 6. 補學採用條件：stat 與 digit 讀值不同 → 不學；畫面在變（兩次截圖不同）→ 不學
+w, clk, fk = dm_setup('dm6', DM_TPL)
+n_before = sum(len(v) for v in json.loads(digitmatch.tpl_path(DM_RAW['layout']).read_text(encoding='utf-8')).values())
+fk.stat = (0, json.dumps({**DM_STAT, 'petHp': 69}, ensure_ascii=False) + '\n', '')       # OCR 讀錯一位
+alt = json.loads(json.dumps(DM_OUT)); alt['fields'] = {**DM_OUT['fields'], 'hp': DM_OUT['fields']['mp']}   # 第二張圖 hp 欄不同
+seq = [json.dumps(DM_OUT) + '\n', json.dumps(alt) + '\n']
+fk.digit = lambda: (0, seq.pop(0) if len(seq) > 1 else seq[0], '')
+run_cycles(w, clk, 1)
+n_after = sum(len(v) for v in json.loads(digitmatch.tpl_path(DM_RAW['layout']).read_text(encoding='utf-8')).values())
+check('OCR 與 digit 不一致 / 兩張圖不同 → 不補樣板', n_after == n_before and w.dm_n['learned'] <= 3, f'{n_before} {n_after} {w.dm_n}')
+h = watchstate.read()['hud']
+check('不一致時 petHp 仍以 digit 為準', h['pet']['hp']['v'] == DM_RAW['expect']['petHp'] and h['src']['petHp'] == 'digit')
+watch.OCR_ON = False
+watch.DIGIT_ON = False
+watch.LEARN_EVERY = 60.0
+import shutil  # noqa: E402
+shutil.rmtree(dm_tmp, ignore_errors=True)
 
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')

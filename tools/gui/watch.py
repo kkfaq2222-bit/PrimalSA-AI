@@ -17,7 +17,7 @@
 
 退出碼：0 正常（含父程序死）/ 2 參數錯 / 3 同平台已有實例（或鎖被換走）/ 5 收到 --stop / 6 鎖屬於另一平台 / 其他 = 異常。
 
-**零輸入**：只送 gui.ps1 的 pixel / info（一律帶 -NoRestore 1：遊戲最小化時不還原視窗）與 stat.ps1 / ocr.ps1（stat.ps1 每 3 s 一次，讀 HUD 數值）。
+**零輸入**：只送 gui.ps1 的 pixel / info（一律帶 -NoRestore 1：遊戲最小化時不還原視窗）與 stat.ps1 / ocr.ps1 / digitmatch.ps1（每 3 s 一次讀 HUD 數值：digitmatch 樣板比對第一順位，讀不出的欄位才用 stat.ps1 補；每分鐘最多一次用 stat 補學樣板）。
 不送任何點擊、按鍵、走路、fg / max / seq / shot / waitpix；test_watch.py 用白名單與 AST 檢查把關。
 watch 不上傳截圖，不做驗證視窗判斷（那是 quest 那一層）；state 不能當點擊依據。
 """
@@ -39,6 +39,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import battleguard  # noqa: E402
 import charname  # noqa: E402
+import digitmatch  # noqa: E402
 import errlog  # noqa: E402
 import screen_sigs  # noqa: E402
 import watchstate  # noqa: E402
@@ -58,14 +59,16 @@ UNKNOWN_LONG_S = 10.0             # screen.state=unknown 連續這麼久 → ale
 CLEAR_S = 5.0                     # 連續這麼久都是已知畫面 → 清除
 QUEST_SCAN_EVERY = 2.0            # 讀 quest-events.log 新增行的間隔
 QUEST_PREFIXES = ('警告：Clef 判斷可能是答題 / 驗證視窗', '警告：連續 3 次遇到不認得的畫面')   # quest.py 的兩句警報開頭
-OCR_ON = True                     # 測試可關（關了就完全不呼叫 stat.ps1）
+OCR_ON = True                     # 測試可關（關了就完全不呼叫 stat.ps1 / digitmatch.ps1）
+DIGIT_ON = True                   # HUD 數值第一順位用 digitmatch 樣板比對；False = 一律 stat.ps1 OCR（測試 / 緊急退路）
+LEARN_EVERY = 60.0                # 自動補樣板（需要 stat 當標籤 + 多截一張圖）最短間隔：每分鐘最多一次
 OCR_STATES = ('idle', 'walking', 'battle')   # 只在這些畫面讀 HUD（battle 僅限非完整戰鬥；對話 / 面板 / 未知畫面可能蓋住 HUD，OCR 會讀到雜訊）
 LAYOUT_OK = '2880x1659'
 TRANSITIONS_KEEP = 20
 STABLE_CAP = 5                    # stable_n 上限（不封頂會每輪都「內容有變」）
 
 GUI_ALLOWED = ('pixel', 'info')               # 零輸入白名單：gui.ps1 只准這兩個指令
-PS_ALLOWED = ('stat.ps1', 'ocr.ps1')          # 其他腳本只准這兩支
+PS_ALLOWED = ('stat.ps1', 'ocr.ps1', 'digitmatch.ps1')   # 其他腳本只准這三支（都是唯讀截圖 / 讀像素 / OCR）
 NOGAME_STATES = ('no_game', 'minimized')
 
 _stop_flag = {'sig': 0}           # 訊號 / 內部要求停止時設（呼叫前檢查；訊號 handler 另外直接 raise SystemExit）
@@ -95,7 +98,7 @@ def _gui(cmd: str, *args: str, timeout: float = GUI_TIMEOUT) -> subprocess.Compl
 
 
 def _ps(script: str, *args: str, timeout: float = PS_TIMEOUT) -> subprocess.CompletedProcess:
-    """stat.ps1 / ocr.ps1（唯讀 OCR）；其他腳本一律拒絕。一定帶 timeout"""
+    """stat.ps1 / ocr.ps1 / digitmatch.ps1（唯讀 OCR / 樣板比對）；其他腳本一律拒絕。一定帶 timeout"""
     _check_stop()
     if script not in PS_ALLOWED:
         raise ValueError(f'watch 零輸入白名單：腳本只准 {PS_ALLOWED}，不准 {script!r}')
@@ -232,6 +235,10 @@ class Watcher:
         self.hud_fail = True             # 最近一次嘗試是否失敗 / 跳過
         self.last_ocr = -1e9
         self.ocr_ms = 0
+        self.hud_src: dict = {}          # 欄位名 -> 'digit' | 'ocr'（除錯用：這個值是樣板比對還是 stat OCR 讀的）
+        self.dm_n = {'digit': 0, 'mixed': 0, 'ocr': 0, 'learned': 0}   # 每輪 HUD 讀取的來源計數 + 自動補的樣板數
+        self.last_learn = -1e9
+        self._tpl: dict = {}             # 版面 -> 樣板 dict（記憶體快取，補樣板後直接更新）
         # 警示（§5）：unknown 連續 N 秒、quest 事件 log 轉述
         self.enc_on = None
         self.unknown_since = None        # 本地 monotonic
@@ -574,7 +581,7 @@ class Watcher:
         except OSError:
             pass
 
-    # ---- HUD 數值（stat.ps1）----
+    # ---- HUD 數值（digitmatch 樣板比對 → stat.ps1 補）----
     def _maybe_ocr(self, kind: str) -> None:
         """每 OCR_EVERY 秒跑一次 stat.ps1；畫面不是主畫面類（對話 / 面板 / 完整戰鬥 / 沒開遊戲…）就不跑，只標 stale"""
         if not self.ocr_on:
@@ -586,11 +593,73 @@ class Watcher:
         if self.mono() - self.last_ocr < OCR_EVERY:
             return
         self.last_ocr = self.mono()
-        r, how, ms = self._call(_ps, 'stat.ps1')
-        self.ocr_ms = ms
-        self.merge_stat(self._parse_stat(r), self.call_t0)
+        if DIGIT_ON:
+            self._read_hud_digit()
+        else:
+            r, how, ms = self._call(_ps, 'stat.ps1')
+            self.ocr_ms = ms
+            self.merge_stat(self._parse_stat(r), self.call_t0, 'ocr')
         self._read_names()
 
+    def _tpl_for(self, layout: str) -> dict:
+        if layout not in self._tpl:
+            self._tpl[layout] = digitmatch.load_tpl(layout)
+        return self._tpl[layout]
+
+    def _read_hud_digit(self) -> None:
+        """HUD 數值：digitmatch 樣板比對第一順位；有欄位回 None（或這個版面沒樣板）才呼叫 stat.ps1 補那些欄位。
+        另外每 LEARN_EVERY 秒最多一次：呼叫 stat 當標籤 + 再截一張圖，把新字形補進樣板（見 digitmatch.learn_from 的採用條件）。
+        1920×1017 等沒有樣板的版面：全部退回 stat，並靠同一個補學機制在背景累積樣板（不動視窗）。"""
+        t_all = self.mono()
+        r, how, ms = self._call(_ps, 'digitmatch.ps1')
+        t0 = self.call_t0
+        cap = digitmatch.parse_capture(r.stdout) if r is not None else {'ok': False}
+        dm = None
+        if cap.get('ok'):
+            try:
+                dm = digitmatch.read_fields(cap, self._tpl_for(cap['layout']))
+            except (KeyError, ValueError, IndexError):
+                dm = None
+        learn_due = cap.get('ok') and self.mono() - self.last_learn >= LEARN_EVERY
+        need_stat = dm is None or bool(dm['unsure']) or learn_due
+        st = None
+        if need_stat:
+            r2, how2, ms2 = self._call(_ps, 'stat.ps1')
+            st = self._parse_stat(r2)
+            if st is not None and not st.get('ok'):
+                st = None
+        merged, src = {}, {}
+        for k in self.HUD_SRC:
+            if dm is not None and dm.get(k) not in (None, ''):
+                merged[k], src[k] = dm[k], 'digit'
+            elif st is not None and st.get(k) not in (None, ''):
+                merged[k], src[k] = st[k], 'ocr'
+        if merged:
+            merged['ok'] = True
+            if dm is not None:
+                merged['raw'] = [str(dm['raw'].get(k) or '') for k in ('lv', 'hp', 'mp', 'plv', 'php', 'pos')]
+            elif st is not None and isinstance(st.get('raw'), list):
+                merged['raw'] = st['raw']
+            self.merge_stat(merged, t0, src)
+            used = set(src.values())
+            self.dm_n['digit' if used == {'digit'} else ('ocr' if used == {'ocr'} else 'mixed')] += 1
+        else:
+            self.merge_stat(None, t0)
+        self.ocr_ms = int((self.mono() - t_all) * 1000)
+        # 自動補樣板：stat 有值 + 兩次截圖夾住 stat（確認畫面沒在變）；失敗 / 無效不改 last_learn 以外的任何東西
+        if learn_due and st is not None:
+            self.last_learn = self.mono()
+            r3, how3, ms3 = self._call(_ps, 'digitmatch.ps1')
+            cap2 = digitmatch.parse_capture(r3.stdout) if r3 is not None else {'ok': False}
+            if cap2.get('ok') and cap2.get('layout') == cap['layout']:
+                tpl = self._tpl_for(cap['layout'])
+                n = digitmatch.learn_from(cap, cap2, st, tpl, dm)
+                if n:
+                    self.dm_n['learned'] += n
+                    try:
+                        digitmatch.save_tpl(cap['layout'], tpl)
+                    except OSError:
+                        pass
     # ---- 人物名 / 寵物名 ----
     @staticmethod
     def _mtime(p):
@@ -646,7 +715,7 @@ class Watcher:
 
     HUD_SRC = ('level', 'hp', 'hpPct', 'mp', 'mpPct', 'petLevel', 'petHp', 'map', 'pos')
 
-    def merge_stat(self, d, t: float) -> bool:
+    def merge_stat(self, d, t: float, src=None) -> bool:
         """把一次 stat 結果併進 self.hud；回 True = 有資料。
         ok=False（最小化 / 沒開）或 ok=True 但全空（登入 / 選角畫面等被蓋住）→ 保留舊值，標 stale，不寫空值。
         有資料時只更新「這次有值」的欄位（沒讀到的欄位保留舊值與舊 ts）"""
@@ -659,6 +728,7 @@ class Watcher:
             return False
         for k, v in got.items():
             self.hud[k] = {'v': v, 'ts': t}
+            self.hud_src[k] = src.get(k, 'ocr') if isinstance(src, dict) else (src or 'ocr')
         raw = d.get('raw')
         if isinstance(raw, list):
             self.hud_raw = [str(x) for x in raw][:8]
@@ -698,6 +768,9 @@ class Watcher:
                     pass
         if self.hud_raw:
             out['raw'] = self.hud_raw
+        if self.hud_src:
+            out['src'] = dict(self.hud_src)               # 每欄來源：digit = 樣板比對、ocr = stat.ps1
+            out['dm'] = dict(self.dm_n)
         nm = self.names.resolve(self.side, now)
         out['name'] = nm or {'v': '?', 'ts': None, 'src': None, 'stale': True}
         if pet or self.pet_name:
@@ -945,6 +1018,8 @@ def cmd_bench(n: int) -> int:
         winenv.shutdown_server()
     print(f'{n} 輪 cycle_ms 中位數 {statistics.median(ms):.0f} / p95 {_p95(ms):.0f} / 最大 {max(ms):.0f}；state 分佈 '
           f'{ {s: [t[1] for t in w.transitions].count(s) for s in set(t[1] for t in w.transitions)} }；interval {w.interval}')
+    h = w._hud_section(w.clock())
+    print(f'HUD 來源 {h.get("src")}；每輪來源計數 {w.dm_n}；最近一次 HUD 讀取 {w.ocr_ms} ms')
     return 0
 
 

@@ -29,7 +29,7 @@ PrimalSA-AI/
     schemadump/        SchemaDump.cs：從 HotUpdate.dll 抽 Tabtoy 欄位對照與列舉（ReflectionOnly，不執行遊戲程式）
     query/psa.py       知識庫查詢工具（搜尋、交叉查詢、跨地圖路線、通行格）
     gui/gui.sh         遊戲畫面操作（截圖、點擊、拖曳、按鍵）；用法與按鈕地圖見 .claude/skills/psa-game-ui/
-                       watch.py（零輸入即時狀態監看 → tools/.cache/state.json，psa-hud 啟動；state 只供顯示，不能當點擊依據）、serve.ps1（常駐 server，winenv.GuiServer 啟動；WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）、bench.py（唯讀量測 / soak）、test_*（離線測試）
+                       watch.py（零輸入即時狀態監看 → tools/.cache/state.json，psa-hud 啟動；HUD 數值用 digitmatch.py 樣板比對為主、stat.ps1 OCR 補漏；state 只供顯示，不能當點擊依據）、serve.ps1（常駐 server，winenv.GuiServer 啟動；WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）、bench.py（唯讀量測 / soak）、test_*（離線測試）
     web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
     .cache/            匯出時的暫存（HotUpdate.dll 等），可刪
 ```
@@ -99,7 +99,7 @@ PrimalSA-AI/
 操作前先讀 `.claude/skills/psa-game-ui/SKILL.md`（工具用法、操作迴圈、紅區）與同資料夾 `ui/README.md`（功能索引；按鈕座標、各面板內容依功能拆檔）。
 工具：`bash tools/gui/gui.sh shot|click|drag|key|info|max|end`（WSL / Git Bash 手打用）；走路 / 補血用 `uv run --no-project python tools/gui/walk.py ...`、`heal.py`（兩邊指令相同）。座標用截圖座標；預設背景操作（不搶前景，點擊時游標瞬移約 0.15 秒）；用過 `fg` / `max` 後要跑 `end` 把前景還給使用者。
 
-**即時狀態**：開著 psa-hud 時有 `watch.py` 在背景零輸入監看（只送 pixel / info / stat），`uv run --no-project python tools/gui/watch.py --get` 可讀；它只是參考，點擊前仍要現場讀圖，`idle` 不代表沒有驗證視窗；出現 `verify_suspect` / alerts 就依鐵則 5 停手通知。只有開 psa-hud 的那個 session 管理它，兩個平台同時開 session 時只有一邊有即時狀態。
+**即時狀態**：開著 psa-hud 時有 `watch.py` 在背景零輸入監看（只送 pixel / info / digitmatch / stat），`uv run --no-project python tools/gui/watch.py --get` 可讀；它只是參考，點擊前仍要現場讀圖，`idle` 不代表沒有驗證視窗；出現 `verify_suspect` / alerts 就依鐵則 5 停手通知。只有開 psa-hud 的那個 session 管理它，兩個平台同時開 session 時只有一邊有即時狀態。
 
 ## 5.2 在 Claude 桌面 App（Windows 原生）執行
 專案也可以用 Claude 桌面 App 的 Claude Code 開（路徑 `C:\games\PrimalSA-AI`，shell 是 Git Bash，沒有 wslpath、沒有 /mnt/c）。工具已兼容，差異如下：
