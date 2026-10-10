@@ -227,8 +227,8 @@ def ocr_names(n_cards: int, only=None) -> dict:
     return out
 
 
-def read_state(ocr: bool = True) -> dict:
-    """開切換面板 → 讀 → 關（只關自己開的）。回 {'ok': bool, 'cards': [...], 'summary': {...}, 'err': str, 'ms': {...}}。
+def read_state(ocr: bool = True, keep_open: bool = False) -> dict:
+    """開切換面板 → 讀 → 關（只關自己開的；keep_open=True 讀完不關，char.py 要接著點卡片，呼叫端負責關）。回 {'ok': bool, 'cards': [...], 'summary': {...}, 'err': str, 'ms': {...}}。
     面板打不開 / 讀圖中途消失 → ok=False（呼叫端回 40）。不點任何面板內座標（開關只用 open_panel / close_panel 的開啟鈕與 ✕）"""
     res = {'ok': False, 'cards': [], 'summary': {}, 'err': '', 'ms': {}}
     t0 = time.time()
@@ -269,7 +269,7 @@ def read_state(ocr: bool = True) -> dict:
         res.update(ok=True, cards=cards, summary=summarize(cards))
         return res
     finally:
-        if not was_open:
+        if not was_open and not (keep_open and res['ok']):
             uikit.close_panel(uikit.SWITCH)
 
 

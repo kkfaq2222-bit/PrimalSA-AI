@@ -45,6 +45,7 @@ uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40
 uv run --no-project python tools/gui/heal.py --no-return   # 補完血停在醫院，不傳回練功點、不開遇敵（解任務被打飛後用）
 uv run --no-project python tools/gui/quest.py --solo --task 任務名   # 單人逃跑：遇怪按逃跑，到 NPC ESC 對話框退出碼 20，被打飛退出碼 21；--fight = 戰鬥步按自動戰鬥，退出碼 0 才是打贏（35 沒贏 / 36 不確定 / 33 對話無進展 / 34 不同圖，見 /psa-quest-solo）
 uv run --no-project python tools/gui/team.py status|check|disband   # 隊伍狀態（唯讀）/ 檢查 1 隊長 + 4 隊員（0 = 符合）/ 解散（當前須為隊長）；退出碼 40～47 見 ui/team.md；名字用 namematch.py 整名樣板比對（`namematch.py learn|read|list`，見 ui/team.md）；form 未做
+uv run --no-project python tools/gui/char.py current|switch DKBO2|ensure DKBO   # 當前角色：唯讀讀取 / 切過去並驗證（點前 namematch 確認名字 + 線上，點後等加載 → HUD → 重開面板確認；成功寫 current-char.json；最後一行 JSON 含 changed）；退出碼 60～65 見 ui/team.md；不會自動切回 DKBO，呼叫端負責 ensure；離線測試 test_char.py（假面板在 fake_switch.py，test_team 共用）
 uv run --no-project python tools/gui/petwatch.py [--once] [--interval 30] [--target-level 77]   # 監測 5 人金布伊等級，≥ 門檻換回迪基格斯（內含補血檢查 + 維持原地遇敵，不要和 heal.py --watch 同跑）
 ```
 
