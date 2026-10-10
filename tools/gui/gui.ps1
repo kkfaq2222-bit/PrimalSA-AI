@@ -14,6 +14,8 @@
 #   gui.ps1 waitstill <逾時毫秒> [開始等待毫秒]  點地面走路後等鏡頭停下來（印 still / nomove / timeout 毫秒）
 #   gui.ps1 ifok / ifnok <指令> ...   上一個 waitpix 成功 / 失敗才執行（seq 用），例：seq "click 462 335; waitpix 1500 948,445,229,197,155; ifok click 948 460"
 #   gui.ps1 seq "<動作>; <動作>; ..."  同一個行程連續執行多個動作，例：seq "click 763 760; wait 300; shot C:\\x.png"
+#   -NoRestore 1                      遇到遊戲視窗最小化時不還原（預設會 SW_SHOWNOACTIVATE 還原並等 0.8 秒）：印 minimized、exit 3。
+#                                     只給唯讀監看（watch.py 的 pixel / info）用；送輸入的指令不要帶
 #   -Note "用途"                       任何指令後面可加，附註寫進操作 log（gui.sh 用環境變數 PSA_NOTE）
 #   操作 log：click / dclick / drag / key / max / end 會寫一行到 tools/.cache/actions.log（只留最新 100 行，psa-hud pane 顯示）；shot / pixel / wait* 不記
 #   gui.ps1 fg <指令> ...             用舊的前景模式執行（背景模式失靈時的備案），例：fg click 763 760、seq "fg; click ..."
@@ -28,7 +30,7 @@
 #   - 鍵盤：PostMessage WM_KEYDOWN / WM_CHAR / WM_KEYUP，游標完全不動。
 # fg 模式：任務期間第一次 click / drag / key 時記下使用者原本的前景視窗與游標（存 tools/.cache/gui-session.txt），
 #          把遊戲拉到前景並一直留著；任務做完呼叫 end 才還原。
-param([string]$Cmd, [string]$A1, [string]$A2, [string]$A3, [string]$A4, [string]$A5, [double]$Scale = 2, [string]$Note = '')
+param([string]$Cmd, [string]$A1, [string]$A2, [string]$A3, [string]$A4, [string]$A5, [double]$Scale = 2, [string]$Note = '', [string]$NoRestore = '0')
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8  # 讓 WSL 收到的中文不變亂碼
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type @"
@@ -46,6 +48,8 @@ public class W {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, IntPtr e);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+  [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")] public static extern uint GetWindowPid(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
   [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
   [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "PostMessageW")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
@@ -116,11 +120,29 @@ public class Guard {
 }
 "@
 [W]::SetProcessDPIAware() | Out-Null
-$proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
-if (-not $proc) { Write-Error "PrimalSA 沒有在執行"; exit 1 }
-$h = $proc.MainWindowHandle
+# 視窗 handle 快取（只給唯讀的 pixel / info 用；常駐 serve.ps1 以 & 呼叫、同一 runspace，$global: 跨次保留；一次性執行每次新行程，等於沒快取）。
+# 命中條件：IsWindow 且該視窗所屬行程 PID == 快取的 PrimalSA PID（防 handle 被回收給別的視窗）；任一不符就重查（Get-Process 約 27 ms）。
+# click / key 等輸入指令一律不用快取，每次重查，確保不會把輸入送到錯的視窗。
+$h = [IntPtr]::Zero
+if (($Cmd -eq 'pixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:__psa_pid) {
+  $__psa_wp = [uint32]0
+  if ([W]::IsWindow([IntPtr]$global:__psa_hwnd)) {
+    [W]::GetWindowPid([IntPtr]$global:__psa_hwnd, [ref]$__psa_wp) | Out-Null
+    if ($__psa_wp -eq [uint32]$global:__psa_pid) { $h = [IntPtr]$global:__psa_hwnd }
+  }
+}
+if ($h -eq [IntPtr]::Zero) {
+  $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
+  if (-not $proc) { $global:__psa_hwnd = $null; $global:__psa_pid = $null; Write-Error "PrimalSA 沒有在執行"; exit 1 }
+  $h = $proc.MainWindowHandle
+  if ($h -ne [IntPtr]::Zero) { $global:__psa_hwnd = [int64]$h; $global:__psa_pid = [int]@($proc)[0].Id }
+}
 # 最小化時 Unity 不繪製，要還原；用 SW_SHOWNOACTIVATE(4) 不搶焦點
-if ([W]::IsIconic($h)) { [W]::ShowWindow($h, 4) | Out-Null; Start-Sleep -Milliseconds 800 }
+# 例外：-NoRestore 1（watch 唯讀監看用）→ 最小化時什麼都不做，印 minimized、exit 3（不 ShowWindow、不 sleep）
+if ([W]::IsIconic($h)) {
+  if ($NoRestore -eq '1') { Write-Output 'minimized'; exit 3 }
+  [W]::ShowWindow($h, 4) | Out-Null; Start-Sleep -Milliseconds 800
+}
 $r = New-Object W+RECT; [W]::GetClientRect($h, [ref]$r) | Out-Null
 $p = New-Object W+POINT; [W]::ClientToScreen($h, [ref]$p) | Out-Null
 $Fg = $false

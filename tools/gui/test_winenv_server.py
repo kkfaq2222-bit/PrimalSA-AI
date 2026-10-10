@@ -184,6 +184,7 @@ check('split ocr', sp('ocr', ['1', '2', '3', '4', '-Zooms', '2,3', '-Dark', '150
 check('split 大小寫不拘、回正規名稱', sp('ocr', ['-zooms', '2']) == ([], {'Zooms': '2'}))
 check('split 負數 / 不在白名單的 -xxx 當位置參數', sp('gui', ['click', '-5', '-Foo', 'x']) == (['click', '-5', '-Foo', 'x'], {}))
 check('split 結尾的 -Note 沒有值 → 當位置參數', sp('gui', ['shot', '-Note']) == (['shot', '-Note'], {}))
+check('split gui -NoRestore 1（pixel 帶 -NoRestore）', sp('gui', ['pixel', '1,2 3,4', '-NoRestore', '1']) == (['pixel', '1,2 3,4'], {'NoRestore': '1'}))
 check('split titlematch', sp('titlematch', ['-Mode', 'match', '-Dir', 'C:\\a b', '-Thr', '0.6']) == ([], {'Mode': 'match', 'Dir': 'C:\\a b', 'Thr': '0.6'}))
 # 白名單與 ps1 param 區塊同步
 for name, names in winenv.SERVER_NAMED.items():
@@ -191,9 +192,20 @@ for name, names in winenv.SERVER_NAMED.items():
     m = re.search(r'^param\((.*)\)\s*$', txt, re.M)
     got = set(re.findall(r'\$([A-Za-z]+)', m[1])) if m else set()
     if name == 'gui':
-        check('gui.ps1 param 具名參數 Scale / Note 都在', {'Scale', 'Note'} <= got)
+        check('gui.ps1 param 具名參數 Scale / Note / NoRestore 都在', {'Scale', 'Note', 'NoRestore'} <= got)
+        check('gui SERVER_NAMED 的每個名稱都在 gui.ps1 param', set(names) <= got, f'{got} vs {names}')
     else:
         check(f'{name}.ps1 param 與 SERVER_NAMED 一致', got == set(names), f'{got} vs {names}')
+
+# gui.ps1 -NoRestore：最小化分支必須先判 NoRestore 再 ShowWindow（真機最小化情境無法在單元測試重現，只做靜態檢查）
+_g = (winenv.GUI_DIR / 'gui.ps1').read_text(encoding='utf-8-sig')
+_m = re.search(r"if \(\[W\]::IsIconic\(\$h\)\) \{(.*?)\n\}", _g, re.S)
+check('gui.ps1 最小化分支：NoRestore=1 → minimized + exit 3，且在 ShowWindow 之前', bool(_m) and "$NoRestore -eq '1'" in _m[1] and 'exit 3' in _m[1]
+      and _m[1].index("$NoRestore -eq '1'") < _m[1].index('ShowWindow'))
+# gui.ps1 handle 快取：只給 pixel / info、命中要核對 IsWindow + PID、變數用 $global:__psa_ 前綴（靜態檢查；實機行為已手動驗過）
+check('gui.ps1 handle 快取只限 pixel / info 且核對 IsWindow + PID', "$Cmd -eq 'pixel' -or $Cmd -eq 'info'" in _g and '[W]::IsWindow(' in _g and '$global:__psa_pid' in _g
+      and re.search(r'\$global:(?!__psa_)\w+', _g) is None)
+check('gui.ps1 保留 UTF-8 BOM', (winenv.GUI_DIR / 'gui.ps1').read_bytes()[:3] == b'\xef\xbb\xbf')
 
 # 9) 逾時估算
 et = winenv.estimate_timeout

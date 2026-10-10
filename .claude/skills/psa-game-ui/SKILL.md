@@ -56,7 +56,7 @@ uv run --no-project python tools/gui/errlog.py fix <id|last> "改進內容"
 uv run --no-project python tools/gui/errlog.py list
 ```
 存 `tools/.cache/errlog.jsonl`（最新 100 筆，不進 git）；Python 裡 `import errlog; i = errlog.add(...); errlog.fix(i, ...)`。一筆寫一件事、寫具體（發生什麼 + 為什麼），改進寫「改了什麼檔 / 之後怎麼做」。
-- 遊戲**不能最小化**（Unity 最小化不繪製）；每個指令遇到最小化會用 SW_SHOWNOACTIVATE 還原（不搶焦點）。放在其他視窗後面沒關係。
+- 遊戲**不能最小化**（Unity 最小化不繪製）；每個指令遇到最小化會用 SW_SHOWNOACTIVATE 還原（不搶焦點）；**例外**：`gui.ps1 pixel|info ... -NoRestore 1`（watch 唯讀監看用）遇到最小化不還原，印 `minimized`、exit 3。放在其他視窗後面沒關係。
 - **座標 = 截圖座標**：截圖固定縮成客戶區的 1/2（`-Scale 2`，不隨視窗大小變），click 內部 ×2。實測客戶區 2880×1659 → 截圖 1440×830。
 - `ui/` 的座標只在這個大小有效。**每次開始操作先跑 `info`**，不是 2880×1659 就跑 `max`；`max` 後仍不同（換螢幕 / 解析度）時不要等比例換算（UI 縮放與錨點會變，例：1436×1644 時背包在 558,790），以新截圖重新目測。
 - **1920×1080 螢幕**（`max` 後 `client=1920x1017`、截圖 960×508）：用 [ui/layout-1920x1017.md](ui/layout-1920x1017.md) 的座標；`stat.ps1`、`walk.py`、`heal.py` 會自動切換（`tools/gui/layout.py`）。

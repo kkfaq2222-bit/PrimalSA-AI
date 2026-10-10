@@ -112,9 +112,9 @@ def run_ps(script: str, *args: str, timeout: float | None = None) -> subprocess.
 # ---------------------------------------------------------------------------------------------
 SERVER_SCRIPTS = {'gui', 'ocr', 'stat', 'findmark', 'titlematch'}
 # 各腳本 param 區塊裡「具名」參數（五支腳本都沒有 [switch]，所以「-名稱 值」成對拆進 named，其餘當位置參數）。
-# 腳本改 param 時要同步這裡（_selftest 有檢查）。
+# 腳本改 param 時要同步這裡（test_winenv_server.py 的「白名單與 ps1 param 區塊同步」會檢查；_selftest 只測路徑換算）。
 SERVER_NAMED = {
-    'gui': ('Scale', 'Note'),
+    'gui': ('Scale', 'Note', 'NoRestore'),
     'ocr': ('X', 'Y', 'Wd', 'Ht', 'Zoom', 'Dark', 'Zooms', 'Light'),
     'stat': ('Shot', 'ShotWidth'),
     'findmark': ('Crop', 'Out', 'Zoom'),
