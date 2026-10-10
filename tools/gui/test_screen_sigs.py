@@ -129,6 +129,34 @@ for n in ast.walk(ast.parse((HERE / 'screen_sigs.py').read_text(encoding='utf-8'
     elif isinstance(n, ast.ImportFrom):
         mods.add(n.module)
 check('screen_sigs 不 import winenv', 'winenv' not in mods, str(mods))
-check('annotate 殼：回空清單', S.annotate({}, {}) == [])
+check('annotate：沒有取樣點（只有 classify 用的 fixture）→ 空清單、enc_on None', S.annotate({}, {}) == [] and S.enc_on({}, {'state': 'idle'}) is None)
+
+# ---- 4. annotate / enc_on（樣本驗證）----
+AX = json.loads((HERE / 'fixtures' / 'annot_px.json').read_text(encoding='utf-8'))
+apts = [tuple(p) for p in AX['points']]
+bad, pos = [], {'notice_dialog': 0, 'login': 0, 'charsel': 0, 'enc_on': 0}
+for smp in AX['samples']:
+    h = smp['px']
+    px = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(apts)}
+    a, e = S.annotate(px, {}), S.enc_on(px, {'state': 'idle'})
+    if a != smp['annot'] or e != smp['enc_on']:
+        bad.append(smp['f'])
+    for k in a:
+        pos[k] += 1
+    pos['enc_on'] += bool(e)
+check(f'annotate / enc_on：{len(AX["samples"])} 張樣本結果與凍結結果一致', not bad, str(bad[:3]))
+check('每個上線特徵至少一張正例（提示視窗 / 登入 / 選角 / 遇敵鈕）', all(v >= 1 for v in pos.values()), str(pos))
+check('annot_points 與 classify 的 points 不重複', not (set(S.annot_points()) & set(S.points())))
+# 容差邊界：NET_LOGIN 偏 25 命中、26 不命中；ENC_ON 偏 50 / 51
+for name, sig, tol in (('login', S.NET_LOGIN, 25), ('enc_on', S.ENC_ON, 50)):
+    for off, want in ((tol, True), (tol + 1, False)):
+        px = {(x, y): (min(255, r + off), g, b) for x, y, r, g, b, t in sig}
+        got = (S.annotate(px, {}) == ['login']) if name == 'login' else (S.enc_on(px, {'state': 'idle'}) is True)
+        check(f'{name} 偏 {off} → {"命中" if want else "不命中"}', got == want)
+check('enc_on：主畫面看不到紅龍 = False；戰鬥等其他畫面 = None', S.enc_on({(x, y): (0, 0, 0) for x, y, *_ in S.ENC_ON}, {'state': 'walking'}) is False
+      and S.enc_on({(x, y): (0, 0, 0) for x, y, *_ in S.ENC_ON}, {'state': 'battle'}) is None)
+check('label：登入 / 選角（classify=unknown）顯示認得的畫面名', S.label({'state': 'unknown'}, ['login']) == '登入畫面' and S.label({'state': 'unknown'}, ['charsel']) == '選角畫面')
+check('label：idle + 提示視窗', S.label({'state': 'idle'}, ['notice_dialog']) == '主畫面（未偵測到已知視窗）（提示視窗）')
+check('label：任何 annotate 組合都不出現「安全」「無驗證」', all(not any(w in S.label({'state': st}, an) for w in ('安全', '無驗證')) for st in ('idle', 'unknown', 'dialog') for an in ([], ['login'], ['notice_dialog'])))
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

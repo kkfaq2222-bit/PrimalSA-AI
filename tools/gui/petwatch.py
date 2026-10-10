@@ -28,6 +28,7 @@ import errlog
 import heal
 import layout
 import netwatch
+import watchstate
 import winenv
 from walk import gui, log
 
@@ -244,9 +245,12 @@ def main() -> int:
     done = set(st['done'])
     end = time.time() + a.duration if a.duration else None
     next_scan = 0.0
+    vg = watchstate.VerifyGuard('petwatch', log=log)   # watch 標出疑似驗證視窗 → 暫停動作，最多 10 分鐘（超過停止、寫 errlog，不自動恢復）
     log(f'開始：每 {a.interval} 秒掃一輪，金布伊 ≥ {a.target_level} 級就換回迪基格斯；已完成 {sorted(done) or "無"}')
     try:
         while len(done) < len(CHARS) and (end is None or time.time() < end):
+            if vg.check() == 'timeout':
+                return heal.EXIT_VERIFY
             now = time.time()
             if netwatch.guard('petwatch')['status'] == 'reconnected':
                 next_scan = 0.0                      # 重連後馬上重掃一輪（netwatch 已恢復原地遇敵、檢查隊伍）

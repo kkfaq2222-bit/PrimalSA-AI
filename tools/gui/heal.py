@@ -19,6 +19,7 @@ import time
 import layout
 import netwatch
 import screen_sigs
+import watchstate
 import winenv
 from walk import LAYOUT, PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
 
@@ -253,6 +254,9 @@ def heal_trip(spot: str, no_return: bool = False) -> None:
     log(f'完成，耗時 {time.time() - t0:.1f} 秒（{"、".join(seg)}）')
 
 
+EXIT_VERIFY = 11     # --watch 因疑似驗證視窗暫停超過 10 分鐘，已停止（見 errlog）
+
+
 def low(s: dict, hp: int, mp: int) -> bool | None:
     """看血條 / 魔條比例（stat.ps1 的 hpPct / mpPct）。讀不到（戰鬥畫面、對話框蓋住 HUD）回 None = 不判斷。
     不用 OCR 的 hp / mp 數字：個位數（例 HP 1）OCR 會回 null，以前把 null 當低血，剛補滿也會誤判。"""
@@ -287,7 +291,10 @@ def main() -> int:
         return 0
     log(f'監看中：血條 < {a.hp}% 或魔條 < {a.mp}%（連續 {a.confirm} 次）就回村補血（Ctrl+C 結束）')
     end = time.time() + a.duration if a.duration else None
+    vg = watchstate.VerifyGuard('heal --watch', log=log)   # watch 標出疑似驗證視窗 → 暫停動作，最多 10 分鐘（超過停止、寫 errlog，不自動恢復）
     while end is None or time.time() < end:
+        if vg.check() == 'timeout':
+            return EXIT_VERIFY
         netwatch.guard('heal')           # 網路異常提示 → 點確定；登入畫面 → 自動按登錄重登（失敗才 exit 10；不輸入帳密）
         hits = 0
         for i in range(a.confirm):

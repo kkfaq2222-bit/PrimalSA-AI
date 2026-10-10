@@ -17,6 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import errlog  # noqa: E402
 import screen_sigs  # noqa: E402
 import watch  # noqa: E402
 import watchstate  # noqa: E402
@@ -43,6 +44,9 @@ def fresh_dir(name):
     d = TMP / name
     d.mkdir(parents=True, exist_ok=True)
     watchstate.CACHE = d
+    watchstate.ACK_FILE = d / 'watch.ack'
+    watchstate.QUEST_LOG = d / 'quest-events.log'
+    errlog.LOG = d / 'errlog.jsonl'
     for n, f in (('STATE_FILE', 'state.json'), ('LOCK_FILE', 'watch.lock'), ('STOP_FILE', 'watch.stop'), ('HUD_CFG', 'psa-hud.json'),
                  ('BATTLE_LOCK', 'battle.lock'), ('HALT_FILE', 'netwatch.halt')):
         setattr(watchstate, n, d / f)
@@ -87,6 +91,7 @@ class Fake:
         return subprocess.CompletedProcess(['x'], rc, out, err)
 
 
+EXTRA = ['0,0,0'] * len(screen_sigs.annot_points())
 FX = json.loads((HERE / 'fixtures' / 'screen_px.json').read_text(encoding='utf-8'))
 PTS = [tuple(p) for p in FX['points']]
 
@@ -95,7 +100,8 @@ def px_out(state):
     """fixture 裡某個狀態的像素 → gui pixel 的 stdout（'r,g,b r,g,b ...'）"""
     smp = next(s for s in FX['samples'] if s['state'] == state)
     h = smp['px']
-    return ' '.join(f'{int(h[i*6:i*6+2], 16)},{int(h[i*6+2:i*6+4], 16)},{int(h[i*6+4:i*6+6], 16)}' for i in range(len(PTS)))
+    out = [f'{int(h[i*6:i*6+2], 16)},{int(h[i*6+2:i*6+4], 16)},{int(h[i*6+4:i*6+6], 16)}' for i in range(len(PTS))]
+    return ' '.join(out + EXTRA)     # 後面接 annotate 用的點（全黑 = 沒有任何附註）
 
 
 def make(name, owner='', server=False):
@@ -611,6 +617,162 @@ k1 = watchstate.content_key(w.build())
 clk.t += 0.2
 w.hud['hp']['ts'] += 5; w.hud_ts += 5
 check('hud 只有時間戳變 → content_key 不變', watchstate.content_key(w.build()) == k1)
+watch.OCR_ON = False
+
+# ---------------------------------------------------------------- 第 5 階段：警示（unknown_long / quest 轉述 / ack / annotate）
+ALLPTS = screen_sigs.points() + screen_sigs.annot_points()
+
+
+def px_with(*sigs, base='0,0,0'):
+    """全黑底，指定特徵的點塗成特徵色 → gui pixel 輸出字串（順序 = watch.pts）"""
+    d = {}
+    for sg in sigs:
+        for x, y, r, g, b, _ in sg:
+            d[(x, y)] = f'{r},{g},{b}'
+    return ' '.join(d.get(pt, base) for pt in ALLPTS)
+
+
+UNK = (0, px_with(), '')
+w, clk, fk = make('alert')
+fk.pixel = UNK
+for _ in range(10):                 # 9 s 左右：還沒到 10 s
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('unknown 未滿 10 s → 沒有警報', st['screen']['state'] == 'unknown' and st['alerts'] == [] and st['flags']['verify_suspect'] is False, str(st['alerts']))
+for _ in range(3):
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('unknown 連續 ≥ 10 s → alerts.unknown_long + verify_suspect', st['flags']['verify_suspect'] is True and [a['kind'] for a in st['alerts']] == ['unknown_long']
+      and st['alerts'][0]['shot'] is None and '安全' not in st['alerts'][0]['msg'], str(st['alerts']))
+rows = errlog._read(errlog.LOG)
+check('errlog 寫一筆（source=watch，沒有 battle.lock 也寫）', len(rows) == 1 and rows[0]['source'] == 'watch' and rows[0]['fix'] is None, str(rows))
+for _ in range(5):
+    w.cycle(); clk.t += 0.9
+check('持續 unknown 不重複寫 errlog、alert 的 since 不變', len(errlog._read(errlog.LOG)) == 1 and watchstate.read()['alerts'][0]['since'] == st['alerts'][0]['since'])
+# 恢復：連續 5 s 已知畫面才清除
+fk.pixel = (0, px_out('idle'), '')
+w.cycle(); clk.t += 0.9
+check('剛恢復（< 5 s）警報還在', watchstate.read()['flags']['verify_suspect'] is True)
+for _ in range(7):
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('連續 5 s 已知畫面 → 警報清除、verify_suspect = False', st['alerts'] == [] and st['flags']['verify_suspect'] is False)
+rows = errlog._read(errlog.LOG)
+check('清除時補 errlog fix', rows[0]['fix'] and '已恢復' in rows[0]['fix'], str(rows[0]['fix']))
+# unknown 中途閃回已知一次 → 累積歸零
+w, clk, fk = make('alert2')
+for i in range(30):
+    fk.pixel = (0, px_out('idle') if i % 8 == 7 else px_with(), '')
+    w.cycle(); clk.t += 0.9
+check('unknown 被已知畫面打斷 → 重新計時、不誤報', watchstate.read()['alerts'] == [])
+# 最小化 / error 不計入
+w, clk, fk = make('alert3')
+fk.pixel = UNK
+for _ in range(8):
+    w.cycle(); clk.t += 0.9
+fk.pixel = subprocess.TimeoutExpired('pixel', 3)
+for _ in range(20):
+    w.cycle(); clk.t += 0.9
+check('讀取失敗（error）期間不累積也不觸發警報', watchstate.read()['alerts'] == [])
+# 登入 / 選角畫面（classify=unknown）算已知，不報
+w, clk, fk = make('alert4')
+fk.pixel = (0, px_with(screen_sigs.NET_LOGIN), '')
+for _ in range(20):
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('登入畫面（annot login）不觸發 unknown_long；label = 登入畫面', st['alerts'] == [] and st['screen']['annot'] == ['login'] and st['screen']['label'] == '登入畫面', str(st['screen']))
+fk.pixel = (0, px_with(screen_sigs.NET_CHARSEL), '')
+for _ in range(3):
+    w.cycle(); clk.t += 0.9
+check('選角畫面 annot charsel', watchstate.read()['screen']['annot'] == ['charsel'])
+# 提示視窗：只黃字（annot），不觸發 verify_suspect
+w, clk, fk = make('alert5')
+fk.pixel = (0, px_with(screen_sigs.NET_DIALOG, screen_sigs.SIG_HUD), '')
+for _ in range(30):
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('提示視窗 notice_dialog：annot 有、不觸發警報', st['screen']['annot'] == ['notice_dialog'] and st['alerts'] == [] and st['flags']['verify_suspect'] is False, str(st['screen']))
+# enc_on
+w, clk, fk = make('enc')
+fk.pixel = (0, px_with(screen_sigs.SIG_HUD, screen_sigs.ENC_ON), '')
+w.cycle()
+check('主畫面 + 紅龍頭 → screen.enc_on = True', watchstate.read()['screen']['enc_on'] is True)
+fk.pixel = (0, px_with(screen_sigs.SIG_HUD), '')
+w.cycle()
+check('主畫面沒紅龍頭 → enc_on = False', watchstate.read()['screen']['enc_on'] is False)
+fk.pixel = (0, px_with(), '')
+w.cycle()
+check('不認得的畫面 → enc_on = null', watchstate.read()['screen']['enc_on'] is None)
+
+# ---- quest-events.log 轉述 ----
+w, clk, fk = make('qlog')
+qlog = Path(watchstate.QUEST_LOG)
+qlog.write_text('2026-10-10 10:00:00 警告：Clef 判斷可能是答題 / 驗證視窗（舊的，watch 啟動前）\n', encoding='utf-8')
+w2 = watch.Watcher(clock=clk, mono=clk, sleep=clk.sleep)        # 這個實例啟動時 log 已經有舊行
+w2.owns_lock = True
+check('啟動前的舊行記為 offset（不觸發）', w2.q_off == qlog.stat().st_size)
+w2.token = w.token
+for _ in range(3):
+    w2.cycle(); clk.t += 2.1
+check('舊行不觸發', w2.q_alerts == [])
+with open(qlog, 'a', encoding='utf-8') as f:
+    f.write('2026-10-10 12:00:01 警告：Clef 判斷可能是答題 / 驗證視窗，請人工處理 [x.png]\n')
+    f.write('2026-10-10 12:00:05 一般事件\n')
+    f.write('2026-10-10 12:00:09 警告：連續 3 次遇到不認得的畫面（可能是答題 / 防腳本驗證視窗）')   # 還沒寫完換行
+w2.cycle(); clk.t += 2.1
+check('新增的 Clef 警報句觸發', [a['kind'] for a in w2.q_alerts] == ['verify'] and w2.q_alerts[0]['src'] == 'quest' and w2.build()['flags']['verify_suspect'] is True)
+with open(qlog, 'a', encoding='utf-8') as f:
+    f.write('\n')
+w2.cycle(); clk.t += 2.1
+check('第二句（連續 3 次不認得）等換行後觸發，一般事件不觸發', len(w2.q_alerts) == 2 and all(a['msg'].startswith('警告：') for a in w2.q_alerts))
+check('轉述會寫 errlog（source=watch）', len([r for r in errlog._read(errlog.LOG) if r['source'] == 'watch']) == 2)
+# 檔案變小 = 輪替 → offset 歸零
+qlog.write_text('2026-10-10 13:00:00 警告：連續 3 次遇到不認得的畫面（新檔）\n', encoding='utf-8')
+w2.cycle(); clk.t += 2.1
+check('檔案變小（輪替）→ offset 歸零、新行被讀到', any('新檔' in a['line'] for a in w2.q_alerts))
+# ack 清除
+check('ack 前警報在', bool(w2.q_alerts))
+assert watch.cmd_ack() == 0
+w2.cycle(); clk.t += 2.1
+check('--ack 清掉 quest 轉述警報並刪 ack 檔', w2.q_alerts == [] and not Path(watchstate.ACK_FILE).exists() and w2.build()['flags']['verify_suspect'] is False)
+check('ack 補 errlog fix', all(r['fix'] for r in errlog._read(errlog.LOG) if r['source'] == 'watch'))
+# 早於啟動時間的 ack 檔忽略（只刪檔）
+w2.q_alerts.append({'kind': 'verify', 'src': 'quest', 'line': 'x', 'msg': 'x', 'err_id': None})
+Path(watchstate.ACK_FILE).write_text('{}')
+os.utime(watchstate.ACK_FILE, (1.0, 1.0))
+w2._check_ack()
+check('ack 檔時間早於啟動 → 不清警報', len(w2.q_alerts) == 1 and not Path(watchstate.ACK_FILE).exists())
+
+# ---- 消費端：VerifyGuard / verify_suspect ----
+fresh_dir('vguard')
+wnow = {'t': 0.0}
+seq = []
+g = watchstate.VerifyGuard('heal --watch', log=lambda m: seq.append(m), reader=lambda: None, sleep=lambda s: None)
+check('state 不可用（reader=None）→ 放行', g.check() == 'ok' and not seq)
+g = watchstate.VerifyGuard('heal --watch', log=lambda m: seq.append(m), reader=lambda: False, sleep=lambda s: None)
+check('verify_suspect=False → 放行', g.check() == 'ok' and not seq)
+clk2 = Clock(0.0)
+vals = [True] * 5 + [False]
+g = watchstate.VerifyGuard('heal --watch', log=lambda m: seq.append(m), reader=lambda: vals.pop(0) if vals else False, sleep=clk2.sleep, mono=clk2)
+check('警報解除後恢復放行（暫停期間有印警告與解除訊息）', g.check() == 'ok' and any('暫停動作' in m for m in seq) and any('已解除' in m for m in seq), str(seq))
+seq.clear()
+clk2 = Clock(0.0)
+g = watchstate.VerifyGuard('petwatch', log=lambda m: seq.append(m), reader=lambda: True, sleep=clk2.sleep, mono=clk2)
+check('一直疑似 → 10 分鐘後 timeout', g.check() == 'timeout' and 600 <= clk2.t < 610, f't={clk2.t}')
+check('timeout 寫 errlog（source=petwatch）且不自動恢復', any(r['source'] == 'petwatch' and '暫停超過 10 分鐘' in r['error'] for r in errlog._read(errlog.LOG)))
+# verify_suspect() 讀 state
+fresh_dir('vs')
+me = winenv.platform_kind()
+now = time.time()
+base = {'v': 1, 'ts': now, 'seq': 1, 'watcher': {'running': True, 'platform': me, 'token': 't'}, 'flags': {'verify_suspect': False}, 'alerts': []}
+watchstate.write(base, 'x')
+check('verify_suspect()：沒標 → False', watchstate.verify_suspect() is False)
+watchstate.write({**base, 'flags': {'verify_suspect': True}}, 'x')
+check('verify_suspect()：標了 → True', watchstate.verify_suspect() is True)
+watchstate.write({**base, 'alerts': [{'kind': 'verify'}]}, 'x')
+check('verify_suspect()：只有 alerts.kind=verify 也算', watchstate.verify_suspect() is True)
+watchstate.write({**base, 'ts': now - 60}, 'x')
+check('verify_suspect()：state 太舊 → None（不暫停）', watchstate.verify_suspect() is None)
 watch.OCR_ON = False
 
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive

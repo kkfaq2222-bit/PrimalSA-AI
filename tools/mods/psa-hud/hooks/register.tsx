@@ -98,7 +98,7 @@ export type WHud = {
 type WState = {
   v?: number; seq?: number; phase?: string
   watcher?: { token?: string; running?: boolean; interval?: number }
-  screen?: { label?: string; age_s?: number; state?: string; full?: boolean }
+  screen?: { label?: string; age_s?: number; state?: string; full?: boolean; annot?: string[] }
   hud?: WHud
   flags?: { verify_suspect?: boolean; netwatch_halt?: boolean }
   alerts?: { msg?: string; line?: string }[]
@@ -317,6 +317,8 @@ export function viewModel(i: ViewIn): WatchLine {
   // 不是自己管的 watch（只讀 / 關閉 / 停止 / 失敗）：state 久沒更新 = 監看未執行
   if (!own && i.state && i.now - i.seenAt > STALE_HINT_MS) hints.push({ text: '監看未執行（state.json 沒有更新）', tone: 'red' })
   if (!own && !i.state && i.badVersion == null && (i.status === 'off' || i.status === 'failed' || i.status === 'stopped')) hints.push({ text: '監看未執行', tone: 'red' })
+  // 黃字：畫面上有提示視窗（annotate 只標出，不代表是驗證視窗；idle + 提示視窗是最該看一眼的組合）
+  if (i.state?.screen?.annot?.includes('notice_dialog')) hints.push({ text: '畫面上有提示視窗，請看一眼', tone: 'yellow' })
   if (i.state?.flags?.verify_suspect) hints.push({ text: '疑似答題 / 驗證視窗，請人工處理', tone: 'red' })
   if (i.state?.flags?.netwatch_halt) hints.push({ text: '斷線監看已暫停（netwatch.halt）', tone: 'red' })
   for (const a of (i.state?.alerts ?? []).slice(0, 2)) if (a.msg || a.line) hints.push({ text: String(a.msg || a.line).slice(0, 120), tone: 'red' })
@@ -532,7 +534,7 @@ export const register: Register = on => {
     statPs1 = statPathFromCwd(e.cwd) ?? statPs1
     logFile = logPathFromCwd(e.cwd) ?? logFile
     projCwd = e.cwd
-    await $.command.register({ name: 'psa-hud', description: '打開精靈王石器資訊 pane 並立即更新；/psa-hud watch on|off 開關即時監看' })
+    await $.command.register({ name: 'psa-hud', description: '打開精靈王石器資訊 pane 並立即更新；/psa-hud watch on|off 開關即時監看；/psa-hud ack 清掉驗證警報' })
     // 舊版（0.1）放在狀態列，改用 pane 後清掉
     $.ui.status(undefined)
     void $.ui.open({ id: PANE, title: '精靈王石器' })
@@ -551,6 +553,16 @@ export const register: Register = on => {
 
   on('command.run', { command: 'psa-hud' }, async ($, e) => {
     const arg = String((e as { args?: string }).args ?? '').trim().split(/\s+/)
+    if (arg[0] === 'ack') {
+      // 人工確認過 quest 轉述的驗證警報：叫 watch 清掉（unknown_long 靠畫面恢復自動清）
+      if (!sup) return { text: '監看未啟用（只在精靈王石器專案的互動 session 裡啟動）' }
+      try {
+        const r = await $.process.run(await watchArgv($, ['--ack']), { timeoutMs: 15000 })
+        return { text: r.exitCode === 0 ? '已送出 ack：watch 下一輪清掉 quest 轉述的驗證警報（畫面不認得的警報要等畫面恢復才會清）' : `ack 失敗（退出碼 ${r.exitCode}）` }
+      } catch (err) {
+        return { text: `ack 失敗：${String(err).slice(0, 80)}` }
+      }
+    }
     if (arg[0] === 'watch') {
       if (!sup) return { text: '監看未啟用（只在精靈王石器專案的互動 session 裡啟動）' }
       if (arg[1] === 'off') await sup.setOff()

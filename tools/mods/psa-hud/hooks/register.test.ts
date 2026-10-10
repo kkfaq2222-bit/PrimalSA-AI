@@ -285,3 +285,14 @@ test('watchAlive：(token, seq) 10 s 內有變才算活著；watcher.running=fal
   expect(watchAlive({ v: 1, watcher: { running: false } }, 100, 0)).toBe(false)
   expect(watchAlive(null, 0, 0)).toBe(false)
 })
+
+// ── 第 5 階段：警示顯示 ──
+test('警示：提示視窗 = 黃字；verify_suspect / alerts = 紅字（verify_suspect 與 alerts 各一行，最多 2 筆 alerts）；標籤不出現「安全」', () => {
+  const h = (o: Record<string, unknown>) => viewModel(VIN({ state: ST(o) as never })).hints
+  expect(h({ screen: { label: '主畫面（未偵測到已知視窗）（提示視窗）', age_s: 0, annot: ['notice_dialog'] } })).toEqual([{ text: '畫面上有提示視窗，請看一眼', tone: 'yellow' }])
+  expect(h({ screen: { label: '登入畫面', age_s: 0, annot: ['login'] } })).toEqual([])      // 登入 / 選角只改標籤，不是警示
+  const a = h({ flags: { verify_suspect: true }, alerts: [{ kind: 'unknown_long', msg: '不認得的畫面超過 10 秒（可能是驗證視窗，請人工確認）' }, { kind: 'verify', line: 'L2' }, { kind: 'verify', line: 'L3' }] })
+  expect(a.map(x => x.tone)).toEqual(['red', 'red', 'red'])
+  expect(a[0]?.text).toContain('疑似答題')
+  expect(a.some(x => x.text.includes('L3'))).toBe(false)
+})

@@ -23,6 +23,8 @@ STOP_FILE = CACHE / 'watch.stop'
 HUD_CFG = CACHE / 'psa-hud.json'
 BATTLE_LOCK = CACHE / 'battle.lock'
 HALT_FILE = CACHE / 'netwatch.halt'
+ACK_FILE = CACHE / 'watch.ack'
+QUEST_LOG = ROOT / 'notes' / 'quest-events.log'
 VERSION = 1
 
 # 「內容有沒有變」的比較排除這些鍵（任何深度）：時間戳、序號、每輪都會變的量測值、雜訊值。
@@ -195,3 +197,45 @@ def peek_battle_lock(path=None) -> dict | None:
     if not isinstance(d, dict) or not isinstance(d.get('pid'), int):
         return None
     return {'pid': d['pid'], 'start': d.get('start'), 'note': d.get('note', '')}
+
+
+# ---------------------------------------------------------------- 消費端：疑似驗證視窗時暫停（heal --watch / petwatch）
+def verify_suspect(max_age: float = 5.0, path=None, now=time.time, sleep=time.sleep, platform: str | None = None):
+    """True = watch 標了疑似驗證視窗（flags.verify_suspect 或 alerts 有 kind=verify / unknown_long）；False = 沒標；
+    None = state 不可用（watch 沒跑 / 太舊）。注意「False」不代表沒有驗證視窗（watch 只認得有限幾種畫面）"""
+    st = fresh(max_age, path=path, now=now, sleep=sleep, platform=platform)
+    if not st:
+        return None
+    fl = st.get('flags') or {}
+    kinds = {a.get('kind') for a in (st.get('alerts') or []) if isinstance(a, dict)}
+    return bool(fl.get('verify_suspect')) or bool(kinds & {'verify', 'unknown_long'})
+
+
+class VerifyGuard:
+    """長程序（heal --watch / petwatch）每輪呼叫 check()：疑似驗證視窗 → 暫停（不動作、印警告）直到解除；
+    暫停超過 limit_s（預設 10 分鐘，使用者 2026-10-10 同意）→ 寫 errlog、check() 回 'timeout'，呼叫端要結束（不自動恢復）。
+    state 不可用 → 一律放行（行為與沒有 watch 時相同）。"""
+    LIMIT_S = 600.0
+    POLL_S = 5.0
+
+    def __init__(self, source: str, log=print, limit_s: float | None = None, reader=None, sleep=time.sleep, mono=time.monotonic):
+        self.source, self.log = source, log
+        self.limit_s = self.LIMIT_S if limit_s is None else limit_s
+        self.reader = reader or verify_suspect
+        self.sleep, self.mono = sleep, mono
+
+    def check(self) -> str:
+        """'ok' = 可以動作；'timeout' = 暫停超過上限，呼叫端應停止"""
+        if self.reader() is not True:
+            return 'ok'
+        t0 = self.mono()
+        self.log(f'警告：watch 標出疑似答題 / 驗證視窗，{self.source} 暫停動作（請人工檢查畫面；最多等 {int(self.limit_s // 60)} 分鐘）')
+        while self.reader() is True:
+            if self.mono() - t0 >= self.limit_s:
+                import errlog
+                errlog.add(f'因疑似驗證視窗暫停超過 {int(self.limit_s // 60)} 分鐘，已停止 {self.source}，請檢查畫面', source=self.source)
+                self.log(f'疑似驗證視窗暫停超過 {int(self.limit_s // 60)} 分鐘，停止 {self.source}（已寫 errlog，不自動恢復）')
+                return 'timeout'
+            self.sleep(self.POLL_S)
+        self.log(f'疑似驗證視窗警報已解除，{self.source} 繼續（暫停 {int(self.mono() - t0)} 秒）')
+        return 'ok'

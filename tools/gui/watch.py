@@ -7,6 +7,7 @@
   uv run --no-project python tools/gui/watch.py --get [--max-age 2]   印 state.json（年齡超過 / watcher 不在 → 退出碼 1）
   uv run --no-project python tools/gui/watch.py --status     印鎖與 state 摘要
   uv run --no-project python tools/gui/watch.py --stop       要求常駐 watch 結束（寫 watch.stop 與 psa-hud.json watch=false）
+  uv run --no-project python tools/gui/watch.py --ack        清掉 quest 轉述的驗證警報（人工確認過畫面後）
   uv run --no-project python tools/gui/watch.py --unlock     刪鎖（別平台 / 已死擁有者的殘鎖；同平台擁有者還活著要加 --force）
   uv run --no-project python tools/gui/watch.py --once       讀一次畫面、印 state（不寫檔、不上鎖）
   uv run --no-project python tools/gui/watch.py --bench N    跑 N 輪印 cycle_ms 統計（不寫檔、不上鎖）
@@ -35,6 +36,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import battleguard  # noqa: E402
+import errlog  # noqa: E402
 import screen_sigs  # noqa: E402
 import watchstate  # noqa: E402
 import winenv  # noqa: E402
@@ -49,6 +51,10 @@ GUI_TIMEOUT = 3.0                 # pixel / info 單次逾時
 PS_TIMEOUT = 8.0                  # stat / ocr
 OCR_EVERY = 3.0                   # 每 3 s 跑一次 stat.ps1（HUD 數值）
 HUD_STALE_S = 12.0                # 超過這麼久沒成功讀到 → hud.stale
+UNKNOWN_LONG_S = 10.0             # screen.state=unknown 連續這麼久 → alerts.unknown_long + verify_suspect（載入畫面 M8 未量，門檻待實機調）
+CLEAR_S = 5.0                     # 連續這麼久都是已知畫面 → 清除
+QUEST_SCAN_EVERY = 2.0            # 讀 quest-events.log 新增行的間隔
+QUEST_PREFIXES = ('警告：Clef 判斷可能是答題 / 驗證視窗', '警告：連續 3 次遇到不認得的畫面')   # quest.py 的兩句警報開頭
 OCR_ON = True                     # 測試可關（關了就完全不呼叫 stat.ps1）
 OCR_STATES = ('idle', 'walking', 'battle')   # 只在這些畫面讀 HUD（battle 僅限非完整戰鬥；對話 / 面板 / 未知畫面可能蓋住 HUD，OCR 會讀到雜訊）
 LAYOUT_OK = '2880x1659'
@@ -210,7 +216,7 @@ class Watcher:
         self._cpu_t = (mono(), time.process_time())
         self.ppid = os.getppid()
         self.last_ppid_check = mono()
-        self.pts = screen_sigs.points()
+        self.pts = screen_sigs.points() + screen_sigs.annot_points()    # classify 用 points()；annot_points() 是 annotate / enc_on 另外要的點
         self.pts_arg = ' '.join(f'{x},{y}' for x, y in self.pts)
         self.last_px = None
         self._flags_cache = None
@@ -223,6 +229,14 @@ class Watcher:
         self.hud_fail = True             # 最近一次嘗試是否失敗 / 跳過
         self.last_ocr = -1e9
         self.ocr_ms = 0
+        # 警示（§5）：unknown 連續 N 秒、quest 事件 log 轉述
+        self.enc_on = None
+        self.unknown_since = None        # 本地 monotonic
+        self.known_since = None
+        self.unk_alert = None            # {'kind','since','msg','shot'} + 內部 'err_id'
+        self.q_alerts: list = []
+        self.q_off = self._qlog_size()   # 啟動時記下檔案大小，只看之後新增的行
+        self.last_qscan = mono()
 
     # ---- 啟動 / 結束 ----
     def lock_info(self) -> dict:
@@ -266,6 +280,8 @@ class Watcher:
             except OSError:
                 pass
             raise _Exit(5, '收到 --stop')
+        self._scan_quest_log()
+        self._check_ack()
         # 父程序看門狗（只有 hud 啟動時）
         if self.owner == 'hud' and self.mono() - self.last_ppid_check >= (5.0 if sys.platform == 'win32' else 0.0):
             self.last_ppid_check = self.mono()
@@ -378,6 +394,7 @@ class Watcher:
         if kind == 'ok':
             self.cycle_ms.append(self.cur_cycle_ms)
         self._update_interval()
+        self._update_alerts()
         self._maybe_ocr(kind)
         self.flush()
 
@@ -391,9 +408,12 @@ class Watcher:
             new = c['state']
             self.cls = {k: c[k] for k in ('full', 'cmd', 'auto_off', 'gold')}
             self.annot = screen_sigs.annotate(px, c)
+            self.enc_on = screen_sigs.enc_on(px, c)
             self.last_px = px
         else:
             new = kind                    # minimized / no_game / error / unsupported
+            if kind != 'error':
+                self.enc_on = None
             if kind in ('no_game', 'minimized', 'unsupported'):
                 self.cls = {'full': False, 'cmd': False, 'auto_off': False, 'gold': 0}
                 self.annot = []
@@ -440,6 +460,107 @@ class Watcher:
             self.interval = min(SLOW_MAX, max(SLOW_MIN, 3 * statistics.median(recent) / 1000.0))
         else:
             self.interval = INTERVAL
+
+    # ---- 警示（§5）：只標出、不點任何東西；不存截圖 ----
+    def _alerts(self) -> list:
+        out = []
+        if self.unk_alert:
+            out.append({k: v for k, v in self.unk_alert.items() if k != 'err_id'})
+        out.extend({k: v for k, v in a.items() if k != 'err_id'} for a in self.q_alerts)
+        return out
+
+    def _update_alerts(self) -> None:
+        """unknown 連續 UNKNOWN_LONG_S 秒 → alerts.unknown_long + errlog（不論有沒有 battle.lock）；
+        連續 CLEAR_S 秒都是已知畫面（或沒開遊戲 / 最小化）→ 清除並補 fix。error / unsupported 不計（既不累積也不清除）。
+        登入 / 選角畫面（annot login / charsel）算已知畫面（那是 netwatch 的範圍）。"""
+        now = self.mono()
+        st = self.cur
+        unknown = st == 'unknown' and not any(k in self.annot for k in screen_sigs.ANNOT_KNOWN)
+        if unknown:
+            self.known_since = None
+            if self.unknown_since is None:
+                self.unknown_since = now
+                self.unknown_wall = self.clock()
+            if self.unk_alert is None and now - self.unknown_since >= UNKNOWN_LONG_S:
+                eid = errlog.add(f'疑似驗證視窗：畫面連續 {int(UNKNOWN_LONG_S)} 秒以上不認得（watch 偵測；不碰、請人工確認）', source='watch')
+                self.unk_alert = {'kind': 'unknown_long', 'since': self.unknown_wall, 'shot': None, 'err_id': eid,
+                                  'msg': f'不認得的畫面超過 {int(UNKNOWN_LONG_S)} 秒（可能是驗證視窗，請人工確認）'}
+        elif st in NOGAME_STATES:
+            self.unknown_since = self.known_since = None
+            self._clear_unknown(st)
+        elif st in (None, 'error', 'unsupported'):
+            pass
+        else:
+            self.unknown_since = None
+            if self.unk_alert is not None:
+                if self.known_since is None:
+                    self.known_since = now
+                elif now - self.known_since >= CLEAR_S:
+                    self.known_since = None
+                    self._clear_unknown(st)
+            else:
+                self.known_since = None
+
+    def _clear_unknown(self, st) -> None:
+        a, self.unk_alert = self.unk_alert, None
+        if a and a.get('err_id'):
+            errlog.fix(a['err_id'], f'畫面已恢復為「{screen_sigs.label({"state": st}, self.annot)}」，警報自動清除')
+
+    @staticmethod
+    def _qlog_size() -> int:
+        try:
+            return Path(watchstate.QUEST_LOG).stat().st_size
+        except OSError:
+            return 0
+
+    def _scan_quest_log(self) -> None:
+        """讀 quest-events.log 啟動後新增的行；比對 quest 的兩句警報開頭（Clef 判斷 / 連續 3 次不認得）→ alerts.kind=verify。
+        檔案變小 = 被輪替 → offset 歸零；只消化到最後一個換行（寫到一半的行下次再讀）"""
+        if self.mono() - self.last_qscan < QUEST_SCAN_EVERY:
+            return
+        self.last_qscan = self.mono()
+        try:
+            size = Path(watchstate.QUEST_LOG).stat().st_size
+        except OSError:
+            return
+        if size < self.q_off:
+            self.q_off = 0
+        if size == self.q_off:
+            return
+        try:
+            with open(watchstate.QUEST_LOG, 'rb') as f:
+                f.seek(self.q_off)
+                data = f.read(256 * 1024)
+        except OSError:
+            return
+        cut = data.rfind(b'\n')
+        if cut < 0:
+            return
+        self.q_off += cut + 1
+        for ln in data[:cut + 1].decode('utf-8', errors='replace').splitlines():
+            msg = ln[20:] if len(ln) > 20 and ln[4:5] == '-' and ln[10:11] == ' ' else ln     # 去掉 'YYYY-MM-DD HH:MM:SS ' 前綴
+            if msg.startswith(QUEST_PREFIXES):
+                if not any(a.get('line') == ln[:200] for a in self.q_alerts):
+                    eid = errlog.add(f'quest 警報轉述：{msg[:100]}（疑似驗證視窗，請人工確認）', source='watch')
+                    self.q_alerts.append({'kind': 'verify', 'src': 'quest', 'line': ln[:200], 'msg': msg[:120], 'err_id': eid})
+                    del self.q_alerts[:-3]
+
+    def _check_ack(self) -> None:
+        """watch.py --ack（/psa-hud ack）：清掉 quest 轉述的警報（unknown_long 靠畫面恢復自動清）。ack 檔時間早於啟動的忽略"""
+        p = Path(watchstate.ACK_FILE)
+        try:
+            t = p.stat().st_mtime
+        except OSError:
+            return
+        if t >= self.started:
+            for a in self.q_alerts:
+                if a.get('err_id'):
+                    errlog.fix(a['err_id'], '使用者確認（/psa-hud ack）')
+            self.q_alerts.clear()
+        try:
+            p.unlink()
+        except OSError:
+            pass
 
     # ---- HUD 數值（stat.ps1）----
     def _maybe_ocr(self, kind: str) -> None:
@@ -546,10 +667,10 @@ class Watcher:
                        'label': screen_sigs.label({'state': self.cur, **self.cls}, self.annot) if self.cur else '啟動中',
                        'since': self.since, 'transitions': [list(t[:3]) + [t[3] if t[3] is not None else now] for t in self.transitions],
                        'full': self.cls['full'], 'cmd': self.cls['cmd'], 'auto_off': self.cls['auto_off'], 'gold': self.cls['gold'],
-                       'enc_on': None, 'stable_n': self.stable_n, 'src': 'pixel'},
+                       'enc_on': self.enc_on, 'stable_n': self.stable_n, 'src': 'pixel'},
             'hud': self._hud_section(now),
-            'flags': dict(self._flags(mono), verify_suspect=False),   # verify_suspect / alerts 第 5 階段
-            'alerts': [],
+            'flags': dict(self._flags(mono), verify_suspect=bool(self._alerts())),
+            'alerts': self._alerts(),
         }
         return d
 
@@ -641,6 +762,14 @@ def cmd_stop() -> int:
     return 1
 
 
+def cmd_ack() -> int:
+    """--ack：告訴常駐 watch「quest 轉述的驗證警報我看過了」（寫 watch.ack；watch 下一輪清掉並補 errlog fix）"""
+    Path(watchstate.CACHE).mkdir(parents=True, exist_ok=True)
+    Path(watchstate.ACK_FILE).write_text(json.dumps({'ts': time.time()}), encoding='utf-8')
+    print('已送出 ack（watch 下一輪清掉 quest 轉述的警報）')
+    return 0
+
+
 def cmd_unlock(force: bool) -> int:
     d, kind = read_lock(retries=1)
     if kind == 'none':
@@ -721,6 +850,7 @@ def main(argv=None) -> int:
     g.add_argument('--status', action='store_true')
     g.add_argument('--stop', action='store_true')
     g.add_argument('--unlock', action='store_true')
+    g.add_argument('--ack', action='store_true')
     g.add_argument('--once', action='store_true')
     g.add_argument('--bench', type=int, metavar='N')
     ap.add_argument('--max-age', type=float, default=2.0)
@@ -738,6 +868,8 @@ def main(argv=None) -> int:
         return cmd_stop()
     if a.unlock:
         return cmd_unlock(a.force)
+    if a.ack:
+        return cmd_ack()
     if winenv.platform_kind() == 'linux':
         print('不是 WSL / Windows，無法讀遊戲視窗', file=sys.stderr)
         return 2

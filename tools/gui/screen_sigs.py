@@ -104,22 +104,65 @@ def classify(px: dict) -> dict:
     return {'state': st, 'gold': gold, 'full': full, 'cmd': cmd, 'auto_off': auto_off}
 
 
+# ---- annotate 特徵（watch 專用附註；只上「有正例樣本」的特徵，2026-10-10 以 tools/.cache 等 677 張 1440×830 樣本驗證：
+# 4 種各有正例（提示視窗 1、登入 2、選角 1、遇敵鈕 30）、其餘樣本 0 誤判，見 fixtures/annot_px.json）----
+# 沒有可靠特徵 / 沒有正例所以**不上線**：通用彈窗（popup）、背包 / 寵物 / 外掛面板（沙地與米色面板太像，沒有樣本證明 0 誤判）、驗證 / 答題視窗（沒有任何樣本）
+ANNOT_SIGS = {'notice_dialog': NET_DIALOG, 'login': NET_LOGIN, 'charsel': NET_CHARSEL}
+ANNOT_KNOWN = ('login', 'charsel')    # 這些視窗本來就是「已知畫面」：不算 unknown（netwatch 那一層處理）
+
+
+def annot_points() -> list:
+    """annotate 需要的取樣點（不在 points() 裡；watch 的 pixel 呼叫把兩組一起讀，classify 的 points() 不變）"""
+    seen, out = set(points()), []
+    for sig in list(ANNOT_SIGS.values()) + [ENC_ON]:
+        for x, y, *_ in sig:
+            if (x, y) not in seen:
+                seen.add((x, y))
+                out.append((x, y))
+    return out
+
+
+def _match_safe(px: dict, sig) -> bool:
+    """像 match，但缺點（呼叫端沒讀這些點，例如只有 classify 用的 fixture）一律當不符合"""
+    return all((x, y) in px and close(px[(x, y)], (r, g, b), tol) for x, y, r, g, b, tol in sig)
+
+
 def annotate(px: dict, base: dict) -> list:
-    """watch 專用附註（第 5 階段實作；沒有正例樣本的特徵不上線）。目前不產生任何附註"""
+    """watch 專用附註 → ['notice_dialog' | 'login' | 'charsel']（至多一個）。不影響 classify。
+    遇敵鈕（enc_on）不在這裡：用 enc_on() 另外取"""
+    for name, sig in ANNOT_SIGS.items():
+        if _match_safe(px, sig):
+            return [name]
     return []
+
+
+def enc_on(px: dict, base: dict):
+    """主畫面右下「取消遇敵」紅龍頭：True = 原地遇敵開著；False = 主畫面（idle / walking）且沒看到；其他畫面 / 缺點 → None"""
+    if _match_safe(px, ENC_ON):
+        return True
+    if base.get('state') in ('idle', 'walking') and all(pt in px for pt in [(x, y) for x, y, *_ in ENC_ON]):
+        return False
+    return None
 
 
 _LABELS = {'idle': '主畫面（未偵測到已知視窗）', 'walking': '自動跑路中', 'dialog': '對話框', 'reward': '獲得物品視窗',
            'select': '選擇對象面板', 'panel': '切換角色面板', 'unknown': '不認得的畫面',
            'no_game': '遊戲未執行', 'minimized': '遊戲視窗最小化', 'error': '讀取畫面失敗', 'unsupported': '版面不支援（非 2880×1659）'}
 
+_ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面'}
+
 
 def label(d: dict, annot=None) -> str:
     """給人看的狀態文字（watch 寫進 state.json 的 screen.label）。
     idle 一律是「未偵測到已知視窗」：特徵只認得有限幾種視窗，所以任何標籤都不准出現「安全」「無驗證」之類的保證（單元測試檢查）"""
     st = d.get('state')
+    annot = list(annot or [])
+    if st == 'unknown':                     # 登入 / 選角畫面沒有 HUD → classify 是 unknown，但那是認得的畫面
+        for k in ANNOT_KNOWN:
+            if k in annot:
+                return _ANNOT_TEXT[k]
     if st == 'battle':
         base = '戰鬥中（完整・下指令）' if d.get('cmd') else '戰鬥中（完整・演出中）' if d.get('full') else '戰鬥中（快速）'
     else:
         base = _LABELS.get(st, f'未知狀態 {st}')
-    return base + ('（' + '、'.join(annot) + '）' if annot else '')
+    return base + ('（' + '、'.join(_ANNOT_TEXT.get(a, a) for a in annot) + '）' if annot else '')
