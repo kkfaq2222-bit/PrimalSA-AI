@@ -246,16 +246,39 @@ winenv.shutdown_server()
 check('shutdown_server() 明確送 quit 並等到結束', proc.poll() is not None)
 
 # 13) 殘留 server 清理：擁有者已死的登記項 → 清掉；擁有者還活著的不碰
-winenv._pids_save([{'owner': 111, 'win': 5001, 't': 0}, {'owner': 222, 'win': 5002, 't': 0}, {'owner': os.getpid(), 'win': 5003, 't': 0}])
+ME = winenv.platform_kind()
+OTHER = 'windows' if ME != 'windows' else 'wsl'
+winenv._pids_save([{'owner': 111, 'win': 5001, 'plat': ME, 't': 0}, {'owner': 222, 'win': 5002, 'plat': ME, 't': 0}, {'owner': os.getpid(), 'win': 5003, 'plat': ME, 't': 0}])
 killed.clear()
 n = winenv.reap_orphans(alive=lambda pid: pid in (222, os.getpid()), kill=lambda w: killed.append(w) or True)
 check('只殺擁有者已死的（111 → 5001），活著的 / 自己的不碰', n == 1 and killed == [5001], f'{n} {killed}')
 check('登記檔只剩活著擁有者的項目', sorted(e['win'] for e in winenv._pids_load()) == [5002, 5003], str(winenv._pids_load()))
-winenv._pids_save([{'owner': 111, 'win': 5001, 't': 0}])
+winenv._pids_save([{'owner': 111, 'win': 5001, 'plat': ME, 't': 0}])
 check('殺不掉（kill 回 False）→ 回 0', winenv.reap_orphans(alive=lambda p: False, kill=lambda w: False) == 0)
 PIDS_BAD = tmp / 'bad.pids'; PIDS_BAD.write_text('not json', encoding='utf-8'); winenv.PIDS_FILE = PIDS_BAD
 check('登記檔壞掉 → 當空的，不丟例外', winenv._pids_load() == [] and winenv.reap_orphans() == 0)
 winenv.PIDS_FILE = tmp / 'gui-server.pids'
+# 13b) 跨平台：不同平台的登記，即使 alive 判成已死也不殺、不移除；舊格式（無 plat）只丟登記不殺
+winenv._pids_save([{'owner': 111, 'win': 6001, 'plat': OTHER, 't': 0}, {'owner': 111, 'win': 6002, 't': 0}, {'owner': 111, 'win': 6003, 'plat': ME, 't': 0}])
+killed.clear()
+n = winenv.reap_orphans(alive=lambda p: False, kill=lambda w: killed.append(w) or True)
+check('不同平台的登記不回收、舊格式不殺；只殺同平台已死擁有者', killed == [6003] and n == 1, str(killed))
+check('不同平台登記仍留在檔內、舊格式已移除', [e['win'] for e in winenv._pids_load()] == [6001], str(winenv._pids_load()))
+winenv._pids_save([{'owner': 333, 'win': 6101, 'plat': ME, 't': 0}])
+killed.clear()
+check('擁有者活著不回收', winenv.reap_orphans(alive=lambda p: True, kill=lambda w: killed.append(w) or True) == 0 and not killed and len(winenv._pids_load()) == 1)
+winenv._pids_save([])
+winenv._pids_add(os.getpid(), 7001)
+check('_pids_add 記平台與擁有者', winenv._pids_load()[0].get('plat') == ME and winenv._pids_load()[0]['owner'] == os.getpid())
+winenv._pids_remove(7001)
+# 鎖檔：殘留的舊鎖會被接管；多執行緒同時登記不掉項目
+import threading
+lk = winenv.PIDS_FILE.with_name(winenv.PIDS_FILE.name + '.lock'); lk.write_text('x'); os.utime(lk, (1, 1))
+winenv._pids_add(1, 7002)
+check('殘留舊鎖被接管、鎖已釋放', [e['win'] for e in winenv._pids_load()] == [7002] and not lk.exists())
+ths = [threading.Thread(target=winenv._pids_add, args=(1, 8000 + i)) for i in range(20)]
+[t.start() for t in ths]; [t.join() for t in ths]
+check('20 筆並行登記不掉項目', len(winenv._pids_load()) == 21, str(len(winenv._pids_load())))
 winenv._pids_save([])
 winenv._taskkill = orig_taskkill
 winenv.CLOSE_WAIT = 2.0
@@ -290,9 +313,45 @@ time.sleep(60)
         alive = True
     except ProcessLookupError:
         alive = False
-    check('SIGTERM 結束的程序：server 已一起結束，且程序仍以 SIGTERM 結束', not alive and ch.returncode == -signal.SIGTERM, f'alive={alive} rc={ch.returncode}')
+    check('SIGTERM 結束的程序：server 已一起結束，程序以 SystemExit(143) 結束', not alive and ch.returncode == 128 + signal.SIGTERM, f'alive={alive} rc={ch.returncode}')
     if alive:
         os.kill(spid, signal.SIGKILL)
+
+    # 16) SIGTERM 後呼叫端的 finally / atexit 要跑；呼叫端自裝 handler 時串接
+    for mode in ('default', 'chain'):
+        mark = tmp / f't16_{mode}.txt'
+        child_code = f'''
+import sys, time, signal, atexit
+sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})
+import winenv
+srv = winenv.GuiServer(argv=[sys.executable, {str(fake)!r}, {str(tmp / "t16")!r}])
+winenv._srv = srv
+winenv.PIDS_FILE = type(winenv.PIDS_FILE)({str(tmp / "t16.pids")!r})
+mark = {str(mark)!r}
+atexit.register(lambda: open(mark, 'a').write('atexit '))
+if {mode!r} == 'chain':
+    signal.signal(signal.SIGTERM, lambda s, f: (open(mark, 'a').write('mine '), sys.exit(7)))
+winenv._install_signal_handlers()
+srv.start()
+print(srv.proc.pid, flush=True)
+try:
+    time.sleep(60)
+finally:
+    open(mark, 'a').write('finally ')
+'''
+        ch = subprocess.Popen([sys.executable, '-c', child_code], stdout=subprocess.PIPE, text=True)
+        spid = int(ch.stdout.readline())
+        ch.send_signal(signal.SIGTERM)
+        ch.wait(timeout=10)
+        got = mark.read_text() if mark.exists() else ''
+        if mode == 'default':
+            check('SIGTERM 後呼叫端 finally 與 atexit 都有跑', 'finally' in got and 'atexit' in got, got)
+        else:
+            check('呼叫端自裝 handler：關 server 後串接呼叫它（rc=7）、atexit 有跑', 'mine' in got and 'atexit' in got and ch.returncode == 7, f'{got} rc={ch.returncode}')
+        try:
+            os.kill(spid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 print(f'failed={failed}')
 sys.exit(1 if failed else 0)

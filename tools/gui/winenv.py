@@ -105,10 +105,10 @@ def run_ps(script: str, *args: str, timeout: float | None = None) -> subprocess.
 # 每個 Python 程序各自一個 server（lazily 啟動）。「程序結束後 server 一定要結束」靠五層保險（2026-10-10 追查 serve.ps1 殘留後加固）：
 #   ① atexit / quest.main 的 finally 明確呼叫 close()：送 quit → 關 stdin → 等 CLOSE_WAIT 秒 → 還活著就 kill WSL 這側的 interop 代理，
 #      並用記下的 Windows PID `taskkill /f`（殺代理不保證 Windows 側的 powershell.exe 跟著死）；
-#   ② SIGTERM / SIGHUP 也會先 close() 再結束（Python 對這兩個訊號預設直接死、不跑 atexit）；
+#   ② SIGTERM / SIGHUP 先 close() 再 raise SystemExit（讓 finally / atexit 跑；呼叫端自裝 handler 則串接）；
 #   ③ 父程序死掉 → stdin EOF → server 自己結束；
 #   ④ serve.ps1 閒置看門狗 SERVER_IDLE_MIN 分鐘（舊 15 分鐘）；
-#   ⑤ gui-server.pids 登記「擁有者 Python PID ↔ server Windows PID」：下次有程序起 server 時，擁有者已死的殘留 server 一併清掉（reap_orphans）。
+#   ⑤ gui-server.pids 登記「擁有者 Python PID ↔ server Windows PID」：下次有程序起 server 時，擁有者已死的殘留 server 一併清掉（reap_orphans；登記含平台，只回收同平台）。
 # ---------------------------------------------------------------------------------------------
 SERVER_SCRIPTS = {'gui', 'ocr', 'stat', 'findmark', 'titlematch'}
 # 各腳本 param 區塊裡「具名」參數（五支腳本都沒有 [switch]，所以「-名稱 值」成對拆進 named，其餘當位置參數）。
@@ -447,22 +447,58 @@ def _pids_load() -> list:
 
 
 def _pids_save(entries: list) -> None:
+    """原子寫（先寫暫存檔再 os.replace），避免讀到寫一半的檔"""
     try:
         PIDS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        PIDS_FILE.write_text(json.dumps(entries), encoding='utf-8')
+        tmp = PIDS_FILE.with_name(f'{PIDS_FILE.name}.{os.getpid()}.tmp')
+        tmp.write_text(json.dumps(entries), encoding='utf-8')
+        os.replace(tmp, PIDS_FILE)
     except OSError:
         pass
 
 
+def _pids_update(fn) -> None:
+    """鎖檔下讀 → fn(entries) 回傳新清單 → 寫回（read-modify-write 不掉項目）。
+    鎖 = O_EXCL 建立 .lock；鎖超過 5 秒視為殘留強制接管；等不到鎖也照做（只是回到無鎖行為，不卡住）"""
+    lock = PIDS_FILE.with_name(PIDS_FILE.name + '.lock')
+    have = False
+    try:
+        PIDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        t0 = time.time()
+        while time.time() - t0 < 3.0:
+            try:
+                os.close(os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                have = True
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - lock.stat().st_mtime > 5.0:
+                        lock.unlink()
+                        continue
+                except OSError:
+                    pass
+                time.sleep(0.02)
+            except OSError:
+                break
+        _pids_save(fn(_pids_load()))
+    finally:
+        if have:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+
+
 def _pids_add(owner: int, win: int | None) -> None:
+    """登記 server：記平台（wsl / windows）與擁有者 PID；PID 空間依平台不同，reap 只認同平台的"""
     if win:
-        _pids_save([e for e in _pids_load() if e['win'] != win] + [{'owner': owner, 'win': win, 't': int(time.time())}])
+        ent = {'owner': owner, 'win': win, 'plat': platform_kind(), 't': int(time.time())}
+        _pids_update(lambda es: [e for e in es if e['win'] != win] + [ent])
 
 
 def _pids_remove(win: int) -> None:
-    es = _pids_load()
-    if any(e['win'] == win for e in es):
-        _pids_save([e for e in es if e['win'] != win])
+    if any(e['win'] == win for e in _pids_load()):
+        _pids_update(lambda es: [e for e in es if e['win'] != win])
 
 
 def _owner_alive(pid: int) -> bool:
@@ -488,19 +524,31 @@ def _owner_alive(pid: int) -> bool:
     return True
 
 
-def reap_orphans(alive=None, kill=None) -> int:
-    """清掉「擁有者 Python 已死」的殘留 serve.ps1（登記在 PIDS_FILE）。alive / kill 可替換給測試。回清掉幾個。
-    只殺登記過的 PID、且擁有者確定已死、且該 PID 現在命令列仍是 serve.ps1（_kill_if_serve）；擁有者還活著的（別的程序正在用）一律不碰"""
+def reap_orphans(alive=None, kill=None, plat: str | None = None) -> int:
+    """清掉「擁有者 Python 已死」的殘留 serve.ps1（登記在 PIDS_FILE）。alive / kill / plat 可替換給測試。回清掉幾個。
+    只殺：同平台登記的（WSL 與 Windows 原生的 PID 空間不同，不能互查）、擁有者確定已死、且該 PID 現在命令列仍是 serve.ps1（_kill_if_serve）。
+    不同平台的、擁有者還活著的一律不碰；沒記平台的舊格式項目無法判斷 → 只從登記檔移除、不殺（靠 server 閒置看門狗收尾）"""
     alive = alive or _owner_alive
     kill = kill or _kill_if_serve
-    keep, n = [], 0
-    for e in _pids_load():
-        if alive(e['owner']):
-            keep.append(e)
-        elif e['win'] > 0 and kill(e['win']):
-            n += 1
-    if n or len(keep) != len(_pids_load()):
-        _pids_save(keep)
+    me = plat or platform_kind()
+    n = 0
+
+    def fn(es):
+        nonlocal n
+        keep = []
+        for e in es:
+            if not e.get('plat'):
+                continue                      # 舊格式：丟掉登記
+            if e['plat'] != me or alive(e['owner']):
+                keep.append(e)
+            elif e['win'] > 0 and kill(e['win']):
+                n += 1
+            else:
+                keep.append(e)                # 殺失敗，下次再試
+        return keep
+
+    if _pids_load():
+        _pids_update(fn)
     return n
 
 
@@ -511,7 +559,9 @@ def shutdown_server() -> None:
 
 
 def _on_signal(signum, frame) -> None:
-    """SIGTERM / SIGHUP：先關 server 再以原訊息結束（Python 預設直接死、不跑 atexit）"""
+    """SIGTERM / SIGHUP：先關 server，再讓程序照常結束（Python 預設直接死、不跑 atexit / finally）。
+    呼叫端先裝了自己的 handler → 關完 server 串接呼叫它（由它決定怎麼結束）；原本是忽略 → 只關 server；
+    否則 raise SystemExit(128+訊號)，讓呼叫端的 finally / atexit 清理照跑"""
     try:
         if _srv is not None:
             _srv.close()
@@ -520,10 +570,9 @@ def _on_signal(signum, frame) -> None:
         if callable(prev):
             prev(signum, frame)
         elif prev == signal.SIG_IGN:
-            pass                      # 原本就忽略這個訊號：server 關了就好，程序照舊
+            pass
         else:
-            signal.signal(signum, signal.SIG_DFL)
-            os.kill(os.getpid(), signum)
+            raise SystemExit(128 + int(signum))
 
 
 _prev_handlers: dict = {}
