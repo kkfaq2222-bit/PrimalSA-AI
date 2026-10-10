@@ -17,6 +17,7 @@ import os
 import posixpath
 import queue
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -101,7 +102,13 @@ def run_ps(script: str, *args: str, timeout: float | None = None) -> subprocess.
 
 # ---------------------------------------------------------------------------------------------
 # 常駐 server（serve.ps1）client。協定與設計見 notes/plan-gui-speedup.md 3.3 / 3.4。
-# 每個 Python 程序各自一個 server（lazily 啟動）；父程序結束 → stdin EOF → server 自己結束（另有 15 分鐘閒置看門狗）。
+# 每個 Python 程序各自一個 server（lazily 啟動）。「程序結束後 server 一定要結束」靠五層保險（2026-10-10 追查 serve.ps1 殘留後加固）：
+#   ① atexit / quest.main 的 finally 明確呼叫 close()：送 quit → 關 stdin → 等 CLOSE_WAIT 秒 → 還活著就 kill WSL 這側的 interop 代理，
+#      並用記下的 Windows PID `taskkill /f`（殺代理不保證 Windows 側的 powershell.exe 跟著死）；
+#   ② SIGTERM / SIGHUP 也會先 close() 再結束（Python 對這兩個訊號預設直接死、不跑 atexit）；
+#   ③ 父程序死掉 → stdin EOF → server 自己結束；
+#   ④ serve.ps1 閒置看門狗 SERVER_IDLE_MIN 分鐘（舊 15 分鐘）；
+#   ⑤ gui-server.pids 登記「擁有者 Python PID ↔ server Windows PID」：下次有程序起 server 時，擁有者已死的殘留 server 一併清掉（reap_orphans）。
 # ---------------------------------------------------------------------------------------------
 SERVER_SCRIPTS = {'gui', 'ocr', 'stat', 'findmark', 'titlematch'}
 # 各腳本 param 區塊裡「具名」參數（五支腳本都沒有 [switch]，所以「-名稱 值」成對拆進 named，其餘當位置參數）。
@@ -115,6 +122,9 @@ SERVER_NAMED = {
 }
 INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'max', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
 START_TIMEOUT = 20.0
+SERVER_IDLE_MIN = 3         # serve.ps1 閒置看門狗（分鐘）：長程序每秒都有請求，不會誤殺；殘留的 server 最多活這麼久
+CLOSE_WAIT = 2.0            # close()：送 quit + 關 stdin 後等 server 自己退出的秒數，逾時才 kill
+PIDS_FILE = ROOT / 'tools' / '.cache' / 'gui-server.pids'   # 登記擁有者 / server PID，給 reap_orphans 用
 START_FAILS_MAX = 3         # 連續起不來幾次就退回一次性
 COOLDOWN = 300.0            # 退回一次性的冷卻秒數
 DEFAULT_ON = False          # 預設關：完整跑過一次真實任務、使用者同意後才改 True；在此之前用環境變數 PSA_GUI_SERVER=1 試用
@@ -204,6 +214,7 @@ class GuiServer:
     def __init__(self, argv: list[str] | None = None) -> None:
         self.argv = argv            # 測試用：指定啟動指令（假 server / 壞掉的 serve.ps1）；None = 真的 serve.ps1
         self.proc = None
+        self.win_pid = None         # server（Windows 側 powershell.exe）的 PID，ready 訊息帶回；close() 殺不掉代理時用它 taskkill
         self.q: queue.Queue = queue.Queue()
         self.lock = threading.Lock()
         self.next_id = 0
@@ -215,7 +226,7 @@ class GuiServer:
         if self.argv:
             return self.argv
         return ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-                '-File', to_windows(GUI_DIR / 'serve.ps1')]
+                '-File', to_windows(GUI_DIR / 'serve.ps1'), '-IdleMin', str(SERVER_IDLE_MIN)]
 
     def _reader(self, proc, q) -> None:
         """逐行讀 server stdout（bytes）；每行去 U+FEFF、整行找 \\x1ePSA 標記（不要求行首）；EOF 放哨兵 None"""
@@ -248,6 +259,8 @@ class GuiServer:
     def start(self) -> bool:
         global _start_fails, _cooldown_until
         self.close()
+        if self.argv is None:
+            reap_orphans()           # 先清掉擁有者已死的舊 server（測試用假 server 不碰）
         err = None
         try:
             ep = ROOT / 'tools' / '.cache' / 'gui-server.err'
@@ -272,6 +285,9 @@ class GuiServer:
         if not ready or not ready.get('ready'):
             self.close()
             return self._start_failed('serve.ps1 沒有在時限內回 ready')
+        self.win_pid = ready.get('pid') if isinstance(ready.get('pid'), int) else None
+        if self.argv is None:
+            _pids_add(os.getpid(), self.win_pid)      # 只登記真的 serve.ps1（測試用假 server 的 pid 是 Linux 側的，不能讓 reap 拿去殺 Windows 行程）
         _start_fails = 0
         self.mtimes = self._watch_files()
         self.mt_checked = time.time()
@@ -287,24 +303,41 @@ class GuiServer:
         return False
 
     def close(self) -> None:
-        """關閉 server：送 quit、等 1 秒、不行就 kill。不拿鎖（atexit 時主執行緒可能卡在 call）"""
+        """關閉 server：送 quit、關 stdin、等 CLOSE_WAIT 秒；還活著就 kill 代理並用 Windows PID taskkill。不拿鎖（atexit 時主執行緒可能卡在 call）。
+        回來時保證 server 已結束（或已盡力殺過）"""
         p, self.proc = self.proc, None
+        wpid, self.win_pid = self.win_pid, None
         if not p:
             return
+        exited = False
         try:
             if p.poll() is None:
                 try:
                     p.stdin.write(b'{"id":0,"cmd":"quit"}\n')
                     p.stdin.flush()
+                except (OSError, ValueError):
+                    pass
+                try:
                     p.stdin.close()
                 except (OSError, ValueError):
                     pass
                 try:
-                    p.wait(timeout=1)
+                    p.wait(timeout=CLOSE_WAIT)
+                    exited = True
                 except subprocess.TimeoutExpired:
                     p.kill()
+                    try:
+                        p.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        pass
+            else:
+                exited = True
         except OSError:
             pass
+        if not exited and wpid:
+            _taskkill(wpid)          # 代理被殺 ≠ Windows 側 powershell.exe 一定跟著死
+        if wpid:
+            _pids_remove(wpid)
 
     # ---- 呼叫 ----
     def _ensure(self) -> bool:
@@ -384,11 +417,138 @@ class GuiServer:
             return m if st == 'ok' else None
 
 
+def _taskkill(pid: int) -> bool:
+    """強制結束 Windows 行程 pid（WSL：taskkill.exe 經 interop；Windows 原生：taskkill）。失敗回 False，不丟例外"""
+    try:
+        subprocess.run(['taskkill.exe', '/pid', str(int(pid)), '/f'], capture_output=True, timeout=8)
+        return True
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+
+
+def _kill_if_serve(pid: int) -> bool:
+    """殺殘留 server 前先確認該 PID 現在真的還是 serve.ps1（PID 可能已被別的程式重用）：命令列含 serve.ps1 才 Stop-Process。
+    回 True = 已處理（殺了，或該 PID 已不存在 / 已不是 serve.ps1，不必再追）；False = 呼叫 powershell 失敗，保留登記下次再試"""
+    cmd = (f"$p = Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}' -ErrorAction SilentlyContinue; "
+           f"if ($p -and $p.CommandLine -match 'serve\\.ps1') {{ Stop-Process -Id {int(pid)} -Force; 'killed' }} else {{ 'gone' }}")
+    try:
+        r = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', cmd], capture_output=True, text=True, timeout=20)
+        return r.returncode == 0 and r.stdout.strip() in ('killed', 'gone')
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+
+
+def _pids_load() -> list:
+    try:
+        d = json.loads(PIDS_FILE.read_text(encoding='utf-8'))
+        return [e for e in d if isinstance(e, dict) and isinstance(e.get('owner'), int) and isinstance(e.get('win'), int)] if isinstance(d, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _pids_save(entries: list) -> None:
+    try:
+        PIDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PIDS_FILE.write_text(json.dumps(entries), encoding='utf-8')
+    except OSError:
+        pass
+
+
+def _pids_add(owner: int, win: int | None) -> None:
+    if win:
+        _pids_save([e for e in _pids_load() if e['win'] != win] + [{'owner': owner, 'win': win, 't': int(time.time())}])
+
+
+def _pids_remove(win: int) -> None:
+    es = _pids_load()
+    if any(e['win'] == win for e in es):
+        _pids_save([e for e in es if e['win'] != win])
+
+
+def _owner_alive(pid: int) -> bool:
+    """擁有者 Python 是否還活著（Windows 原生用 OpenProcess，其他平台 kill 0；WSL 的 PID 是 Linux 側的）"""
+    if pid == os.getpid():
+        return True
+    if sys.platform == 'win32':
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def reap_orphans(alive=None, kill=None) -> int:
+    """清掉「擁有者 Python 已死」的殘留 serve.ps1（登記在 PIDS_FILE）。alive / kill 可替換給測試。回清掉幾個。
+    只殺登記過的 PID、且擁有者確定已死、且該 PID 現在命令列仍是 serve.ps1（_kill_if_serve）；擁有者還活著的（別的程序正在用）一律不碰"""
+    alive = alive or _owner_alive
+    kill = kill or _kill_if_serve
+    keep, n = [], 0
+    for e in _pids_load():
+        if alive(e['owner']):
+            keep.append(e)
+        elif e['win'] > 0 and kill(e['win']):
+            n += 1
+    if n or len(keep) != len(_pids_load()):
+        _pids_save(keep)
+    return n
+
+
+def shutdown_server() -> None:
+    """明確關掉本程序的常駐 server（長程序結束前呼叫，例如 quest.main 的 finally；不依賴 atexit）。沒開過 = 不做事；可重複呼叫"""
+    if _srv is not None:
+        _srv.close()
+
+
+def _on_signal(signum, frame) -> None:
+    """SIGTERM / SIGHUP：先關 server 再以原訊息結束（Python 預設直接死、不跑 atexit）"""
+    try:
+        if _srv is not None:
+            _srv.close()
+    finally:
+        prev = _prev_handlers.get(signum)
+        if callable(prev):
+            prev(signum, frame)
+        elif prev == signal.SIG_IGN:
+            pass                      # 原本就忽略這個訊號：server 關了就好，程序照舊
+        else:
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+
+
+_prev_handlers: dict = {}
+
+
+def _install_signal_handlers() -> None:
+    """只在主執行緒裝（signal.signal 的限制）；已被別人裝過自訂 handler 的會在 close 後轉呼叫原 handler"""
+    if threading.current_thread() is not threading.main_thread():
+        return
+    for name in ('SIGTERM', 'SIGHUP'):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            _prev_handlers[sig] = signal.signal(sig, _on_signal)
+        except (ValueError, OSError):
+            pass
+
+
 def _server() -> GuiServer:
     global _srv
     if _srv is None:
         _srv = GuiServer()
         atexit.register(_srv.close)
+        _install_signal_handlers()
     return _srv
 
 

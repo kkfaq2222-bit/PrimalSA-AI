@@ -81,6 +81,7 @@ def enable(srv) -> None:
     winenv._errlog_last.clear()
 
 
+winenv.PIDS_FILE = tmp / 'gui-server.pids'      # 登記檔也不要寫進專案
 # errlog 不要真的寫進專案檔
 logged = []
 winenv._log_err = lambda kind, msg: logged.append(kind)
@@ -216,6 +217,82 @@ srv = new_server('t11'); enable(srv); winenv.run_ps(G, 'x')
 srv.lock.acquire()
 t0 = time.time(); srv.close(); srv.lock.release()
 check('close() 不拿鎖、1 秒內完成', time.time() - t0 < 3 and not srv.alive())
+
+# 12) 結束後 server 一定結束（2026-10-10 追查 serve.ps1 殘留後加固）
+STUBBORN = r'''
+import sys, json, time, os
+sys.stdout.buffer.write(b"\n\x1ePSA " + json.dumps({"ready": True, "pid": 424242}).encode() + b"\n"); sys.stdout.buffer.flush()
+time.sleep(600)   # 不理 quit、不理 stdin EOF（模擬卡住的 powershell.exe）
+'''
+killed = []
+orig_taskkill = winenv._taskkill
+winenv._taskkill = lambda pid: killed.append(pid) or True
+winenv.CLOSE_WAIT = 0.5
+stub = winenv.GuiServer(argv=[sys.executable, '-c', STUBBORN]); enable(stub)
+check('卡住的 server 能啟動、記下 ready 的 PID；假 server 不寫登記檔（避免 reap 拿 Linux PID 去殺 Windows 行程）', stub.start() and stub.win_pid == 424242 and not winenv._pids_load(), str(winenv._pids_load()))
+winenv._pids_add(os.getpid(), 424242)     # 手動登記，測 close() 會移除
+t0 = time.time(); stub.close()
+check('不理 quit / EOF 的 server：CLOSE_WAIT 後 kill 代理 + 用 Windows PID taskkill、登記移除', not stub.alive() and killed == [424242] and time.time() - t0 < 5 and not winenv._pids_load(), f'{killed} {time.time() - t0:.1f}s')
+killed.clear()
+srv = new_server('t12'); enable(srv); winenv.run_ps(G, 'x')
+proc = srv.proc
+srv.close()
+check('正常 server：quit 後自行退出，不需要 kill / taskkill', proc.poll() is not None and not killed)
+srv.close()   # 重複呼叫不出錯
+winenv.shutdown_server()
+check('shutdown_server() 關掉 _srv，可重複呼叫', not srv.alive())
+srv = new_server('t12b'); enable(srv); winenv.run_ps(G, 'x'); proc = srv.proc
+winenv.shutdown_server()
+check('shutdown_server() 明確送 quit 並等到結束', proc.poll() is not None)
+
+# 13) 殘留 server 清理：擁有者已死的登記項 → 清掉；擁有者還活著的不碰
+winenv._pids_save([{'owner': 111, 'win': 5001, 't': 0}, {'owner': 222, 'win': 5002, 't': 0}, {'owner': os.getpid(), 'win': 5003, 't': 0}])
+killed.clear()
+n = winenv.reap_orphans(alive=lambda pid: pid in (222, os.getpid()), kill=lambda w: killed.append(w) or True)
+check('只殺擁有者已死的（111 → 5001），活著的 / 自己的不碰', n == 1 and killed == [5001], f'{n} {killed}')
+check('登記檔只剩活著擁有者的項目', sorted(e['win'] for e in winenv._pids_load()) == [5002, 5003], str(winenv._pids_load()))
+winenv._pids_save([{'owner': 111, 'win': 5001, 't': 0}])
+check('殺不掉（kill 回 False）→ 回 0', winenv.reap_orphans(alive=lambda p: False, kill=lambda w: False) == 0)
+PIDS_BAD = tmp / 'bad.pids'; PIDS_BAD.write_text('not json', encoding='utf-8'); winenv.PIDS_FILE = PIDS_BAD
+check('登記檔壞掉 → 當空的，不丟例外', winenv._pids_load() == [] and winenv.reap_orphans() == 0)
+winenv.PIDS_FILE = tmp / 'gui-server.pids'
+winenv._pids_save([])
+winenv._taskkill = orig_taskkill
+winenv.CLOSE_WAIT = 2.0
+
+# 14) 真 serve.ps1 的啟動指令帶閒置看門狗
+argv = winenv.GuiServer()._argv()
+check('serve.ps1 帶 -IdleMin（縮短殘留時間）', '-IdleMin' in argv and argv[argv.index('-IdleMin') + 1] == str(winenv.SERVER_IDLE_MIN) and winenv.SERVER_IDLE_MIN <= 5, str(argv))
+
+# 15) SIGTERM：程序被 terminate 時先關 server（Python 預設直接死、不跑 atexit）
+if sys.platform != 'win32':
+    import signal
+    child_code = f'''
+import sys, time
+sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})
+import winenv
+srv = winenv.GuiServer(argv=[sys.executable, {str(fake)!r}, {str(tmp / "t15")!r}])
+winenv._srv = srv
+winenv.PIDS_FILE = type(winenv.PIDS_FILE)({str(tmp / "t15.pids")!r})
+import atexit; atexit.register(srv.close)
+winenv._install_signal_handlers()
+srv.start()
+print(srv.proc.pid, flush=True)
+time.sleep(60)
+'''
+    ch = subprocess.Popen([sys.executable, '-c', child_code], stdout=subprocess.PIPE, text=True)
+    spid = int(ch.stdout.readline())
+    ch.send_signal(signal.SIGTERM)
+    ch.wait(timeout=10)
+    time.sleep(0.5)
+    try:
+        os.kill(spid, 0)
+        alive = True
+    except ProcessLookupError:
+        alive = False
+    check('SIGTERM 結束的程序：server 已一起結束，且程序仍以 SIGTERM 結束', not alive and ch.returncode == -signal.SIGTERM, f'alive={alive} rc={ch.returncode}')
+    if alive:
+        os.kill(spid, signal.SIGKILL)
 
 print(f'failed={failed}')
 sys.exit(1 if failed else 0)
