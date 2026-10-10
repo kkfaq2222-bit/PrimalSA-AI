@@ -116,5 +116,119 @@ s = Sim(dialog_at=2.0)
 rc = run(['--fight', '--npc', '53,17', '--max-seconds', '120'], s)
 ok &= check('exit 23', rc == quest.EXIT_NO_BATTLE, f'rc={rc}')
 
+# ---- 新增：--stop-after-dialog 跨步 / 組隊完整戰鬥 / --disband-after ----
+class Script:
+    """依序回傳預先排好的畫面（每次 read_screen 取下一個，最後一個重複）；gui 只記錄點擊"""
+
+    def __init__(self, seq, pixel=None):
+        self.seq, self.i, self.t, self.clicks = seq, 0, 1000.0, []
+        self.pixel = pixel or (lambda args: '')
+
+    def time(self):
+        return self.t
+
+    def sleep(self, d):
+        self.t += d
+
+    def screen(self):
+        s = self.seq[min(self.i, len(self.seq) - 1)]
+        self.i += 1
+        return dict(s)
+
+    def gui(self, *args, note=''):
+        if args[0] == 'seq':
+            self.clicks.append((round(self.t - 1000, 1), args[1]))
+            return ''
+        if args[0] == 'pixel':
+            return self.pixel(args)
+        return ''
+
+
+def run2(argv, sim):
+    quest.time.time, quest.time.sleep = sim.time, sim.sleep
+    quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: None
+    quest.walk.gui = sim.gui
+    quest.snap = lambda tag: 'sim.png'
+    quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
+    quest.layout.current = lambda: '2880x1659'
+    quest.clef.available = lambda: False
+    quest.netwatch.guard = lambda *_: {'status': 'ok'}
+    quest.find_marker = lambda: (_ for _ in ()).throw(AssertionError('不該找黃問號'))
+    quest.track_task = lambda *a, **k: (_ for _ in ()).throw(AssertionError('不該點追蹤'))
+    sys.argv = ['quest.py'] + argv
+    return quest.main()
+
+
+REWARD = dict(IDLE, state='reward')
+WALK = dict(IDLE, state='walking')
+FULL_CMD_OFF = {'state': 'battle', 'gold': 0, 'full': True, 'cmd': True, 'auto_off': True}
+
+print('(f) --stop-after-dialog：步 1 對話完（含獎勵）→ 閒置 2 次就停，沒點追蹤 / 黃問號（深紅事故）')
+s = Script([DIALOG, DIALOG, REWARD, IDLE, IDLE, DIALOG, DIALOG])
+rc = run2(['--stop-after-dialog', '--task', '深紅洞窟', '--max-seconds', '120'], s)
+ok &= check('exit 0', rc == 0, f'rc={rc}')
+ok &= check('停在步 1：只用掉 5 個畫面（沒看到步 2 的對話）', s.i == 5, f'i={s.i}')
+ok &= check('沒有任何追蹤 / 問號點擊（只有對話左鈕 + 獎勵確認）', all(c[1].startswith(('click 948 461', 'click 720 572')) for c in s.clicks), str(s.clicks))
+
+print('(f2) --stop-after-dialog：步完成後遊戲自己開始 Auto Walking → 退出碼 24')
+s = Script([DIALOG, IDLE, WALK])
+rc = run2(['--stop-after-dialog', '--task', '深紅洞窟', '--max-seconds', '120'], s)
+ok &= check('exit 24', rc == quest.EXIT_AUTOWALK, f'rc={rc}')
+
+print('(g) 組隊預設模式完整戰鬥、自動戰鬥關：按 1380,600（不逃跑）')
+s = Script([FULL_CMD_OFF, FULL_CMD_OFF, dict(FULL_CMD_OFF, cmd=False, auto_off=False), IDLE], None)
+rc = run2(['--no-track', '--max-seconds', '30'], s)
+ok &= check('有按自動戰鬥、沒按逃跑', len(has(s, 'click 1380 600')) == 1 and not has(s, 'click 1283 168'), str(s.clicks))
+print('(g2) 按了 4 次仍關 → 退出碼 25')
+s = Script([FULL_CMD_OFF])
+rc = run2(['--no-track', '--max-seconds', '120'], s)
+ok &= check('exit 25', rc == quest.EXIT_BATTLE_STUCK and len(has(s, 'click 1380 600')) == quest.AUTO_STUCK_MAX, f'rc={rc} n={len(has(s, "click 1380 600"))}')
+
+print('(h) --disband-after')
+TEAM_PX, TASK_PX = '10,10,10 230,200,160', '230,200,160 10,10,10'   # TAB_PROBE 兩點：組隊亮 = 第二點 R>190（(130,225)=任務暗、(270,225)=組隊亮）
+
+
+def disband_sim(tab_ok=True, menu=True, done=True):
+    state = {'n': 0}
+
+    def pixel(args):
+        pts = args[1].split()
+        if len(pts) == 2:                                   # TAB_PROBE
+            return '100,80,60 235,210,170' if tab_ok else '235,210,170 100,80,60'
+        state['n'] += 1                                     # list_signature：第 N 次讀取
+        n = state['n']
+        return ' '.join(['1,1,%d' % (0 if n == 1 else (1 if (n == 2 and menu) or (n == 3 and done and menu) else 0))] * 3)
+    return pixel
+
+
+def sig_seq(*vals):
+    it = iter(vals)
+    quest.list_signature = lambda: next(it)
+
+
+s = Script([IDLE], disband_sim())
+for name, tab_ok, sigs, want_rc, want_click in [
+        ('成功', True, ('a', 'b', 'c'), 0, 'click 200 372'),
+        ('分頁沒切過去 → 不點解散也不點隊長列', False, ('a', 'b', 'c'), quest.EXIT_DISBAND_FAIL, None),
+        ('選單沒彈出 → 不點解散', True, ('a', 'a', 'c'), quest.EXIT_DISBAND_FAIL, None),
+        ('解散後畫面沒變 → 未確認', True, ('a', 'b', 'b'), quest.EXIT_DISBAND_FAIL, 'click 200 372')]:
+    s = Script([IDLE], lambda args, ok_=tab_ok: '100,80,60 235,210,170' if ok_ else '235,210,170 100,80,60')
+    quest.time.time, quest.time.sleep = s.time, s.sleep
+    quest.gui, quest.snap = s.gui, lambda tag: 'sim.png'
+    quest.event = lambda m, shot=None: print(f'   {m}')
+    sig_seq(*sigs)
+    rc = quest.disband_team()
+    clicked_btn = bool(has(s, 'click 200 372'))
+    clicked_leader = bool(has(s, 'click 210 320'))
+    ok &= check(f'disband {name}', rc == want_rc and clicked_btn == (want_click is not None) and (clicked_leader or tab_ok is False), f'rc={rc} {s.clicks}')
+    if tab_ok is False:
+        ok &= check('  沒點隊長列 210,320', not clicked_leader)
+
+print('(h2) --stop-after-dialog --disband-after：停止後才解散；分頁沒切過去 → 26')
+s = Script([DIALOG, IDLE, IDLE], lambda args: '235,210,170 100,80,60')
+quest.time.time, quest.time.sleep = s.time, s.sleep
+rc = run2(['--stop-after-dialog', '--disband-after', '--task', 'x', '--max-seconds', '60'], s)
+ok &= check('exit 26 且沒點解散', rc == quest.EXIT_DISBAND_FAIL and not has(s, 'click 200 372') and not has(s, 'click 210 320'), f'rc={rc} {s.clicks}')
+
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

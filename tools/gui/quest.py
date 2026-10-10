@@ -18,6 +18,9 @@
            否則 = 小怪（自動戰鬥開著就先關，下指令階段按逃跑）。已手動點過 NPC 用 --no-click。
            點 NPC 後 12 秒沒對話框也沒戰鬥 → 退出碼 22（沒點到 NPC）；對話後 15 秒沒開打 → 23；被打飛 21。
            範例：quest.py --fight --task 英雄島前傳 --npc auto --max-seconds 300
+  --disband-after  這步完成（搭配 --stop-after-dialog / --stop-after-rewards）後立刻解散隊伍；分頁沒切到組隊 / 選單沒彈出 / 解散後畫面沒變 → 不亂點，退出碼 26
+  --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，連續閒置 2 次就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
+  組隊預設模式（非 --solo / --fight）的完整戰鬥：自動戰鬥鈕是關的 → 按 1380,600；同一場按 4 次仍關（寵物指令視窗等）→ 退出碼 25
   模擬測試：uv run --no-project python tools/gui/test_quest_fight.py
   事件記錄：notes/quest-events.log（每行一筆，附截圖路徑 tools/.cache/quest-log/）。
 
@@ -54,6 +57,10 @@ EXIT_AT_NPC = 20                     # --solo：到達 NPC（對話框已 ESC �
 EXIT_KNOCKED = 21                    # 被打飛回薩姆吉爾儲存點
 EXIT_NO_NPC = 22                     # --fight：點 NPC 後 NPC_WAIT 秒內沒對話框也沒戰鬥（沒點到 NPC / 被小怪打斷）
 EXIT_NO_BATTLE = 23                  # --fight：有對話但 QUEST_BATTLE_WINDOW 秒內沒開打（這步其實不戰鬥？）
+EXIT_AUTOWALK = 24                   # --stop-after-dialog：這步對話完，遊戲自己又開始 Auto Walking（腳本沒點追蹤；呼叫端要馬上處理，例如解散）
+EXIT_BATTLE_STUCK = 25               # 組隊預設模式：完整戰鬥按了自動戰鬥好幾次仍是關的（寵物指令視窗 / 其他卡住畫面）→ 人工處理
+EXIT_DISBAND_FAIL = 26               # --disband-after：解散沒做成（分頁沒切過去 / 選單沒彈出 / 解散後畫面沒變），沒亂點
+AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰鬥鈕
 NPC_WAIT = 12.0                      # --fight 點 NPC 後最多等幾秒看有沒有反應（走過去 + 開對話框）
 LOG_FILE = ROOT / 'notes' / 'quest-events.log'
 SHOT_DIR = ROOT / 'tools' / '.cache' / 'quest-log'
@@ -281,6 +288,60 @@ def ensure_task_tab() -> None:
         log(f'ensure_task_tab 失敗：{e}')
 
 
+def tab_state() -> str | None:
+    """左側面板目前分頁：'team'（組隊亮、任務暗）/ 'task'（任務亮、組隊暗）/ None（讀不準）"""
+    try:
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in TAB_PROBE)).split()
+        (tr, _, _), (gr, _, _) = [tuple(int(v) for v in c.split(',')) for c in out]
+    except Exception:
+        return None
+    if gr > 190 and tr < 120:
+        return 'team'
+    if tr > 190 and gr < 120:
+        return 'task'
+    return None
+
+
+TAB_TEAM = (260, 236)                # 左側面板「組隊」分頁鈕
+DISBAND_LEADER = (210, 320)          # 組隊分頁隊長那一列
+DISBAND_BTN = (200, 372)             # 點隊長列後彈出選單的「解散隊伍」
+
+
+def disband_team() -> int:
+    """對話步完成後立刻解散（/psa-disband-team 的自動版）。每一步都驗證，驗不過就停、不再點（寧可退出碼 26 也不亂點，
+    避免點到 y≈325 的任務追蹤條目觸發自動巡路）：
+    1. 切組隊分頁 260,236 → tab_state()=='team'（沒切過去再點一次；換圖後第一下點擊常被吃掉）
+    2. 點隊長列 210,320 → 左側面板像素必須變了（選單彈出）才點解散；分頁又變回任務 = 點到別的東西 → 停
+    3. 點解散 200,372 → 面板像素再變、分頁仍是組隊才算成功"""
+    for attempt in range(2):
+        gui('seq', f'{PRIMER}; click {TAB_TEAM[0]} {TAB_TEAM[1]}; wait 700', note='--disband-after：切左側組隊分頁')
+        if tab_state() == 'team':
+            break
+    else:
+        event(f'--disband-after：左側分頁沒切到「組隊」（連點 2 次）→ 不點解散，退出碼 {EXIT_DISBAND_FAIL}', snap('disband-no-tab'))
+        return EXIT_DISBAND_FAIL
+    sig0 = list_signature()
+    gui('seq', f'click {DISBAND_LEADER[0]} {DISBAND_LEADER[1]}; wait 500', note='--disband-after：點隊長列')
+    sig1 = list_signature()
+    if tab_state() != 'team' or sig1 == sig0:
+        event(f'--disband-after：點隊長列後選單沒彈出（或分頁變了）→ 不點解散，退出碼 {EXIT_DISBAND_FAIL}', snap('disband-no-menu'))
+        return EXIT_DISBAND_FAIL
+    gui('seq', f'click {DISBAND_BTN[0]} {DISBAND_BTN[1]}; wait 800', note='--disband-after：解散隊伍')
+    if tab_state() != 'team' or list_signature() == sig1:
+        event(f'--disband-after：點解散後畫面沒變 → 未確認解散成功，退出碼 {EXIT_DISBAND_FAIL}（請 shot 看左側是否只剩「創建隊伍」）', snap('disband-unverified'))
+        return EXIT_DISBAND_FAIL
+    event('--disband-after：已解散隊伍（左側組隊分頁變了；請再 shot 確認只剩「創建隊伍」）', snap('disbanded'))
+    return 0
+
+
+def finish(a, rc: int = 0) -> int:
+    """一步完成的收尾：--disband-after 時先解散（失敗回 26），否則回 rc"""
+    if a.disband_after:
+        d = disband_team()
+        return d or rc
+    return rc
+
+
 def _tm_has(want: str) -> bool:
     try:
         import titlematch
@@ -391,13 +452,16 @@ def is_quest_battle(last_action: float, now: float, window: float = QUEST_BATTLE
     return last_action > 0 and now - last_action <= window
 
 
-def plan_battle_action(s: dict, boss: bool, since_click: float) -> str | None:
+def plan_battle_action(s: dict, boss: bool, since_click: float, party: bool = False) -> str | None:
     """完整戰鬥畫面該做什麼（純函式，方便模擬測試）：
     BOSS 戰 → 自動戰鬥鈕是「關」才點（'auto_on'）；小怪 → 下指令階段按逃跑（'escape'），
     自動戰鬥是開著（鈕不是靜止紅圖示、也沒有指令框）就先關（'auto_off'，指令框下一回合才會出現）。
+    party=True（組隊預設模式，不逃跑）：完整戰鬥、自動戰鬥鈕是「關」→ 'auto_on'（小怪也讓全隊自動打完）。
     沒有完整戰鬥畫面（快速戰鬥）或點擊間隔不夠 → None。"""
     if not s.get('full'):
         return None
+    if party:
+        return 'auto_on' if s.get('auto_off') and since_click >= 3.0 else None
     if boss:
         return 'auto_on' if s.get('auto_off') and since_click >= 3.0 else None
     if s.get('cmd'):
@@ -490,6 +554,7 @@ def main() -> int:
     ap.add_argument('--every', type=float, default=None, help='輪詢間隔秒數（預設 2.5；--solo / --fight 預設 1.5）')
     ap.add_argument('--solo', action='store_true', help='單人逃跑風格：完整戰鬥按逃跑；到 NPC 出對話框 → ESC 後停下（退出碼 20）；被打飛退出碼 21')
     ap.add_argument('--stop-after-dialog', action='store_true', help='對話框按完、回主畫面連續閒置 2 次就結束（沒有獲得物品視窗的對話步用；組隊後單步對話用，避免自動點下一步追蹤開始巡路）')
+    ap.add_argument('--disband-after', action='store_true', help='這步完成（--stop-after-dialog / --stop-after-rewards 結束）後立刻解散隊伍：切組隊分頁 → 點隊長列 → 解散，每步驗證，失敗退出碼 %d 且不亂點' % EXIT_DISBAND_FAIL)
     ap.add_argument('--fight', action='store_true', help='戰鬥步（要先站在 NPC 附近；不巡路）：點 NPC → 對話左鈕 → 開打；只有點 NPC / 按對話框後 %d 秒內開始的才是 BOSS 戰（開自動戰鬥、打完退出碼 0）；其他戰鬥是小怪（關自動戰鬥、按逃跑）；沒反應退出碼 22、對話後沒開打 23、被打飛 21' % QUEST_BATTLE_WINDOW)
     ap.add_argument('--npc', default='', help='--fight 用：NPC 的地圖座標 X,Y，或 auto（用 --task 的任務步驟找第一個戰鬥步的 NPC，同 psa.py steps）；不給 = 必須加 --no-click')
     ap.add_argument('--at', default='', help='--fight 用：自己目前的座標 X,Y（不給就 OCR 讀右上角）')
@@ -507,6 +572,9 @@ def main() -> int:
         return 4
     if a.solo and a.fight:
         log('--solo（逃跑）與 --fight（打）互斥')
+        return 4
+    if a.disband_after and (a.solo or a.fight or not (a.stop_after_dialog or a.stop_after_rewards)):
+        log('--disband-after 只能搭配 --stop-after-dialog 或 --stop-after-rewards（不可與 --solo / --fight 並用）')
         return 4
     if a.every is None:
         a.every = 1.5 if (a.solo or a.fight) else 2.5
@@ -556,6 +624,7 @@ def main() -> int:
     boss_seen = False            # --fight：已打過 BOSS 戰
     npc_click_t = 0.0            # --fight：點 NPC 的時間
     warned_quick = False
+    auto_presses = 0             # 組隊預設模式：本場戰鬥按自動戰鬥鈕的次數
     if guard_ko:
         event(f'模式：{"單人逃跑 --solo" if a.solo else "戰鬥步 --fight"}；起點 {last_pos}')
     if a.fight:
@@ -571,7 +640,8 @@ def main() -> int:
         st = s['state']
         if st in ('idle', 'walking', 'dialog', 'reward'):
             in_battle = False
-        if st == 'battle' and not in_battle:
+        in_battle_new = st == 'battle' and not in_battle
+        if in_battle_new:
             in_battle = True
             quest_battle = is_quest_battle(last_action, time.time())
             boss = quest_battle
@@ -622,7 +692,7 @@ def main() -> int:
             event(f'獲得物品視窗 #{rewards}：按確認', shot)
             if a.stop_after_rewards and rewards >= a.stop_after_rewards:
                 event(f'已領 {rewards} 次獎勵視窗，停止（--stop-after-rewards）')
-                return 0
+                return finish(a)
         elif st == 'battle' and (a.solo or a.fight):
             if not s.get('full'):
                 if not warned_quick:
@@ -641,6 +711,23 @@ def main() -> int:
                 elif a.fight and boss and time.time() - last_full_log > 20:
                     event('--fight BOSS 戰中（自動戰鬥已開，等打完）')
                     last_full_log = time.time()
+        elif st == 'battle' and s.get('full'):
+            # 組隊預設模式的完整戰鬥：自動戰鬥是關的 → 按 1380,600 讓全隊自動打完（不逃跑：組隊逃跑行為未驗證）
+            if in_battle_new:
+                auto_presses = 0
+            act = plan_battle_action(s, False, time.time() - last_click_t, party=True)
+            if act:
+                if auto_presses >= AUTO_STUCK_MAX:
+                    shot = snap('battle-stuck')
+                    event(f'組隊完整戰鬥：自動戰鬥鈕按了 {auto_presses} 次仍是關的（寵物指令視窗 / 其他卡住畫面？）→ 停，退出碼 {EXIT_BATTLE_STUCK}（人工：戰寵視窗先選攻擊再按選擇）', shot)
+                    return EXIT_BATTLE_STUCK
+                gui('seq', f'click {AUTO_BTN[0]} {AUTO_BTN[1]}', note='組隊完整戰鬥 → 開自動戰鬥')
+                last_click_t = time.time()
+                auto_presses += 1
+                event(f'組隊完整戰鬥：自動戰鬥鈕是關的 → 按 {AUTO_BTN}（本場第 {auto_presses} 次）')
+            elif time.time() - last_full_log > 20:
+                event('完整戰鬥畫面（自動戰鬥已開，等打完）')
+                last_full_log = time.time()
         elif st == 'battle':
             if s.get('full') or not quest_battle:
                 # 完整戰鬥畫面（上方「播放中」）：戰鬥中的切換是「換角色下指令」面板，沒有刷新角色 → 只等；一般遇敵（非任務戰鬥）也只等
@@ -683,11 +770,20 @@ def main() -> int:
                 event(f'--fight 對話後 {QUEST_BATTLE_WINDOW:.0f} 秒沒開打（這步可能不戰鬥）→ 退出碼 {EXIT_NO_BATTLE}', shot)
                 print('對話後沒開打', flush=True)
                 return EXIT_NO_BATTLE
+        elif a.stop_after_dialog and (dialogs or rewards) and st in ('idle', 'walking'):
+            # 這一步已經對話 / 領獎過：從這裡起絕不點追蹤、不點 NPC 頭上黃「?」（否則會把下一步也對完、接著巡路 = 2026-10-10 深紅事故）。
+            # 只等閒置 2 次就停；遊戲自己又進入 Auto Walking → 退出碼 24（呼叫端立刻處理，例如 --disband-after 已先解散）
+            if st == 'walking':
+                event(f'--stop-after-dialog：步驟完成後遊戲自己開始 Auto Walking（對話 {dialogs}、獎勵 {rewards}）→ 不點任何追蹤，退出碼 {EXIT_AUTOWALK}')
+                return finish(a, EXIT_AUTOWALK)
+            if idle_streak >= 2:
+                event(f'步驟結束（對話 {dialogs}、獎勵 {rewards}），連續閒置 {idle_streak} 次 → 停（--stop-after-dialog，未點追蹤 / 黃問號）')
+                return finish(a)
         elif st == 'idle':
             # 做完事（對話 / 領獎）後連續 2 次閒置 = 這一步結束，馬上結束不空等（有領過獎勵，或 --no-track 時對話過）
             if idle_streak >= 2 and not (rewards and not a.no_track and a.task and not tracked and checked_rewards < rewards) and (rewards or (a.no_track and dialogs) or (a.stop_after_dialog and dialogs)):
                 event(f'步驟結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}），連續閒置 {idle_streak} 次，提前結束')
-                return 0
+                return finish(a)
             if tracked:
                 track_fail += 1
                 if track_fail >= 2:
