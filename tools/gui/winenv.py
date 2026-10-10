@@ -111,7 +111,7 @@ def run_ps(script: str, *args: str, timeout: float | None = None) -> subprocess.
 #      serve.ps1 記憶體 / GDI 自保要退出時，最後一個回應帶 bye=true，client 收到就主動 close；
 #   ⑤ gui-server.pids 登記「擁有者 Python PID ↔ server Windows PID」：下次有程序起 server 時，擁有者已死的殘留 server 一併清掉（reap_orphans；登記含平台，只回收同平台）。
 # ---------------------------------------------------------------------------------------------
-SERVER_SCRIPTS = {'gui', 'ocr', 'stat', 'findmark', 'titlematch'}
+SERVER_SCRIPTS = {'gui', 'ocr', 'stat', 'findmark', 'titlematch', 'digitmatch'}
 # 各腳本 param 區塊裡「具名」參數（五支腳本都沒有 [switch]，所以「-名稱 值」成對拆進 named，其餘當位置參數）。
 # 腳本改 param 時要同步這裡（test_winenv_server.py 的「白名單與 ps1 param 區塊同步」會檢查；_selftest 只測路徑換算）。
 SERVER_NAMED = {
@@ -120,6 +120,7 @@ SERVER_NAMED = {
     'stat': ('Shot', 'ShotWidth'),
     'findmark': ('Crop', 'Out', 'Zoom'),
     'titlematch': ('Mode', 'Dir', 'Image', 'Out', 'Y', 'Thr'),
+    'digitmatch': ('Image', 'Boxes'),
 }
 INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'max', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
 START_TIMEOUT = 20.0

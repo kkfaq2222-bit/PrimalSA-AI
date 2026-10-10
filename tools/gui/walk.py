@@ -17,7 +17,7 @@
   walk.npc_steps((20, 57), at=(23, 62), then='click 948 460')   # 點 NPC 開對話的 seq 片段
   walk.prime()                                      # 換地圖後的引子點擊
 
-只透過 gui.ps1（經 winenv.py 直接呼叫 powershell.exe；背景點擊 / 截圖）與 stat.ps1（OCR 讀 HUD 座標）操作，不碰遊戲記憶體。
+只透過 gui.ps1（經 winenv.py 直接呼叫 powershell.exe；背景點擊 / 截圖）與 digitmatch.ps1 / stat.ps1（讀 HUD 座標：樣板比對為主、OCR 退路）操作，不碰遊戲記憶體。
 通行格讀取重用 tools/query/psa.py（load_maps / grid），格子值 1 = 可走。
 """
 import argparse
@@ -38,6 +38,7 @@ if hasattr(sys.stdout, 'reconfigure'):   # Windows 原生 Python 預設 cp950，
 import winenv  # noqa: E402  平台判斷（WSL / Windows 原生）與路徑換算
 import actlog  # noqa: E402  操作 log（tools/.cache/actions.log，pane 顯示）
 import layout  # noqa: E402  依遊戲視窗大小選座標（2880×1659 / 1920×1017）
+import digitmatch  # noqa: E402  HUD 字元樣板比對（讀座標第一順位）
 import psa  # noqa: E402  知識庫查詢工具：load_maps() / grid(map_id) / T('Npc')
 
 # ======== 走路常數（2026-10-09 實測；遊戲最大化客戶區 2880×1659 → 截圖 1440×830 為準）========
@@ -207,7 +208,7 @@ def split(a: tuple[int, int], b: tuple[int, int], lim: int = MAX_TILES) -> list[
     return [b]
 
 
-# ---------------- 讀座標（stat.ps1 OCR，每次約 0.18 秒；一次性約 0.9 秒、常駐 server 約 0.18 秒）----------------
+# ---------------- 讀座標（digitmatch 樣板比對約 0.1 秒為主；退回 stat.ps1 OCR：server 約 0.18 秒、一次性約 0.9 秒）----------------
 def stat() -> dict:
     try:
         r = winenv.run_ps('stat.ps1')
@@ -221,7 +222,10 @@ def stat() -> dict:
 
 
 def pos() -> tuple[int, int, int] | None:
-    m = re.match(r'(\d+):(\d+),(\d+)', stat().get('pos') or '')
+    """讀座標：先現場 digitmatch（字元樣板比對，約 0.1 秒；走路要的是「點擊之後」的新座標，所以一律現場截圖，
+    不讀 watch 的 state.hud——watch 每 3 s 才讀一次，拿不到比現場更新的值）；讀不出來（沒樣板 / 認不得 / 逾時）才退回 stat.ps1 OCR"""
+    p = digitmatch.live_pos()
+    m = re.match(r'(\d+):(\d+),(\d+)', p or '') or re.match(r'(\d+):(\d+),(\d+)', stat().get('pos') or '')
     return (int(m[1]), int(m[2]), int(m[3])) if m else None
 
 

@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 import actlog
+import charstate
 import errlog
 import heal
 import layout
@@ -36,9 +37,9 @@ CACHE = Path(__file__).resolve().parents[1] / '.cache'
 STATE = CACHE / 'petwatch.json'
 LOCK = CACHE / 'petwatch.lock'
 
-CHARS = ['DKB0', 'DKB02', 'DKB03', 'DKB04', 'DKB05']
-AVATAR_Y = {'DKB0': 195, 'DKB02': 322, 'DKB03': 450, 'DKB04': 580, 'DKB05': 700}   # 寵物面板左欄頭像 x=83
-ASS_RADIO = {'DKB0': (137, 151), 'DKB02': (298, 151), 'DKB03': (461, 151), 'DKB04': (137, 204), 'DKB05': (298, 204)}
+CHARS = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']   # 真名字母 O；舊 petwatch.json 的 DKB0… 在 load_state 轉成真名
+AVATAR_Y = {'DKBO': 195, 'DKBO2': 322, 'DKBO3': 450, 'DKBO4': 580, 'DKBO5': 700}   # 寵物面板左欄頭像 x=83
+ASS_RADIO = {'DKBO': (137, 151), 'DKBO2': (298, 151), 'DKBO3': (461, 151), 'DKBO4': (137, 204), 'DKBO5': (298, 204)}
 PET_BTN, ASS_BTN, ASS_TAB = (318, 80), (1300, 760), (850, 212)
 SLOT_Y = [200, 322, 445, 567]                      # 寵物欄 1～4 格（x=250）
 SLOT_X = 250
@@ -197,9 +198,13 @@ def battle_free(timeout_ms: int = 20000) -> bool:
 # ---------------- 狀態 / 互斥 ----------------
 def load_state() -> dict:
     try:
-        return json.loads(STATE.read_text(encoding='utf-8'))
+        st = json.loads(STATE.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {'done': [], 'levels': {}}
+    # 舊紀錄的角色名是 DKB0…（數字 0）：O / 0 視為相同，轉成真名
+    st['done'] = [charstate.display(c) for c in st.get('done', [])]
+    st['levels'] = {charstate.display(k): v for k, v in st.get('levels', {}).items()}
+    return st
 
 
 def save_state(st: dict) -> None:

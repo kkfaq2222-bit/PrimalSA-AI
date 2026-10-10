@@ -350,16 +350,16 @@ ok &= check('紅點 >= 8 → leader', quest.classify_team_label([RED] * 12 + [BG
 ok &= check('黃點 >= 8 → member', quest.classify_team_label([YEL] * 12 + [BG] * (n_s - 12)) == 'member')
 ok &= check('只有底色 / 白字 → other', quest.classify_team_label([BG] * n_s) == 'other' and quest.classify_team_label([(240, 240, 240)] * 12 + [BG] * (n_s - 12)) == 'other')
 ok &= check('紅點太少（<8）→ other', quest.classify_team_label([RED] * 3 + [BG] * (n_s - 3)) == 'other')
-ALL5 = {'DKB0': 'leader', 'DKB02': 'member', 'DKB03': 'member', 'DKB04': 'member', 'DKB05': 'member'}
+ALL5 = {'DKBO': 'leader', 'DKBO2': 'member', 'DKBO3': 'member', 'DKBO4': 'member', 'DKBO5': 'member'}
 ok &= check('judge 5 人隊 OK', quest.judge_team(ALL5, 5)[0])
-four = dict(ALL5, DKB04='other')
+four = dict(ALL5, DKBO4='other')
 j = quest.judge_team(four, 5)
-ok &= check('judge 4 人（DKB04 單人）不符且說明點名 DKB04', (not j[0]) and 'DKB04' in j[1].split('不在隊')[1], j[1])
-ok &= check('judge 兩個隊長 / 無隊長 不符', not quest.judge_team(dict(ALL5, DKB02='leader'), 5)[0] and not quest.judge_team(dict(ALL5, DKB0='member'), 5)[0])
-ok &= check('--team-size 4：4 人隊 + 另 1 人單人（DKB04 other）→ 通過（單人卡片不算錯）', quest.judge_team(four, 4)[0])
+ok &= check('judge 4 人（DKBO4 單人）不符且說明點名 DKBO4', (not j[0]) and 'DKBO4' in j[1].split('不在隊')[1], j[1])
+ok &= check('judge 兩個隊長 / 無隊長 不符', not quest.judge_team(dict(ALL5, DKBO2='leader'), 5)[0] and not quest.judge_team(dict(ALL5, DKBO='member'), 5)[0])
+ok &= check('--team-size 4：4 人隊 + 另 1 人單人（DKBO4 other）→ 通過（單人卡片不算錯）', quest.judge_team(four, 4)[0])
 ok &= check('--team-size 5 + 1 人單人 → 仍不符（5 人都要在隊）', not quest.judge_team(four, 5)[0])
-ok &= check('--team-size 4 但只有 3 人在隊 → 不符', not quest.judge_team(dict(four, DKB05='other'), 4)[0])
-ok &= check('--team-size 2：隊長 + 1 隊員，其餘 3 張單人 → 通過', quest.judge_team({'DKB0': 'leader', 'DKB02': 'member', 'DKB03': 'other', 'DKB04': 'other', 'DKB05': 'other'}, 2)[0])
+ok &= check('--team-size 4 但只有 3 人在隊 → 不符', not quest.judge_team(dict(four, DKBO5='other'), 4)[0])
+ok &= check('--team-size 2：隊長 + 1 隊員，其餘 3 張單人 → 通過', quest.judge_team({'DKBO': 'leader', 'DKBO2': 'member', 'DKBO3': 'other', 'DKBO4': 'other', 'DKBO5': 'other'}, 2)[0])
 ok &= check('隊長是單人（全 other，沒有隊長）→ 不符', not quest.judge_team({r: 'other' for r in ALL5}, 4)[0])
 
 
@@ -404,7 +404,7 @@ for nm, kinds, opens, want in [('5 人', ALL5, True, True), ('4 人', four, True
         ok &= check(f'{nm}：用 ✕ 1064,208 關面板', any(c.startswith('click 1064 208') for c in pg.clicks), str(pg.clicks))
 
 print('(n) --fight 4 人隊 → 不點 NPC，退出碼 30；5 人 → 照常點')
-TEAM['ret'], TEAM['calls'] = (False, "隊長 ['DKB0']、隊員 ['DKB02', 'DKB03', 'DKB05']、不在隊 / 單人 / 離線 ['DKB04']"), []
+TEAM['ret'], TEAM['calls'] = (False, "隊長 ['DKBO']、隊員 ['DKBO2', 'DKBO3', 'DKBO5']、不在隊 / 單人 / 離線 ['DKBO4']"), []
 s = Sim(battle_at=3.0)
 rc = run(['--fight', '--npc', '53,17', '--max-seconds', '60'], s)
 ok &= check('exit 30、沒任何點擊、檢查人數 5', rc == quest.EXIT_TEAM_MISMATCH and not s.clicks and TEAM['calls'] == [(5, '--fight 點 NPC 前：')], f'rc={rc} clicks={s.clicks} calls={TEAM["calls"]}')
@@ -428,7 +428,7 @@ TEAM['ret'] = (True, 'ok')
 print('(n2) 預設模式（要點追蹤）：開跑前檢查；脫隊 → 退出碼 32，沒點追蹤 / 黃問號；--solo / --no-track 不檢查')
 TEAM['calls'] = []
 s = Script([IDLE, IDLE])
-TEAM['ret'] = (False, "不在隊 ['DKB03']")
+TEAM['ret'] = (False, "不在隊 ['DKBO3']")
 rc = run2(['--task', 'x', '--max-seconds', '60'], s, team=True)
 ok &= check('exit 30（開始前驗隊伍）且沒有點擊（find_marker / track_task 沒被呼叫）', rc == quest.EXIT_TEAM_MISMATCH and not s.clicks and len(TEAM['calls']) == 1, f'rc={rc} {s.clicks}')
 for extra in (['--solo', '--no-track'], ['--no-track', '--team-size', '0']):
@@ -436,13 +436,13 @@ for extra in (['--solo', '--no-track'], ['--no-track', '--team-size', '0']):
     s = Script([IDLE, IDLE, IDLE, IDLE])
     rc = run2(extra + ['--max-seconds', '4'], s, team=True)
     ok &= check(f'{" ".join(extra)} 不檢查隊伍', not TEAM['calls'] and rc == 0, f'rc={rc}')
-TEAM['calls'], TEAM['ret'] = [], (False, "不在隊 ['DKB03']")
+TEAM['calls'], TEAM['ret'] = [], (False, "不在隊 ['DKBO3']")
 s = Script([IDLE, IDLE])
 rc = run2(['--no-track', '--max-seconds', '4'], s, team=True)
 ok &= check('預設模式 --no-track 也先驗隊伍：不符 → 30、沒點擊', rc == quest.EXIT_TEAM_MISMATCH and not s.clicks and len(TEAM['calls']) == 1, f'rc={rc} {s.clicks}')
 
 print('(n4) 2026-10-10 18:44 事件：--solo 後隊伍散成單人，--stop-after-rewards 啟動 → 先驗隊伍，不符退出碼 30、沒有任何點擊')
-TEAM['calls'], TEAM['ret'] = [], (False, "隊長 無、隊員 無、不在隊 / 單人 / 離線 ['DKB0', 'DKB02', 'DKB03', 'DKB04', 'DKB05']")
+TEAM['calls'], TEAM['ret'] = [], (False, "隊長 無、隊員 無、不在隊 / 單人 / 離線 ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']")
 for first in (IDLE, DIALOG):
     s = Script([first, IDLE, IDLE, DIALOG, REWARD, IDLE])
     rc = run2(['--task', '碧青洞窟', '--stop-after-rewards', '1', '--max-seconds', '180'], s, team=True)
