@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -27,6 +28,7 @@ import errlog
 import heal
 import layout
 import netwatch
+import watchstate
 import winenv
 from walk import gui, log
 
@@ -56,7 +58,10 @@ SLOT_CACHE: dict = {}                              # 角色 → 金布伊所在�
 
 
 def ocr(box, *opts) -> list:
-    r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
+    try:
+        r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
+    except subprocess.TimeoutExpired:
+        return []          # 讀圖逾時視同讀不到，呼叫端進下一輪
     line = (r.stdout.strip().splitlines() or [''])[-1]
     try:
         d = json.loads(line)
@@ -217,6 +222,7 @@ def take_lock() -> bool:
 
 
 def main() -> int:
+    winenv.enable_server()   # 長程序：WSL 預設啟用常駐 server（Windows 原生需 PSA_GUI_SERVER=1；=0 關閉）
     ap = argparse.ArgumentParser(description='監測金布伊等級，到門檻換回迪基格斯')
     ap.add_argument('--once', action='store_true', help='只掃一輪（預設只讀；加 --apply 才換）')
     ap.add_argument('--apply', action='store_true', help='--once 時也執行換回')
@@ -239,21 +245,25 @@ def main() -> int:
     done = set(st['done'])
     end = time.time() + a.duration if a.duration else None
     next_scan = 0.0
+    vg = watchstate.VerifyGuard('petwatch', log=log)   # watch 標出疑似驗證視窗 → 暫停動作，最多 10 分鐘（超過停止、寫 errlog，不自動恢復）
     log(f'開始：每 {a.interval} 秒掃一輪，金布伊 ≥ {a.target_level} 級就換回迪基格斯；已完成 {sorted(done) or "無"}')
     try:
         while len(done) < len(CHARS) and (end is None or time.time() < end):
+            if vg.check() == 'timeout':
+                return heal.EXIT_VERIFY
             now = time.time()
             if netwatch.guard('petwatch')['status'] == 'reconnected':
                 next_scan = 0.0                      # 重連後馬上重掃一輪（netwatch 已恢復原地遇敵、檢查隊伍）
             if not a.no_heal and not a.once:
                 hits = 0
+                last_ts = None
                 for i in range(2):
-                    s = heal.stat()
+                    s, last_ts = heal.read_vitals(last_ts)     # watch 活著 = 讀 state.hud；否則現場 stat
                     r = heal.low(s, a.hp, a.mp)
                     if not r:
                         break
                     hits += 1
-                    if hits < 2:
+                    if hits < 2 and last_ts is None:
                         time.sleep(3)
                 if hits >= 2:
                     log(f'血 / 魔太低（HP {s.get("hpPct")}%，MP {s.get("mpPct")}%），回村補血')

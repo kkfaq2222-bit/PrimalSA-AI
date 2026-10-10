@@ -4,6 +4,7 @@
 用法（專案根目錄）：
   uv run --no-project python tools/gui/heal.py                 # 現在就回村補血，再回波拉島（約 21～24 秒；HEAL_DEBUG=1 印出每個 seq 的結果）
   uv run --no-project python tools/gui/heal.py --spot 波拉島2   # 回到別的練功點（見 SPOTS）
+  uv run --no-project python tools/gui/heal.py --no-return     # 補完停在醫院（不傳回練功點、不開原地遇敵；解任務被打飛後用，再用 quest.py 巡路回任務）
   uv run --no-project python tools/gui/heal.py --watch         # 常駐：每 15 秒看 HUD 血條，隊長血 / 魔太低就自動補
   uv run --no-project python tools/gui/heal.py --watch --hp 40 --mp 20 --every 15 --confirm 2 [--verbose] [--for 300]
 
@@ -17,6 +18,9 @@ import time
 
 import layout
 import netwatch
+import screen_sigs
+import watchstate
+import winenv
 from walk import LAYOUT, PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
 
 # 練級傳送分頁的目的地：名稱 → (截圖座標 x, y, 抵達地圖 ID)；見 .claude/skills/psa-game-ui/ui/transfer.md
@@ -54,8 +58,8 @@ SIG_TAB = {TAB_TOWN: '185,175,243,173,63', TAB_LEVEL: '185,293,243,175,64'}   # 
 SIG_HUD = '1300,745,254,0,0/520,57,208,167,118'
 # 小護士對話框：兩顆按鈕米色 + 對話框棕底（主畫面沙地 245,225,171 很像米色，所以一定要配棕底一起判斷）
 SIG_DIALOG = '948,445,229,197,155/1220,445,229,197,155/1360,300,107,70,44/1100,350,107,70,44'
-SIG_ENC_ON = '1380,630,129,6,0/1360,632,179,12,0'          # 「取消遇敵」紅龍頭（容差 50）
-SIG_ENC_OFF = '1380,630,129,6,0!/1360,632,179,12,0!'
+SIG_ENC_ON = screen_sigs.sig_str(screen_sigs.ENC_ON)             # 「取消遇敵」紅龍頭（容差 50 = screen_sigs.ENC_TOL）
+SIG_ENC_OFF = screen_sigs.sig_str(screen_sigs.ENC_ON, neg=True)
 # 戰鬥中（快速戰鬥沒有戰鬥畫面）角色頭上有綠色「VS」牌；這時傳送會被擋「非正常狀態不能傳送」
 # 傳送抵達點的固定景物（HUD 回來後再比對，對得上就不用 OCR 讀座標，省約 1 秒；對不上才 OCR）
 SIG_ARRIVE = {
@@ -116,8 +120,8 @@ def encounter_on() -> bool:
 def encounter_steps(on: bool) -> str:
     """seq：先看一次，已經是目標狀態就不點（ifnok）；不是就點引子 + 遇敵鈕，再等圖示變色"""
     sig = SIG_ENC_ON if on else SIG_ENC_OFF
-    return (f'waitpix 0 {sig} 50; ifnok {PRIMER.replace("; wait", "; ifnok wait")}; '
-            f'ifnok click {ENCOUNTER[0]} {ENCOUNTER[1]}; ifnok waitpix 1500 {sig} 50')
+    return (f'waitpix 0 {sig} {screen_sigs.ENC_TOL}; ifnok {PRIMER.replace("; wait", "; ifnok wait")}; '
+            f'ifnok click {ENCOUNTER[0]} {ENCOUNTER[1]}; ifnok waitpix 1500 {sig} {screen_sigs.ENC_TOL}')
 
 
 def encounter_done(out: str) -> bool:
@@ -236,7 +240,19 @@ def talk_nurse(p: tuple[int, int, int]) -> None:
     raise RuntimeError('點不開小護士對話框')
 
 
-def heal_trip(spot: str) -> None:
+def bars_full(out: str) -> bool:
+    """seq 輸出裡的「血條 / 魔條」兩個像素（pixel BARS）→ 滿的時候是紅 / 藍"""
+    full = False
+    for line in out.splitlines():
+        cs = line.split()
+        if len(cs) == 2 and all(c.count(',') == 2 for c in cs):
+            (hr, hg, hb), (mr, mg, mb) = (tuple(int(v) for v in c.split(',')) for c in cs)
+            full = hr > 150 and hr - hg > 60 and mb > 150 and mb - mr > 60
+    return full
+
+
+def heal_trip(spot: str, no_return: bool = False) -> None:
+    """回村補血。no_return = 補完停在醫院（不傳回練功點、不開原地遇敵；解任務單人逃跑風格用，之後由 quest.py 巡路回任務）"""
     sx, sy, spot_map = SPOTS[spot]
     t0 = last = time.time()
     seg = []
@@ -261,21 +277,39 @@ def heal_trip(spot: str) -> None:
     lap('村子走路')
     talk_nurse(p)              # 走 3 格 + 點小護士 + 對話框一出現就按「恢復氣血」
     lap('醫院補血')
+    if no_return:
+        out = gui('seq', f'waitpix 1500 {SIG_HUD}; pixel {"/".join(f"{x},{y}" for x, y in BARS)}')
+        log('血 / 魔已補滿，停在醫院（--no-return：不傳回、不開遇敵）' if bars_full(out) else f'警告：血 / 魔條看起來沒補滿（{out!r}），請檢查畫面')
+        lap('確認血條')
+        log(f'完成，耗時 {time.time() - t0:.1f} 秒（{"、".join(seg)}）')
+        return
     # 按完不等提示動畫：等 HUD 回來（對話框自己關）→ 讀血 / 魔條最右端的顏色 → 直接傳送，同一個 seq
     teleport(TAB_LEVEL, (sx, sy), spot_map, spot, want_xy=SPOT_XY.get(spot_map),
              pre=f'waitpix 1500 {SIG_HUD}; pixel {"/".join(f"{x},{y}" for x, y in BARS)}')
     out = LAST_OUT
-    full = False
-    for line in out.splitlines():
-        cs = line.split()
-        if len(cs) == 2 and all(c.count(',') == 2 for c in cs):
-            (hr, hg, hb), (mr, mg, mb) = (tuple(int(v) for v in c.split(',')) for c in cs)
-            full = hr > 150 and hr - hg > 60 and mb > 150 and mb - mr > 60
-    log('血 / 魔已補滿' if full else f'警告：血 / 魔條看起來沒補滿（{out!r}），請檢查畫面')
+    log('血 / 魔已補滿' if bars_full(out) else f'警告：血 / 魔條看起來沒補滿（{out!r}），請檢查畫面')
     lap('確認 + 傳送回去')
     set_encounter(True)
     lap('開遇敵')
     log(f'完成，耗時 {time.time() - t0:.1f} 秒（{"、".join(seg)}）')
+
+
+EXIT_VERIFY = 11     # --watch 因疑似驗證視窗暫停超過 10 分鐘，已停止（見 errlog）
+
+
+def read_vitals(last_ts=None, wait: float = 6.0, sleep=time.sleep, mono=time.monotonic):
+    """--watch 讀血 / 魔條：watch 活著就讀 state.hud（欄位年齡 ≤ 5 s；要求比 last_ts 新的一筆，最多等 wait 秒，
+    watch 每 3 s 才更新一次 HUD，所以「連續 2 次」不會讀到同一筆）；watch 不可用 / 太舊 → 退回現場 stat()。
+    → (stat 格式的 dict, 這筆的 ts 或 None = 來自 stat())"""
+    t_end = mono() + (wait if last_ts is not None else 0.0)
+    while True:
+        v = watchstate.hud_vitals(5.0, newer_than=last_ts)
+        if v:
+            return {'ok': True, 'hp': v['hp'], 'mp': v['mp'], 'hpPct': v['hpPct'], 'mpPct': v['mpPct']}, v['ts']
+        if mono() >= t_end:
+            break
+        sleep(0.5)
+    return stat(), None
 
 
 def low(s: dict, hp: int, mp: int) -> bool | None:
@@ -287,8 +321,10 @@ def low(s: dict, hp: int, mp: int) -> bool | None:
 
 
 def main() -> int:
+    winenv.enable_server()   # 長程序：WSL 預設啟用常駐 server（Windows 原生需 PSA_GUI_SERVER=1；=0 關閉）
     ap = argparse.ArgumentParser(description='回村補血再回練功點')
     ap.add_argument('--spot', default='波拉島', choices=SPOTS)
+    ap.add_argument('--no-return', action='store_true', help='補完血停在醫院，不傳回練功點、不開原地遇敵（解任務被打飛後用；不能和 --watch 併用）')
     ap.add_argument('--watch', action='store_true', help='常駐監看，血 / 魔太低就自動補')
     # 波拉島實測掉血很快：滿血到 20% 約 70 秒、25% → 1 只要一場，所以門檻抓高、間隔抓短
     ap.add_argument('--hp', type=int, default=40, help='隊長血條低於這個百分比就回村（預設 40）')
@@ -302,23 +338,30 @@ def main() -> int:
     if layout.current() not in layout.SUPPORTED:
         log(f"heal.py 不支援 {layout.current()} 版面（只量過 2880×1659、1920×1017），見 ui/layout-1920x1017.md")
         return 2
+    if a.no_return and a.watch:
+        log('--no-return 不能和 --watch 併用')
+        return 2
     if not a.watch:
-        heal_trip(a.spot)
+        heal_trip(a.spot, a.no_return)
         return 0
     log(f'監看中：血條 < {a.hp}% 或魔條 < {a.mp}%（連續 {a.confirm} 次）就回村補血（Ctrl+C 結束）')
     end = time.time() + a.duration if a.duration else None
+    vg = watchstate.VerifyGuard('heal --watch', log=log)   # watch 標出疑似驗證視窗 → 暫停動作，最多 10 分鐘（超過停止、寫 errlog，不自動恢復）
     while end is None or time.time() < end:
+        if vg.check() == 'timeout':
+            return EXIT_VERIFY
         netwatch.guard('heal')           # 網路異常提示 → 點確定；登入畫面 → 自動按登錄重登（失敗才 exit 10；不輸入帳密）
         hits = 0
+        last_ts = None
         for i in range(a.confirm):
-            s = stat()
+            s, last_ts = read_vitals(last_ts)         # watch 活著 = 讀 state.hud（0 次 stat.ps1）；否則現場 stat
             r = low(s, a.hp, a.mp)
             if a.verbose:
                 log(f'HP {s.get("hp")} ({s.get("hpPct")}%) MP {s.get("mp")} ({s.get("mpPct")}%) → {r}', act=False)
             if not r:
                 break          # 不低或讀不到：這輪不算
             hits += 1
-            if hits < a.confirm:
+            if hits < a.confirm and last_ts is None:
                 time.sleep(3)
         if hits >= a.confirm:
             log(f'血 / 魔太低（HP {s.get("hp")} {s.get("hpPct")}%，MP {s.get("mp")} {s.get("mpPct")}%），回村補血')

@@ -13,6 +13,7 @@ color: green
 規則：
 - 只用 `tools/gui/`（gui.sh、walk.py、heal.py、stat.ps1）操作；預設背景模式，不搶使用者前景。
 - 紅區（付費、丟棄、刪除管理、外掛設定、遇敵設定等）沒有使用者明確交代就不點；花石幣只在任務明確要求時做。
+- 可先用 `uv run --no-project python tools/gui/watch.py --get` 看即時狀態（參考用，不能當點擊依據；idle 不代表沒有驗證視窗；有 alerts / verify_suspect 就停手回報）。你若點切換面板卡片換了當前角色，點完執行 `uv run --no-project python tools/gui/watch.py --set-char <角色名>` 讓狀態列的人物名跟上。
 - 你是當下唯一操作遊戲的 agent；不要留常駐程序（例：heal.py --watch）在背景，除非任務明說。
 - 學到的新畫面、新流程寫進對應的 `ui/*.md` 或 `notes/`；不要 commit，除非任務明說。
 - 結束時讓遊戲回到任務指定的狀態（通常：練功點、原地遇敵開著、隊伍完整、沒有面板開著），並回報實際狀態。

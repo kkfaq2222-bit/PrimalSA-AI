@@ -91,6 +91,8 @@ Windows PowerShell 用 Win32 API（WSL 的 bash 用 `gui.sh` 包一層；Python 
 | `stat.ps1` | 背景截圖 + Windows 內建 OCR 讀 HUD → 一行 JSON（等級、HP / MP、`hpPct` / `mpPct` 血條比例、地圖座標） | 不用看圖就知道位置與血量；OCR 讀不到個位數，判斷血量用像素比例 |
 | `walk.py` | 讀座標 → `maps.bin` 通行格找路（每段 ≤ 10 格、點擊避開 UI、離牆遠一點、點擊次數少的方向優先）→ `seq` 連點 + `waitstill` → 終點 OCR 驗證 → 失敗改慢速逐段 | **走路只寫一份**：常數（每格位移、最多格數、UI 禁點範圍、換地圖後的引子點擊）集中在 walk.py；其他腳本 `import walk`。資料對不上的圖退回直線分段讓遊戲自己繞 |
 | `heal.py` | 關遇敵 → 傳送回村 → walk.py 走進醫院 → 點護士 → 傳送回練功點 → 開遇敵；`--watch` 看血條比例自動補 | 固定流程寫成腳本，全程用 waitpix 判斷，一趟約 21～24 秒（人工逐步截圖約 75 秒） |
+| 常駐 server（`serve.ps1` + `winenv.GuiServer`） | 長程序（quest / heal / petwatch / walk 主流程）呼叫 `winenv.enable_server()` 後改走常駐 PowerShell，不必每次重啟（2026-10-10 起 **WSL 預設開**；Windows 原生未量測，預設關、設 `PSA_GUI_SERVER=1` 才開；`PSA_GUI_SERVER=0` 一律關；程序結束 server 一定結束：明確 quit + kill / taskkill 保險、SIGTERM 處理、閒置 3 分鐘、殘留登記清理） | 一次性每呼叫要啟動 PowerShell（約 0.4 秒）。實測（WSL，同時段交錯）：pixel 0.59→0.09 s、stat 0.91→0.18 s、ocr `-Zooms 2..7` 4.3（舊 GetPixel）→1.1（LockBits，一次性）→0.49 s（server）。`gui.sh` 與 psa-hud 的 stat.ps1 維持一次性（psa-hud 另自動 spawn watch.py 讀 state.json）。量測用 `uv run --no-project python tools/gui/bench.py --srv-ab`（另有 `--ab` / `--server` / `--soak`，唯讀，無任務時才跑） |
+| `watch.py`（+ `watchstate.py`、psa-hud） | 常駐、零輸入的即時狀態監看：每 0.5 s 只送 `gui pixel / info -NoRestore 1`（最小化不還原視窗），每 3 s 加一次 `stat.ps1`（HUD 數值，欄位帶時間戳、被蓋住時保留舊值標 stale），寫 `tools/.cache/state.json`；psa-hud 頂端顯示狀態行與等級 / HP。畫面不認得（unknown）連續 10 s、或 quest 的「疑似驗證視窗」警報會標 `verify_suspect`；`heal.py --watch` / `petwatch.py` 見警報就暫停（10 分鐘上限後停止並寫 errlog，不自動恢復） | AI 和人都能不開截圖就知道現在的狀態；heal --watch 改讀 state.hud，watch 活著時 0 次額外 stat。**state 只供顯示 / 決定要不要再看，不能當點擊依據**（點擊前現場讀圖，idle 不代表沒有驗證視窗）。只有開 psa-hud 的 session 管理它；兩個平台同開時只有一邊即時 |
 | `mirror.sh` | 常駐 WinForms 視窗 + **DWM 縮圖**（`DwmRegisterThumbnail`，Alt+Tab 預覽同一套） | 給人看的即時畫面：幀數跟遊戲同步、CPU ≈ 0.02%（舊版每幀 PrintWindow，2 幀/秒就要 0.9%）。終端機（Windows Terminal 經 ConPTY）畫不了 kitty 圖片協定，所以不放在 Claude pane 裡。DWM 合成的畫面 PrintWindow 截不到，要驗證用 CopyFromScreen |
 | `fg <指令>` | 舊做法：拉到前景 + `SetCursorPos` + `mouse_event` / SendKeys | 背景模式失靈時的備案 |
 | `end` | 還原使用者原本的前景視窗與游標 | 用過 `fg` / `max` 後要跑；背景模式不需要（跑了也無害） |
@@ -104,6 +106,7 @@ Windows PowerShell 用 Win32 API（WSL 的 bash 用 `gui.sh` 包一層；Python 
 - DPI：先呼叫 `SetProcessDPIAware`，不然座標會偏。
 
 ### 4.2 操作迴圈
+0. （選用）`watch.py --get --max-age 2` 看即時狀態當參考（不能當點擊依據，見上表 `watch.py`）；有警報就停手回報。
 1. `shot` → 看圖，先判斷**現在在哪個畫面**（主畫面 / 面板 / 對話 / 戰鬥 / 驗證）。
 2. **陌生畫面**：一次只做一個動作，`seq "click X Y; wait 400; shot"`，看完再決定下一步。
 3. **已知流程**：把多個動作串成一個 `seq`，只在**分歧點**和**結尾**截圖。

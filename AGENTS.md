@@ -29,10 +29,11 @@ PrimalSA-AI/
     schemadump/        SchemaDump.cs：從 HotUpdate.dll 抽 Tabtoy 欄位對照與列舉（ReflectionOnly，不執行遊戲程式）
     query/psa.py       知識庫查詢工具（搜尋、交叉查詢、跨地圖路線、通行格）
     gui/gui.sh         遊戲畫面操作（截圖、點擊、拖曳、按鍵）；用法與按鈕地圖見 .claude/skills/psa-game-ui/
+                       watch.py（零輸入即時狀態監看 → tools/.cache/state.json，psa-hud 啟動；state 只供顯示，不能當點擊依據）、serve.ps1（常駐 server，winenv.GuiServer 啟動；WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）、bench.py（唯讀量測 / soak）、test_*（離線測試）
     web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
     .cache/            匯出時的暫存（HotUpdate.dll 等），可刪
 ```
-網站：Cloudflare Pages 專案 `psa-wiki`（https://psa-wiki.pages.dev/），只上傳 site/；原始碼在 GitHub 公開 repo https://github.com/dk880842/PrimalSA-AI（2026-10-09 起公開）。因為是公開的：不要 commit 帳號機密、角色私人資訊、`notes/` 遊玩紀錄；`GameClient/` 不進 repo。`.gitignore` 排除 `GameClient/`、`tools/.cache/`、`site/`、`notes/`。
+網站：Cloudflare Pages 專案 `psa-wiki`（https://psa-wiki.pages.dev/），只上傳 site/；原始碼在 GitHub 私有 repo https://github.com/dk880842/PrimalSA-AI（2026-10-09～10-10 曾公開，2026-10-10 改回私有；曾有 1 個 fork）。仍照公開標準：不要 commit 帳號機密、角色私人資訊、`notes/` 遊玩紀錄；`GameClient/` 不進 repo。`.gitignore` 排除 `GameClient/`、`tools/.cache/`、`site/`、`notes/`。
 
 ## 3. 鐵則（必須遵守）
 1. **`GameClient/` 是唯讀的**：不得新增、修改、刪除、搬移、重新命名其中任何檔案或資料夾，也不要把任何輸出寫進去。
@@ -98,11 +99,13 @@ PrimalSA-AI/
 操作前先讀 `.claude/skills/psa-game-ui/SKILL.md`（工具用法、操作迴圈、紅區）與同資料夾 `ui/README.md`（功能索引；按鈕座標、各面板內容依功能拆檔）。
 工具：`bash tools/gui/gui.sh shot|click|drag|key|info|max|end`（WSL / Git Bash 手打用）；走路 / 補血用 `uv run --no-project python tools/gui/walk.py ...`、`heal.py`（兩邊指令相同）。座標用截圖座標；預設背景操作（不搶前景，點擊時游標瞬移約 0.15 秒）；用過 `fg` / `max` 後要跑 `end` 把前景還給使用者。
 
+**即時狀態**：開著 psa-hud 時有 `watch.py` 在背景零輸入監看（只送 pixel / info / stat），`uv run --no-project python tools/gui/watch.py --get` 可讀；它只是參考，點擊前仍要現場讀圖，`idle` 不代表沒有驗證視窗；出現 `verify_suspect` / alerts 就依鐵則 5 停手通知。只有開 psa-hud 的那個 session 管理它，兩個平台同時開 session 時只有一邊有即時狀態。
+
 ## 5.2 在 Claude 桌面 App（Windows 原生）執行
 專案也可以用 Claude 桌面 App 的 Claude Code 開（路徑 `C:\games\PrimalSA-AI`，shell 是 Git Bash，沒有 wslpath、沒有 /mnt/c）。工具已兼容，差異如下：
 - **前置**：安裝 uv for Windows：`winget install astral-sh.uv`（Python 由 uv 自動管理）。`powershell.exe`（Windows PowerShell 5.1）系統內建。
 - **指令**：`uv run --no-project python tools/gui/walk.py ...`、`heal.py`、`tools/query/psa.py` 與 WSL 完全相同；`bash tools/gui/gui.sh ...` 在 Git Bash 也能用（用 cygpath 換路徑）。
-- **psa-hud mod**：stat.ps1 路徑由 session cwd 推算，不用改程式。載入方式在使用者層級設定（不放進專案）：Windows 版的 `CLAUDE_CODE_PLUGIN_DIRS` 設成 `C:\games\PrimalSA-AI\tools\mods\psa-hud`（WSL 版是 `/mnt/c/games/PrimalSA-AI/tools/mods/psa-hud`；兩邊各有自己的 settings.json）。
+- **psa-hud mod**：stat.ps1 / watch.py 路徑由 session cwd 推算，不用改程式；session.start 會自動 spawn `tools/gui/watch.py`（即時狀態 → `tools/.cache/state.json`，pane 頂端顯示狀態行；`/psa-hud watch on|off` 開關）。載入方式在使用者層級設定（不放進專案）：Windows 版的 `CLAUDE_CODE_PLUGIN_DIRS` 設成 `C:\games\PrimalSA-AI\tools\mods\psa-hud`（WSL 版是 `/mnt/c/games/PrimalSA-AI/tools/mods/psa-hud`；兩邊各有自己的 settings.json）。
 - 其他：Windows 原生 Python 的 stdout 預設 cp950，walk.py 已自行改成 UTF-8；自己寫 Python 呼叫 gui.ps1 時用 `winenv.run_ps()`。
 - 紅區、背景操作、驗證視窗等規則與 WSL 相同。
 - 實測狀態：WSL 完整驗證；Windows 原生用 Windows 版 Python 驗過 `walk.py --plan`、`gui info / shot / pixel`、`stat.ps1`（Git Bash 環境本身未實測）。
@@ -120,6 +123,7 @@ PrimalSA-AI/
    uv run --no-project python tools/query/psa.py pet 烏力           # 成長檔 / 屬性 / 技能 / 取得
    uv run --no-project python tools/query/psa.py npc 老村長         # 位置 / 販售 / 腳本對話 / 任務
    uv run --no-project python tools/query/psa.py map 1000           # NPC / 出口 / 入口
+   uv run --no-project python tools/query/psa.py steps 2031         # 任務每一步：NPC @ 座標、對話 / 戰鬥 / 打怪（單人逃跑解任務用）
    uv run --no-project python tools/query/psa.py route 1000 92 99 1006   # 跨地圖路線（只算地圖出口）
    uv run --no-project python tools/query/psa.py grid 1000 92 99 10      # 座標附近通行格
    ```

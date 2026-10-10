@@ -10,6 +10,7 @@
   map   <名稱|ID>                      地圖詳情：大小、NPC、出口、哪些地圖通到這裡
   skill <名稱|ID>                      技能詳情（SkillBattle），以及哪些寵物天生有、哪個 NPC 教
   task  <名稱|ID>                      任務詳情
+  steps <任務組ID|任務名>              任務每一步分類：NPC @ 地圖座標、對話 / 戰鬥 / 打怪、判斷依據（解任務逃跑風格用）
   route <起點地圖> <x> <y> <終點地圖> [x y]   跨地圖路線（只算地圖出口，不含付費傳送 / 交通 NPC）
   grid  <地圖> <x> <y> [半徑=15]        印出座標附近通行格：. 可走  ~ 水/懸崖  # 障礙  (空白) 無地面  @ 目標  N NPC  W 出口
   petimg <名稱|ID>                     寵物圖檔路徑（頭像 / 靜態圖，猜謎比對用；先跑 tools/extract/pet_images.py 匯出）
@@ -243,6 +244,54 @@ def cmd_task(key):
         n = by_id('Npc').get(r.get(k))
         if n: print('%s：%s(%d) @ %s' % (k, nm(n), n['ID'], pos(n.get('map'), n.get('x'), n.get('y'))))
 
+# 解任務步驟分類（單人逃跑風格用）：戰鬥步 = 該步 endScript 的 NpcScript func 為 taskBattle / fightBattle，或 Task.type == 4（BATTLE）。
+# 2024 龍的巢穴資料是 taskBattle 但實際沒打，所以語意是「可能戰鬥」，一律當戰鬥處理。type == 2（MONSTER）= 打怪步（不能逃，需人工規劃）。
+BATTLE_FUNCS = ('taskBattle', 'fightBattle')
+
+def classify_step(t):
+    """一個 Task 列 → (類別 'talk'|'battle'|'monster', 依據文字)"""
+    sc = by_id('NpcScript').get(t.get('endScript'))
+    func = ((sc or {}).get('script') or {}).get('func')
+    ty = t.get('type')
+    if ty == 2:
+        return 'monster', 'type=2(MONSTER)' + (' condition=%s' % json.dumps(t.get('condition'), ensure_ascii=False) if t.get('condition') else '')
+    if func in BATTLE_FUNCS:
+        return 'battle', 'func=%s group=%s' % (func, sc['script'].get('group')) + (' type=4' if ty == 4 else '')
+    if ty == 4:
+        return 'battle', 'type=4(BATTLE)'
+    return 'talk', 'func=%s type=%s' % (func, ty)
+
+def task_steps(key):
+    """任務組 ID 或任務名 → (group, [Task 列依 step 排序])；名稱不唯一時回傳第一組，其他組放第三個值"""
+    rows = T('Task')
+    if re.fullmatch(r'\d+', key) and any(r.get('group') == int(key) for r in rows):
+        g = int(key); others = []
+    else:
+        rs = resolve('Task', key)
+        if not rs: return None, [], []
+        gs = []
+        for r in rs:
+            if r['group'] not in gs: gs.append(r['group'])
+        g, others = gs[0], gs[1:]
+    return g, sorted((r for r in rows if r.get('group') == g), key=lambda r: r.get('step', 0)), others
+
+def cmd_steps(key):
+    g, ts, others = task_steps(key)
+    if not ts: print('找不到：%s' % key); return
+    print('任務組 %s：%s（%d 步）' % (g, nm(ts[0]), len(ts)))
+    if others: print('其他同名組：%s' % '、'.join(map(str, others[:10])))
+    kind = {'talk': '對話', 'battle': '戰鬥', 'monster': '打怪(人工)'}
+    for t in ts:
+        c, why = classify_step(t)
+        n = by_id('Npc').get(t.get('endNpc'))
+        where = '%s(%s) @ %s' % (nm(n), n['ID'], pos(n.get('map'), n.get('x'), n.get('y'))) if n else '（無 endNpc）'
+        extra = ''
+        if t.get('startNpc'):
+            sn = by_id('Npc').get(t['startNpc'])
+            if sn: extra = '；接任務 %s(%s) @ %s' % (nm(sn), sn['ID'], pos(sn.get('map'), sn.get('x'), sn.get('y')))
+        note = ' ※類型%s非一般對話，需人工確認' % t.get('type') if c == 'talk' and t.get('type') not in (1, None) else ''
+        print('%s 步 %d [%s] %s  | %s | %s%s%s' % (t.get('step'), t['ID'], kind[c], where, why, clean(t.get('explandTn') or t.get('explandCn')), extra, note))
+
 def cmd_raw(table, key):
     r = by_id(table).get(int(key) if key.lstrip('-').isdigit() else key)
     print(json.dumps(r, ensure_ascii=False, indent=1) if r else '找不到')
@@ -393,6 +442,7 @@ def main():
     elif c == 'map': cmd_map(key)
     elif c == 'skill': cmd_skill(key)
     elif c == 'task': cmd_task(key)
+    elif c == 'steps': cmd_steps(key)
     elif c == 'route': cmd_route(rest)
     elif c == 'grid': cmd_grid(rest)
     elif c == 'petimg':

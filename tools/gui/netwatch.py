@@ -21,6 +21,7 @@ netwatch.json（連續失敗計數）、netwatch.act.lock（動作鎖：同時�
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -29,8 +30,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import actlog  # noqa: E402
 import errlog  # noqa: E402
 import layout  # noqa: E402
+import screen_sigs  # noqa: E402
 import winenv  # noqa: E402
 from walk import gui, log  # noqa: E402
+
+PS_TIMEOUT = 40                      # 單次 PowerShell 呼叫上限（秒）；逾時當讀取失敗
+READ_FAIL_MAX = 5                    # 登入畫面連續 N 輪讀不到帳密欄 / 遊戲畫面 → halt
 
 CACHE = Path(__file__).resolve().parents[1] / '.cache'
 HALT = CACHE / 'netwatch.halt'
@@ -41,15 +46,14 @@ WATCH_LOCK = CACHE / 'netwatch.lock'
 EXIT_HALT = 10
 EXIT_FATAL = 11
 MAX_FAILS = 3
-TOL = 25
+TOL = screen_sigs.NET_TOL
 
 # ---- 特徵（2880×1659 版面，截圖座標；2026-10-10 實測）----
 CONFIRM = (715, 557)                 # 提示視窗唯一的藍色「確定」
 # 米色「提示」視窗：左右 + 按鈕列兩側是米色（兩顆鈕的對話框兩側會是藍 / 米，所以左右 600 / 830 也要米色）、中間按鈕是藍
-SIG_DIALOG = ('520,570,245,217,179/880,570,245,217,179/600,300,243,213,175/600,557,243,213,175/'
-              '830,557,243,213,175/640,557,61,106,167')
+SIG_DIALOG = screen_sigs.sig_str(screen_sigs.NET_DIALOG)
 # 登入畫面：登錄鈕橘、註冊鈕藍、面板米色
-SIG_LOGIN = '500,570,179,127,63/760,565,93,137,187/440,520,243,217,179'
+SIG_LOGIN = screen_sigs.sig_str(screen_sigs.NET_LOGIN)
 MSG_BOX = (585, 370, 260, 40)        # 提示視窗訊息文字（OCR 輔助確認，白字深邊）
 MSG_KEYS = ('網', '路', '異', '重', '連')
 LOGIN_BOX = (460, 380, 520, 130)     # 登入畫面「帳號 / 密碼」標籤（只讀標籤，不讀欄位內容）
@@ -60,7 +64,7 @@ ACCT_BOX = (700, 900, 400, 425)      # 帳號欄 x0,x1,y0,y1（只數深色像�
 PWD_BOX = (690, 880, 484, 502)       # 密碼欄（星號）
 ALL_LOGIN_BTN = (740, 640)           # 選擇角色面板「一鍵全登」
 # 選擇角色面板：全登鈕橘、面板米色、右上紅 X、角色列棕
-SIG_CHARSEL = '640,640,197,134,70/500,250,241,213,179/1186,190,196,72,48/350,330,169,117,70'
+SIG_CHARSEL = screen_sigs.sig_str(screen_sigs.NET_CHARSEL)
 SWITCH_ALL_BTN = (716, 578)          # 切換角色面板「全部登錄」
 QUICK_TEAM_SEQ = ('click 520 578; wait 500; click 549 320; wait 400; click 549 520; wait 150; click 682 520; wait 150; '
                   'click 815 520; wait 150; click 948 520; wait 300; click 720 665; wait 1500')
@@ -79,10 +83,48 @@ def _scale_sig(sig: str) -> str:
     return '/'.join(out)
 
 
-def _match(sig: str) -> bool:
-    """用 waitpix 單次檢查（逾時 0）；回傳是否全部符合"""
-    out = gui('seq', f'waitpix 0 {_scale_sig(sig)} {TOL}')
-    return out.strip().startswith('ok')
+# ---- 讀取失敗追蹤（errlog 限頻：同一段連續失敗只記一筆，恢復後補 fix；psa-hud 會顯示 errlog，不能洗版）----
+_fail_id: list = []                  # 目前這段連續失敗對應的 errlog id（空 = 沒在失敗中）
+
+
+def _read_failed(what: str) -> None:
+    if not _fail_id:
+        _fail_id.append(errlog.add(f'netwatch 讀不到遊戲畫面（{what}：PowerShell 失敗 / 截圖失敗 / 輸出異常），暫不判斷、不點擊',
+                                   source='netwatch'))
+
+
+def _read_ok() -> None:
+    if _fail_id:
+        i = _fail_id.pop()
+        if i is not None:
+            errlog.fix(i, '已恢復（下一次讀取成功）')
+
+
+def _ps(*args: str) -> tuple[int, str]:
+    """直接呼叫 gui.ps1，回 (returncode, 輸出)。逾時 / 無法執行 → (-1, '')。
+    （walk.gui 只回字串、丟掉 returncode，這裡才分得出 PS 失敗與「沒符合」）"""
+    try:
+        r = winenv.run_ps('gui.ps1', *args, timeout=PS_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return -1, ''
+    return r.returncode, (r.stdout.strip() or r.stderr.strip())
+
+
+def _match(sig: str) -> bool | None:
+    """用 waitpix 單次檢查（逾時 0）。三態：True = 全部符合；False = 確定不符合（timeout）；
+    None = 讀不到（rc≠0、空輸出、pwfail、其他）— 已重試一次。呼叫端 None 時不點、不宣告成功。"""
+    for _ in range(2):
+        rc, out = _ps('seq', f'waitpix 0 {_scale_sig(sig)} {TOL}')
+        lines = out.splitlines()
+        head = lines[-1].split()[0] if rc == 0 and lines and lines[-1].split() else ''
+        if head == 'ok':
+            _read_ok()
+            return True
+        if head == 'timeout':
+            _read_ok()
+            return False
+    _read_failed('waitpix')
+    return None
 
 
 def _ocr(box, *opts) -> list:
@@ -99,19 +141,20 @@ def hud_ok() -> bool:
     from walk import stat
     s = stat()
     # stat.ps1 在登入畫面也回 ok:true（全空欄位），所以要求讀得到地圖座標或等級，且不是登入畫面
-    return bool(s.get('ok') and (s.get('pos') or s.get('level'))) and not _match(SIG_LOGIN)
+    # _match 讀不到（None）時不確定是不是登入畫面 → 當作 HUD 沒到，不宣告成功
+    return bool(s.get('ok') and (s.get('pos') or s.get('level'))) and _match(SIG_LOGIN) is False
 
 
 def detect() -> str | None:
     """'dialog'（網路異常提示）/ 'login'（登入畫面）/ None。不點任何東西。
     提示視窗：像素特徵符合 → OCR 訊息若讀到文字卻不含 網路異常 相關字，就當成別種提示（不亂點）；OCR 讀不到則信任像素。"""
-    if _match(SIG_DIALOG):
+    if _match(SIG_DIALOG) is True:          # None（讀不到）當「不是對話框」往下判斷
         txt = ''.join(_ocr(MSG_BOX, '-Light', 200, '-Zooms', '2,3'))
         if txt and not any(k in txt for k in MSG_KEYS):
             log(f'netwatch：像素像提示視窗，但訊息是「{txt}」不是網路異常，不處理', act=False)
             return None
         return 'dialog'
-    if _match(SIG_LOGIN):
+    if _match(SIG_LOGIN) is True:
         return 'login'
     return None
 
@@ -159,24 +202,40 @@ def _release(lock: Path) -> None:
         pass
 
 
-def _dark_count(box) -> int:
-    """欄位框內的深棕色（文字 / 星號）像素數；只看有沒有字，不讀內容"""
+def _dark_count(box) -> int | None:
+    """欄位框內的深棕色（文字 / 星號）像素數；只看有沒有字，不讀內容。
+    PS 失敗或回傳點數少於預期（讀不完整）→ 重試一次，仍失敗回 None（不是 0，0 代表「確定是空的」）"""
     x0, x1, y0, y1 = box
-    pts = ' '.join(f'{x},{y}' for y in range(y0, y1, 3) for x in range(x0, x1, 3))
-    n = 0
-    for p in gui('pixel', pts).split():
-        try:
-            r, g, _ = (int(v) for v in p.split(','))
-        except ValueError:
-            continue
-        if r < 130 and g < 90:
-            n += 1
-    return n
+    coords = [(x, y) for y in range(y0, y1, 3) for x in range(x0, x1, 3)]
+    pts = ' '.join(f'{x},{y}' for x, y in coords)
+    for _ in range(2):
+        rc, out = _ps('pixel', pts)
+        vals = []
+        for p in out.split():
+            try:
+                r, g, _b = (int(v) for v in p.split(','))
+            except ValueError:
+                continue
+            vals.append((r, g))
+        if rc == 0 and len(vals) == len(coords):
+            _read_ok()
+            return sum(1 for r, g in vals if r < 130 and g < 90)
+    _read_failed('pixel')
+    return None
 
 
-def login_fields_filled() -> bool:
-    """帳號、密碼欄都有內容（遊戲自動帶入）；兩欄任一空就回 False（絕不自己填）"""
-    return _dark_count(ACCT_BOX) >= 10 and _dark_count(PWD_BOX) >= 10
+def login_fields_filled() -> bool | None:
+    """帳號、密碼欄都有內容（遊戲自動帶入）。True = 都有；False = 確定有一欄是空的（絕不自己填）；
+    None = 讀不到（不能當成「空」halt，由 relogin 重試、有次數上限）"""
+    a = _dark_count(ACCT_BOX)
+    if a is None:
+        return None
+    if a < 10:
+        return False
+    p = _dark_count(PWD_BOX)
+    if p is None:
+        return None
+    return p >= 10
 
 
 def halt(reason: str, src: str) -> dict:
@@ -270,7 +329,19 @@ def relogin(src: str) -> dict:
         st = _load()
         if st.get('login_fails', 0) >= MAX_FAILS:
             return halt(f'連續 {MAX_FAILS} 次登錄失敗', src) | {'status': 'fatal'}
-        if not login_fields_filled():
+        filled = login_fields_filled()
+        if filled is None:
+            # 讀取失敗：不點登錄、不以「欄位空」halt；下輪再試，連續 READ_FAIL_MAX 輪讀不到才 halt
+            st['read_fails'] = st.get('read_fails', 0) + 1
+            _save(st)
+            if st['read_fails'] >= READ_FAIL_MAX:
+                return halt(f'連續 {READ_FAIL_MAX} 輪讀不到帳密欄 / 遊戲畫面（不是欄位空）', src)
+            log(f'netwatch：登入畫面讀不到帳密欄（{st["read_fails"]}/{READ_FAIL_MAX}），本輪不點登錄')
+            return {'status': 'ok', 'failed': True}
+        if st.get('read_fails'):
+            st['read_fails'] = 0
+            _save(st)
+        if not filled:
             return halt('登入畫面的帳號 / 密碼欄是空的（遊戲沒自動帶入），不自己填', src)
         i = errlog.add('斷線回到登入畫面，自動按「登錄」重新登入（使用者授權）', source=src)
         log('netwatch：登入畫面，帳密欄已有內容 → 按登錄')
@@ -290,14 +361,14 @@ def relogin(src: str) -> dict:
                 log(f'netwatch：登錄成功，{int(time.time() - t0)} 秒回到遊戲')
                 time.sleep(2)
                 return {'status': 'reconnected', 'relogin': True, 'recover': recover(src, True, True)}
-            if _match(SIG_CHARSEL):
+            if _match(SIG_CHARSEL) is True:
                 if picked >= 2:
                     break
                 picked += 1
                 log('netwatch：選擇角色面板 → 一鍵全登')
                 gui('click', str(ALL_LOGIN_BTN[0]), str(ALL_LOGIN_BTN[1]), note='一鍵全登')
                 continue
-            if _match(SIG_DIALOG):
+            if _match(SIG_DIALOG) is True:
                 # 登錄後的提示視窗（密碼錯誤 / 封停 / 維護 / 驗證…）：不點、不重試
                 return halt('登錄後出現提示視窗（可能是密碼錯誤 / 封停 / 維護 / 驗證），不處理', src)
         st['login_fails'] = st.get('login_fails', 0) + 1
@@ -335,16 +406,16 @@ def check_and_reconnect(shot=None, src: str = 'netwatch', encounter: bool = True
         deadline = time.time() + 45
         while time.time() < deadline:
             time.sleep(2)
-            if _match(SIG_LOGIN):
+            if _match(SIG_LOGIN) is True:
                 _release(ACT_LOCK)                  # relogin 自己會拿鎖
                 return relogin(src)
-            if hud_ok() and not _match(SIG_DIALOG):
+            if hud_ok() and _match(SIG_DIALOG) is False:     # 讀不到（None）不宣告成功
                 st['fails'] = 0
                 _save(st)
                 errlog.fix(i, '點確定後回到遊戲，已做恢復檢查（netwatch.py）')
                 log('netwatch：重連成功，回到遊戲')
                 return {'status': 'reconnected', 'recover': recover(src, encounter, team)}
-            if _match(SIG_DIALOG):
+            if _match(SIG_DIALOG) is True:
                 gui('click', str(CONFIRM[0]), str(CONFIRM[1]), note='網路異常→確定（再按）')
         st['fails'] = st.get('fails', 0) + 1
         _save(st)

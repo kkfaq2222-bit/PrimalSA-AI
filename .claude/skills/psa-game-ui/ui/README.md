@@ -11,12 +11,13 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | 1920×1017 版面座標（主畫面、換算規則） | [layout-1920x1017.md](layout-1920x1017.md) | — | 主畫面實測，其他面板待量 |
 | 人物資訊（屬性、抗性、潛力點） | [role.md](role.md) | 頭像 119,68 | 實測 |
 | 切換角色、**快速組隊**、組隊面板、**解散隊伍** | [team.md](team.md) | 切換 763,760／組隊 850,760 | 實測（組隊、解散都成功） |
-| 任務面板、任務詳情、**自動巡路 / 解任務監測 quest.py（--task、黃色問號、追蹤列表 OCR）** | [quest.md](quest.md) | 左側 148,236／詳情 368,328／追蹤 205,325 | 實測（成人儀式） |
+| 任務面板、任務詳情、**自動巡路 / 解任務監測 quest.py（--task、黃色問號、追蹤列表 OCR；--solo / --fight 單人逃跑、完整戰鬥逃跑鈕 1283,168 / 自動戰鬥鈕 1380,600）** | [quest.md](quest.md) | 左側 148,236／詳情 368,328／追蹤 205,325 | 實測（成人儀式） |
 | 背包、倉庫、材料圖鑑 | [bag.md](bag.md) | 背包 1120,760 | 實測 |
 | 寵物面板（出戰 / 騎乘 / 休息、技能、成長） | [pet.md](pet.md) | 寵物頭像 318,80 | 實測（設定出戰、騎乘） |
 | 地圖傳送（大陸／練級／便捷／英雄戰場） | [transfer.md](transfer.md) | 圓形傳送鈕 1340,65 | 實測（練級傳送實際等級門檻已全測） |
 | 設置（聲音、畫面、其他、聊天） | [setting.md](setting.md) | 設置 1210,760 | 只看過 |
 | 外掛 ASS（自動戰鬥、補血、抓寵） | [ass.md](ass.md) | 外掛 1300,760 | 只看過，未改設定 |
+| **開始練功完整流程**（依等級選點 → 傳送 → 遇敵 → 5 人戰鬥設定） | `/psa-grind-start` skill（`../psa-grind-start/SKILL.md`） | — | 步驟 1、4、6 已驗證 |
 | 聊天、信件、通知 | [social.md](social.md) | 95/178/260,583 | 實測 |
 | 排行榜、家族 | [social.md](social.md) | 940,760／1030,760 | 只看過 |
 | 商城、贊助、交易所、LuckyCard（多為紅區） | [shop.md](shop.md) | 上排 605～880,70 | 只看過 |
@@ -26,6 +27,8 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 ## 依情境找
 | 想做的事 | 去哪 |
 |---|---|
+| 不碰遊戲就看目前狀態（畫面種類、等級 / HP、疑似驗證警報） | `uv run --no-project python tools/gui/watch.py --get`（需 psa-hud 在跑；僅供參考，不能當點擊依據；說明見 [../SKILL.md](../SKILL.md)「即時狀態監看」） |
+| 單人逃跑解任務（跑 NPC → 組隊 → 對話 / 打；紅暴 2031） | `/psa-quest-solo` skill（介面 / 逃跑鈕座標見 [quest.md](quest.md#單人逃跑解任務questpy---solo----fight2026-10-10流程見-psa-quest-solo-skill)） |
 | 5 個角色組成一隊 | `/psa-quick-team` skill（介面參考 [team.md](team.md#快速組隊)） |
 | 解散隊伍 | `/psa-disband-team` skill（介面參考 [team.md](team.md#解散隊伍)） |
 | 面板 ESC 關不掉 | [home.md](home.md#關閉方式) |
@@ -42,7 +45,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | 出現要選答案的視窗 | [todo.md](todo.md#答題驗證) → 停手通知使用者 |
 
 ## 新增 / 更新規則
-- 驗證過、會重複執行的流程拆成獨立 skill（`.claude/skills/psa-<流程>/SKILL.md`），功能檔與兩邊索引改成引用它。目前有：`psa-quick-team`、`psa-disband-team`。
+- 驗證過、會重複執行的流程拆成獨立 skill（`.claude/skills/psa-<流程>/SKILL.md`），功能檔與兩邊索引改成引用它。目前有：`psa-quick-team`、`psa-disband-team`、`psa-grind-start`、`psa-quest-solo`。
 - 一個功能（或一組相關面板）一個檔；新檔要加進上面兩張表。
 - 每檔開頭放座標基準說明；寫「入口」→「畫面內容」→「操作步驟」→「注意 / 失敗訊息」。
 - 沒實測的寫「未實測」或「推測」，實測後改掉並更新索引的「狀態」欄。

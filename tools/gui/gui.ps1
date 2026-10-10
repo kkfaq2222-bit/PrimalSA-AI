@@ -14,6 +14,8 @@
 #   gui.ps1 waitstill <逾時毫秒> [開始等待毫秒]  點地面走路後等鏡頭停下來（印 still / nomove / timeout 毫秒）
 #   gui.ps1 ifok / ifnok <指令> ...   上一個 waitpix 成功 / 失敗才執行（seq 用），例：seq "click 462 335; waitpix 1500 948,445,229,197,155; ifok click 948 460"
 #   gui.ps1 seq "<動作>; <動作>; ..."  同一個行程連續執行多個動作，例：seq "click 763 760; wait 300; shot C:\\x.png"
+#   -NoRestore 1                      遇到遊戲視窗最小化時不還原（預設會 SW_SHOWNOACTIVATE 還原並等 0.8 秒）：印 minimized、exit 3。
+#                                     只給唯讀監看（watch.py 的 pixel / info）用；送輸入的指令不要帶
 #   -Note "用途"                       任何指令後面可加，附註寫進操作 log（gui.sh 用環境變數 PSA_NOTE）
 #   操作 log：click / dclick / drag / key / max / end 會寫一行到 tools/.cache/actions.log（只留最新 100 行，psa-hud pane 顯示）；shot / pixel / wait* 不記
 #   gui.ps1 fg <指令> ...             用舊的前景模式執行（背景模式失靈時的備案），例：fg click 763 760、seq "fg; click ..."
@@ -28,7 +30,7 @@
 #   - 鍵盤：PostMessage WM_KEYDOWN / WM_CHAR / WM_KEYUP，游標完全不動。
 # fg 模式：任務期間第一次 click / drag / key 時記下使用者原本的前景視窗與游標（存 tools/.cache/gui-session.txt），
 #          把遊戲拉到前景並一直留著；任務做完呼叫 end 才還原。
-param([string]$Cmd, [string]$A1, [string]$A2, [string]$A3, [string]$A4, [string]$A5, [double]$Scale = 2, [string]$Note = '')
+param([string]$Cmd, [string]$A1, [string]$A2, [string]$A3, [string]$A4, [string]$A5, [double]$Scale = 2, [string]$Note = '', [string]$NoRestore = '0')
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8  # 讓 WSL 收到的中文不變亂碼
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type @"
@@ -46,6 +48,8 @@ public class W {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, IntPtr e);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+  [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")] public static extern uint GetWindowPid(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
   [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
   [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "PostMessageW")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
@@ -67,9 +71,16 @@ public class Guard {
   [DllImport("user32.dll")] static extern bool PostThreadMessage(uint tid, uint m, IntPtr w, IntPtr l);
   [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandle(string n);
   [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] static extern UIntPtr SetTimer(IntPtr h, UIntPtr id, uint ms, IntPtr p);
   public struct MSG { public IntPtr h; public uint m; public IntPtr w, l; public uint t; public int x, y; }
-  static HookProc proc; static IntPtr hook; static uint tid; static System.Threading.Thread th;
+  // 每條鉤子執行緒各有自己的 Inst（hook / tid / proc 都是實例欄位）：自己裝、自己拆，
+  // 下一次 Start 不會覆蓋上一條的狀態；Stop 只對自己啟動的那條送 WM_QUIT。
+  class Inst { public HookProc proc; public IntPtr hook; public uint tid; public System.Threading.Thread th; }
+  static Inst cur;
   public static int Swallowed;
+  public static int JoinTimeouts;   // Stop() Join 逾時的累計次數（gui.ps1 讀了寫 actions.log）
+  public static int AutoUnhooked;   // 逾時自動解除（沒人呼叫 Stop）的累計次數
+  public const int MaxLifeMs = 2000;   // 鉤子最多活 2 秒，之後自己 Unhook
   static IntPtr Cb(int n, IntPtr w, IntPtr l) {
     if (n >= 0) {
       int flags = System.Runtime.InteropServices.Marshal.ReadInt32(l, 12);   // MSLLHOOKSTRUCT.flags
@@ -77,31 +88,63 @@ public class Guard {
       // 0x0202 / 0x0205 / 0x0208 = 左 / 右 / 中鍵放開
       if ((flags & 1) == 0 && m != 0x0202 && m != 0x0205 && m != 0x0208) { Swallowed++; return (IntPtr)1; }
     }
-    return CallNextHookEx(hook, n, w, l);
+    return CallNextHookEx(IntPtr.Zero, n, w, l);   // 低階鉤子 hhk 參數會被忽略，不用依賴 static hook
   }
   public static void Start() {
+    if (cur != null) Stop();   // 上一條還沒收就先收掉，避免鉤子累積
     Swallowed = 0;
+    var inst = new Inst(); cur = inst;
     var ready = new System.Threading.ManualResetEvent(false);
-    th = new System.Threading.Thread(delegate() {
-      tid = GetCurrentThreadId(); proc = Cb;
-      hook = SetWindowsHookEx(14, proc, GetModuleHandle(null), 0);   // WH_MOUSE_LL
+    inst.th = new System.Threading.Thread(delegate() {
+      inst.tid = GetCurrentThreadId(); inst.proc = Cb;
+      inst.hook = SetWindowsHookEx(14, inst.proc, GetModuleHandle(null), 0);   // WH_MOUSE_LL
+      SetTimer(IntPtr.Zero, UIntPtr.Zero, (uint)MaxLifeMs, IntPtr.Zero);   // 到時間丟 WM_TIMER 讓迴圈結束
       ready.Set();
-      MSG msg; while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) { }   // 低階鉤子要有訊息迴圈
-      UnhookWindowsHookEx(hook);
+      MSG msg;
+      while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {   // 低階鉤子要有訊息迴圈
+        if (msg.m == 0x0113) { AutoUnhooked++; break; }   // WM_TIMER：逾時自動解除
+      }
+      if (inst.hook != IntPtr.Zero) UnhookWindowsHookEx(inst.hook);   // 自己裝的自己拆（區域 inst，不會拆到別條）
     });
-    th.IsBackground = true; th.Start(); ready.WaitOne(1000);
+    inst.th.IsBackground = true; inst.th.Start(); ready.WaitOne(1000);
   }
-  public static void Stop() { if (th == null) return; PostThreadMessage(tid, 0x0012, IntPtr.Zero, IntPtr.Zero); th.Join(500); th = null; }   // WM_QUIT
+  // 回傳 false = Join 逾時（執行緒還沒收完，但它之後仍會自己拆自己的鉤子）
+  public static bool Stop() {
+    var inst = cur; cur = null;
+    if (inst == null) return true;
+    PostThreadMessage(inst.tid, 0x0012, IntPtr.Zero, IntPtr.Zero);   // WM_QUIT
+    bool ok = inst.th.Join(500);
+    if (!ok) JoinTimeouts++;
+    return ok;
+  }
 }
 "@
 [W]::SetProcessDPIAware() | Out-Null
-$proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
-# 同時開多個客戶端時，用環境變數 PSA_EXE_MATCH（路徑片段，例：PrimalSA222）指定要操作哪一個
-if ($env:PSA_EXE_MATCH) { $proc = @($proc | Where-Object { $_.Path -like "*$($env:PSA_EXE_MATCH)*" }) | Select-Object -First 1 }
-if (-not $proc) { Write-Error "PrimalSA 沒有在執行"; exit 1 }
-$h = $proc.MainWindowHandle
+# 視窗 handle 快取（只給唯讀的 pixel / info 用；常駐 serve.ps1 以 & 呼叫、同一 runspace，$global: 跨次保留；一次性執行每次新行程，等於沒快取）。
+# 命中條件：IsWindow 且該視窗所屬行程 PID == 快取的 PrimalSA PID（防 handle 被回收給別的視窗）；任一不符就重查（Get-Process 約 27 ms）。
+# click / key 等輸入指令一律不用快取，每次重查，確保不會把輸入送到錯的視窗。
+$h = [IntPtr]::Zero
+if (($Cmd -eq 'pixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:__psa_pid) {
+  $__psa_wp = [uint32]0
+  if ([W]::IsWindow([IntPtr]$global:__psa_hwnd)) {
+    [W]::GetWindowPid([IntPtr]$global:__psa_hwnd, [ref]$__psa_wp) | Out-Null
+    if ($__psa_wp -eq [uint32]$global:__psa_pid) { $h = [IntPtr]$global:__psa_hwnd }
+  }
+}
+if ($h -eq [IntPtr]::Zero) {
+  $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
+  # 同時開多個客戶端時，用環境變數 PSA_EXE_MATCH（路徑片段，例：PrimalSA222）指定要操作哪一個
+  if ($env:PSA_EXE_MATCH) { $proc = @($proc | Where-Object { $_.Path -like "*$($env:PSA_EXE_MATCH)*" }) | Select-Object -First 1 }
+  if (-not $proc) { $global:__psa_hwnd = $null; $global:__psa_pid = $null; Write-Error "PrimalSA 沒有在執行"; exit 1 }
+  $h = $proc.MainWindowHandle
+  if ($h -ne [IntPtr]::Zero) { $global:__psa_hwnd = [int64]$h; $global:__psa_pid = [int]@($proc)[0].Id }
+}
 # 最小化時 Unity 不繪製，要還原；用 SW_SHOWNOACTIVATE(4) 不搶焦點
-if ([W]::IsIconic($h)) { [W]::ShowWindow($h, 4) | Out-Null; Start-Sleep -Milliseconds 800 }
+# 例外：-NoRestore 1（watch 唯讀監看用）→ 最小化時什麼都不做，印 minimized、exit 3（不 ShowWindow、不 sleep）
+if ([W]::IsIconic($h)) {
+  if ($NoRestore -eq '1') { Write-Output 'minimized'; exit 3 }
+  [W]::ShowWindow($h, 4) | Out-Null; Start-Sleep -Milliseconds 800
+}
 $r = New-Object W+RECT; [W]::GetClientRect($h, [ref]$r) | Out-Null
 $p = New-Object W+POINT; [W]::ClientToScreen($h, [ref]$p) | Out-Null
 $Fg = $false
@@ -142,7 +185,16 @@ function ToLParam($x, $y) { $cx = [int]([double]$x * $Scale); $cy = [int]([doubl
 function BgMsg($msg, $wp, $x, $y) { MoveTo $x $y; [W]::PostMessage($h, $msg, [IntPtr]$wp, (ToLParam $x $y)) | Out-Null }
 # 背景滑鼠動作開始 / 結束：鎖住使用者實體滑鼠、記下並還原使用者游標（動作期間使用者移動的量被吞掉，游標回到原位）
 function BgBegin { [Guard]::Start(); $script:saved = New-Object W+POINT; [W]::GetCursorPos([ref]$script:saved) | Out-Null; Wake }
-function BgEnd { Start-Sleep -Milliseconds 40; [W]::SetCursorPos($script:saved.X, $script:saved.Y) | Out-Null; [Guard]::Stop() }
+# BgEnd 放在 finally 裡跑：$script:saved 有值才還原游標；Guard 一定 Stop，Join 逾時寫 actions.log
+function BgEnd {
+  try {
+    Start-Sleep -Milliseconds 40
+    if ($script:saved) { [W]::SetCursorPos($script:saved.X, $script:saved.Y) | Out-Null }
+  } finally {
+    $script:saved = $null
+    if (-not [Guard]::Stop()) { ActLog "Guard Stop Join 逾時（累計 $([Guard]::JoinTimeouts) 次）" }
+  }
+}
 # 按鍵：WM_KEYDOWN / WM_KEYUP。Unity 會自己 TranslateMessage 產生 WM_CHAR（實測 {BS} 一次刪一字）
 function BgKey($vk) {
   $sc = [int64][W]::MapVirtualKey($vk, 0)
@@ -197,17 +249,21 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
   }
   'info' { "client=$($r.R)x$($r.B) origin=($($p.X),$($p.Y)) scale=$Scale shot=$([int]($r.R/$Scale))x$([int]($r.B/$Scale)) foreground=$([W]::GetForegroundWindow() -eq $h)" }
   'shot' {
-    if (-not $A1) { $A1 = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.cache\shot.png")) }
+    if (-not $A1) { $A1 = 'shot.png' }
+    # 相對路徑一律解析到 tools/.cache/ 底下（單獨 shot 與 seq 內的 shot 一致；絕對路徑照用）
+    if (-not [IO.Path]::IsPathRooted($A1)) { $A1 = [IO.Path]::GetFullPath((Join-Path (Join-Path $PSScriptRoot '..\.cache') $A1)) }
+    $null = New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($A1))
     $full = New-Object System.Drawing.Bitmap $r.R, $r.B
     $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
     # 3 = PW_CLIENTONLY | PW_RENDERFULLCONTENT（DirectX 視窗要 RENDERFULLCONTENT 才不會黑畫面）
     $ok = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
-    if (-not $ok) { Write-Error "PrintWindow 失敗"; exit 1 }
+    if (-not $ok) { $full.Dispose(); Write-Error "PrintWindow 失敗"; exit 1 }
     $w = [int]($r.R / $Scale); $hh = [int]($r.B / $Scale)
     $small = New-Object System.Drawing.Bitmap $w, $hh
     $g = [System.Drawing.Graphics]::FromImage($small)
     $g.InterpolationMode = 'HighQualityBicubic'; $g.DrawImage($full, 0, 0, $w, $hh); $g.Dispose()
     $small.Save($A1, [System.Drawing.Imaging.ImageFormat]::Png)
+    $small.Dispose(); $full.Dispose()   # 兩張都是大 Bitmap（~19 MB / ~5 MB），常駐 server 下不能留給 GC
     "saved ${w}x${hh}"
   }
   'click' {
@@ -217,11 +273,12 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       [W]::mouse_event($fdn, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 60
       [W]::mouse_event($fup, 0, 0, 0, [IntPtr]::Zero)
     } else {
-      BgBegin
-      BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg $dn $mk $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg $up 0 $A1 $A2
-      BgEnd
+      try {
+        BgBegin
+        BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg $dn $mk $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg $up 0 $A1 $A2
+      } finally { BgEnd }
     }
     ActLog "click $A1,$A2$(if ($A3) { ' ' + $A3 })"
     "click $A1,$A2" + $(if (-not $script:Fg -and [Guard]::Swallowed) { "（擋下使用者滑鼠 $([Guard]::Swallowed) 次）" })
@@ -236,13 +293,14 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       }
     } else {
       # 背景模式未實測：第二下用 WM_LBUTTONDBLCLK（0x0203），照 Windows 雙擊的訊息順序送
-      BgBegin
-      BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg 0x0202 0 $A1 $A2; Start-Sleep -Milliseconds 80
-      BgMsg 0x0203 1 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg 0x0202 0 $A1 $A2
-      BgEnd
+      try {
+        BgBegin
+        BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg 0x0202 0 $A1 $A2; Start-Sleep -Milliseconds 80
+        BgMsg 0x0203 1 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg 0x0202 0 $A1 $A2
+      } finally { BgEnd }
     }
     ActLog "dclick $A1,$A2"
     "dclick $A1,$A2"
@@ -257,15 +315,16 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       }
       [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
     } else {
-      BgBegin
-      BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
-      BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
-      for ($i = 1; $i -le 10; $i++) {
-        $x = [double]$A1 + ([double]$A3 - [double]$A1) * $i / 10; $y = [double]$A2 + ([double]$A4 - [double]$A2) * $i / 10
-        BgMsg 0x0200 1 $x $y; Start-Sleep -Milliseconds 30
-      }
-      BgMsg 0x0202 0 $A3 $A4
-      BgEnd
+      try {
+        BgBegin
+        BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
+        for ($i = 1; $i -le 10; $i++) {
+          $x = [double]$A1 + ([double]$A3 - [double]$A1) * $i / 10; $y = [double]$A2 + ([double]$A4 - [double]$A2) * $i / 10
+          BgMsg 0x0200 1 $x $y; Start-Sleep -Milliseconds 30
+        }
+        BgMsg 0x0202 0 $A3 $A4
+      } finally { BgEnd }
     }
     ActLog "drag $A1,$A2 -> $A3,$A4"
     "drag $A1,$A2 -> $A3,$A4"
@@ -294,7 +353,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     $full = New-Object System.Drawing.Bitmap $r.R, $r.B
     $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
     $ok = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
-    if (-not $ok) { Write-Error "PrintWindow 失敗"; exit 1 }
+    if (-not $ok) { $full.Dispose(); Write-Error "PrintWindow 失敗"; exit 1 }
     # 點可以是「pixel X Y」或一個字串「pixel "X,Y X,Y ..."」（參數個數有限，多點用後者）
     $pts = if ($A2) { @("$A1,$A2") } else { $A1 -split '[\s/]+' | Where-Object { $_ } }
     $out = foreach ($pt in $pts) {
@@ -312,11 +371,12 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       $neg = $t.EndsWith('!'); $v = $t.TrimEnd('!') -split ','
       [void]$conds.Add(@([int]([double]$v[0] * $Scale), [int]([double]$v[1] * $Scale), [int]$v[2], [int]$v[3], [int]$v[4], $neg))
     }
-    $sw = [Diagnostics.Stopwatch]::StartNew(); $hit = $false
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $hit = $false; $pwfail = $false
     $full = New-Object System.Drawing.Bitmap $r.R, $r.B
     do {
       $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
-      [W]::PrintWindow($h, $dc, 3) | Out-Null; $g.ReleaseHdc($dc); $g.Dispose()
+      $pw = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
+      if (-not $pw) { $pwfail = $true; $hit = $false; break }   # 截圖失敗：不要拿黑畫面比到逾時，印 pwfail 讓呼叫端視為「讀不到」
       $hit = $true
       foreach ($c in $conds) {
         $px = $full.GetPixel($c[0], $c[1])
@@ -327,7 +387,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     } while (-not $hit -and $sw.ElapsedMilliseconds -lt [int]$A1)
     $full.Dispose()
     $script:WaitOk = $hit
-    "$(if ($hit) { 'ok' } else { 'timeout' }) $($sw.ElapsedMilliseconds)"
+    if ($pwfail) { 'pwfail' } else { "$(if ($hit) { 'ok' } else { 'timeout' }) $($sw.ElapsedMilliseconds)" }
   }
   'waitstill' {
     # waitstill <逾時毫秒> [開始等待毫秒，預設 600]：等鏡頭停下來（點地面走路後用，取代按格數估的固定等待）。
@@ -345,7 +405,8 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     $prev = $null; $moved = $false; $still = 0; $res = 'timeout'
     while ($sw.ElapsedMilliseconds -lt [int]$A1) {
       $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
-      [W]::PrintWindow($h, $dc, 3) | Out-Null; $g.ReleaseHdc($dc); $g.Dispose()
+      $pw = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
+      if (-not $pw) { $res = 'pwfail'; break }   # 截圖失敗（同 waitpix）
       $cur = foreach ($q in $pts) { $full.GetPixel($q[0], $q[1]).ToArgb() }
       if ($prev) {
         $diff = 0; for ($k = 0; $k -lt $cur.Count; $k++) { if ($cur[$k] -ne $prev[$k]) { $diff++ } }
@@ -356,7 +417,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       $prev = $cur
     }
     $full.Dispose(); $script:WaitOk = ($res -eq 'still')
-    "$res $($sw.ElapsedMilliseconds)"
+    if ($res -eq 'pwfail') { 'pwfail' } else { "$res $($sw.ElapsedMilliseconds)" }
   }
   'ifok' {
     # ifok <指令> ...：上一個 waitpix 成功才做（seq 裡用：等到對話框出現就點按鈕，沒出現就跳過）
