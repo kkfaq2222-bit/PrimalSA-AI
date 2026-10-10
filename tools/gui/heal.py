@@ -27,6 +27,9 @@ SPOTS = {
     '地雷區': (1165, 400, 60049),
     '地雷區2': (1165, 468, 60050),
     '海主人隧道': (862, 656, 31401),
+    '柯奧龜洞': (737, 243, 11001),
+    '阿布龜洞': (540, 326, 10001),
+    '五兄弟洞窟': (703, 445, 31706),
 }
 SPOT_XY = {500: (212, 344), 31401: (91, 29)}   # 練級傳送抵達點（31401 於 2026-10-09 實測兩次）
 TELEPORT_BTN = (1340, 65)            # 主畫面右上圓形傳送鈕
@@ -77,6 +80,9 @@ if LAYOUT == '1920x1017':
         '地雷區': (759, 245, 60049),
         '地雷區2': (759, 288, 60050),
         '海主人隧道': (571, 405, 31401),      # 實測
+        '柯奧龜洞': (491, 146, 11001),        # 2026-10-09 從傳送面板截圖量的（未點過）
+        '阿布龜洞': (367, 198, 10001),
+        '五兄弟洞窟': (469, 272, 31706),
     }
     TELEPORT_BTN = (905, 38)
     TAB_TOWN, TAB_LEVEL = (192, 118), (192, 190)
@@ -158,6 +164,11 @@ def teleport(tab: tuple[int, int], dest: tuple[int, int], want_map: int, name: s
         if p and p[0] == want_map and (want_xy is None or p[1:] == want_xy):
             log(f'傳送到 {name} {p[0]}:{p[1]},{p[2]}')
             return p
+        if p is None and sum(l.startswith('ok') for l in out.splitlines()) >= 3:
+            # 地名折成兩行的地圖（例：五兄弟山寨 31706）OCR 讀不到座標；但面板開了、分頁切了、Loading 後 HUD 也回來了
+            # （被戰鬥擋住時面板還開著、HUD 不會回來），視為成功
+            log(f'傳送到 {name}（OCR 讀不到座標，以畫面確認）')
+            return (want_map, *(want_xy or (0, 0)))
         gui('key', '{ESC}')            # 被擋時面板還開著；在主畫面按 ESC 沒有作用
         log(f'傳送 {name} 沒成功（{p}），可能在戰鬥中，等 2 秒再試')
         time.sleep(2)
@@ -171,7 +182,34 @@ def walk_village() -> tuple[int, int, int]:
                      end_sig=f'{SIG_HUD}/{SIG_HOSPITAL}', arrive=(HOSPITAL, 25, 65))
 
 
+def nurse_remote(p: tuple[int, int, int]) -> bool:
+    """遠距離點小護士（這遊戲 NPC 對話不用走近）：不精準走位，讀目前座標推算她在畫面的位置直接點。
+    先往她的方向走 2～3 格（讓她離開左側面板）；以實際讀到的座標為準重算。成功回 True（已按「恢復氣血」）。
+    每格位移要設環境變數 PSA_TILE_SCALE（鏡頭高度不同，見 walk.py）。"""
+    ox, oy = 0, 0
+    for _ in range(3):
+        cur = wait_pos(3, HOSPITAL)
+        if not cur or cur[0] != HOSPITAL:
+            return False
+        sx, sy = npc_screen(NURSE, (cur[1], cur[2]))
+        sx, sy = sx + ox, sy + oy
+        if not safe(sx, sy):
+            # 她還在面板底下：往她的方向走幾格再重算
+            dx, dy = max(-3, min(3, NURSE[0] - cur[1])), max(-3, min(3, NURSE[1] - cur[2]))
+            gui('seq', f'{PRIMER}; click {" ".join(map(str, screen(dx, dy)))}; waitstill 2500')
+            continue
+        out = gui('seq', f'{PRIMER}; click {sx} {sy}; waitpix 1500 {SIG_DIALOG}; ifok click {HEAL_BUTTON[0]} {HEAL_BUTTON[1]}')
+        if 'ok' in out.split():
+            log(f'遠距離點小護士成功（站 {cur[1]},{cur[2]}，點 {sx},{sy}）')
+            return True
+        gui('key', '{ESC}')
+    return False
+
+
 def talk_nurse(p: tuple[int, int, int]) -> None:
+    if nurse_remote(p):
+        return
+    log('遠距離點小護士沒成功，改用原本的走近流程')
     """站到小護士點得到的位置 → 點她 → 等對話框。入口 25,65 時她在左邊面板底下，要先走 3 格到 23,62。"""
     hx, hy = HOSPITAL_SPOT
     dx, dy = hx - p[1], hy - p[2]

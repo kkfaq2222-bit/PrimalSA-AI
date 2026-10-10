@@ -96,6 +96,8 @@ public class Guard {
 "@
 [W]::SetProcessDPIAware() | Out-Null
 $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
+# 同時開多個客戶端時，用環境變數 PSA_EXE_MATCH（路徑片段，例：PrimalSA222）指定要操作哪一個
+if ($env:PSA_EXE_MATCH) { $proc = @($proc | Where-Object { $_.Path -like "*$($env:PSA_EXE_MATCH)*" }) | Select-Object -First 1 }
 if (-not $proc) { Write-Error "PrimalSA 沒有在執行"; exit 1 }
 $h = $proc.MainWindowHandle
 # 最小化時 Unity 不繪製，要還原；用 SW_SHOWNOACTIVATE(4) 不搶焦點

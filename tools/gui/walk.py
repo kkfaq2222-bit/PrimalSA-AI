@@ -90,6 +90,13 @@ if LAYOUT == '1920x1017':
     PRIMER_XY = (822, 11)            # 右上狀態列（wifi / 時間那一列）；實測點了沒副作用，換地圖後當引子有效
     PRIMER = f'click {PRIMER_XY[0]} {PRIMER_XY[1]}; wait 100'
     SIG_NPC_DIALOG = '900,205,107,70,44/700,215,107,70,44'   # 對話框棕底（小護士實測；別的 NPC 版面不同時自己給 sig）
+# 鏡頭高度（設置 → 畫面設置）每個客戶端各自設定，每格位移跟著變。環境變數 PSA_TILE_SCALE 乘上去：
+# 2026-10-09 實測 gameClient（新帳號）= 0.5（點 +100,+80 px 走了 10 格）；PrimalSA222 校正時是 1.0。
+_TS = float(os.environ.get('PSA_TILE_SCALE') or 1)
+if _TS != 1:
+    TILE_X = (TILE_X[0] * _TS, TILE_X[1] * _TS)
+    TILE_Y = (TILE_Y[0] * _TS, TILE_Y[1] * _TS)
+    NPC_DY = round(NPC_DY * _TS)
 
 
 def log(msg: str, act: bool = True) -> None:
@@ -99,10 +106,48 @@ def log(msg: str, act: bool = True) -> None:
         actlog.add(Path(sys.argv[0]).stem or 'walk', msg)
 
 
+_LOCK_PATH = Path(os.environ.get('TEMP') or '/tmp') / 'psa-gui.lock'
+
+
+class _GuiLock:
+    """跨行程的檔案鎖：同時跑兩支腳本（例：levelwatch 盯兩個遊戲視窗）時，游標瞬移點擊不能同時進行。
+    只在 Windows 原生（msvcrt）生效；WSL 版沒有就略過。最多等 60 秒，拿不到也照樣執行。"""
+
+    def __enter__(self):
+        self.f = None
+        try:
+            import msvcrt
+            self.f = open(_LOCK_PATH, 'a+b')
+            end = time.time() + 60
+            while True:
+                try:
+                    self.f.seek(0)
+                    msvcrt.locking(self.f.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.time() > end:
+                        break
+                    time.sleep(0.2)
+        except ImportError:
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        if self.f:
+            try:
+                import msvcrt
+                self.f.seek(0)
+                msvcrt.locking(self.f.fileno(), msvcrt.LK_UNLCK, 1)
+            except Exception:
+                pass
+            self.f.close()
+
+
 def gui(*args: str, note: str = '') -> str:
     """直接呼叫 powershell.exe -File gui.ps1（不經 bash）；WSL / Windows 原生都通。
     動到遊戲的指令 gui.ps1 會自己寫操作 log；note = 附註用途（-Note）"""
-    r = winenv.run_ps('gui.ps1', *args, *(['-Note', note] if note else []))
+    with _GuiLock():
+        r = winenv.run_ps('gui.ps1', *args, *(['-Note', note] if note else []))
     out = (r.stdout.strip() or r.stderr.strip())
     if os.environ.get('WALK_DEBUG') or os.environ.get('HEAL_DEBUG'):
         print('   ', args[0], '→', out.replace('\n', ' | '), flush=True)
