@@ -14,12 +14,13 @@
            逃跑失敗（還在戰鬥）下一回合再按。要先把 DKB0 外掛的原地遇敵 / 快速戰鬥 / 自動戰鬥關（完整戰鬥畫面才有逃跑鈕；只看到 VS 牌 = 快速戰鬥還開著，只能等，印警告）。
            路上小怪只逃、不刷新角色。到 NPC 跳出對話框 → ESC 關掉（不按任何選項）後停下，退出碼 20；被打飛（回到薩姆吉爾村 1000 儲存點附近）→ 退出碼 21。
   --stop-after-dialog  對話步（組隊後單步）：按完對話框、閒置滿 2.5 秒（連續 2 次以上）就結束退出碼 0（有獲得物品視窗的步驟改用 --stop-after-rewards 1）
-  --fight  戰鬥步（假設已站在 NPC 旁，**不點追蹤、不巡路**）：--npc X,Y（NPC 地圖座標）或 --npc auto（--task 目前步驟的 NPC；見 --step）→ 依自己座標算畫面位置點 NPC（--at X,Y 可手動給自己座標）
+  --fight  戰鬥步（假設已站在 NPC 旁，**不點追蹤、不巡路**）：--npc X,Y（NPC 地圖座標）或 --npc auto（--task 目前步驟的 NPC，讀追蹤條目說明行對任務表；兩步文字相似時先用「目前所在地圖」分辨，仍分不出退出碼 31；見 --step）→ 依自己座標算畫面位置點 NPC（--at X,Y 可手動給自己座標）
            → 先處理「選擇對象」面板（見下）→ 對話框按左鈕 → 開打。戰鬥分類：開始時距離最後一次點 NPC / 按對話框 <= QUEST_BATTLE_WINDOW(15) 秒 = 任務 / BOSS 戰
-           （確保自動戰鬥開 + 刷新角色；打完閒置滿 IDLE_CONFIRM_SECS 秒（且連續 2 次）印「BOSS 戰結束」退出碼 0，不繼續巡路）；
+           （確保自動戰鬥開 + 刷新角色；打完閒置滿 IDLE_CONFIRM_SECS 秒（且連續 2 次）印「BOSS 戰結束」後**判斷輸贏**（verify_boss_result / judge_boss_result：點 NPC 前記下座標與任務步驟，打完重驗隊伍 / 座標 / 步驟 / HP）：贏 = 退出碼 0；少人 32；沒打贏 35；判斷不了 36；不繼續巡路）；
            否則 = 路上小怪：手動逃跑（自動戰鬥開著先關再按逃跑），不刷新角色。
            點 NPC 後 12 秒沒對話框也沒戰鬥 → 退出碼 22（沒點到 NPC）；對話後 15 秒沒開打 → 23；被打飛 21。
            範例：quest.py --fight --task 英雄島前傳 --npc auto --max-seconds 300
+  --npc-map M  --fight --npc X,Y 用：NPC 所在地圖（有 --task 時不給會用任務表反查）；與目前地圖不同 → 退出碼 34（「目前在地圖 A，NPC 在地圖 B」），不點
   --disband-after  這步完成（搭配 --stop-after-dialog / --stop-after-rewards）後立刻解散隊伍；分頁沒切到組隊 / 選單沒彈出 / 解散後隊長紅標還在 → 不亂點，退出碼 26；已是單人（組隊分頁沒隊長紅標）→ 不點任何東西，退出碼 0
   --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，閒置滿 2.5 秒（連續 2 次以上）就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
   --step N  --fight 用：明確指定任務第 N 步的 NPC（= --npc auto 但不 OCR 追蹤條目；需 --task）。--npc auto 不給 --step 時，改讀追蹤條目「標題正下方那行說明」
@@ -45,7 +46,7 @@
            2. 沒有 → 在追蹤列表先用標題圖片樣板比對（titlematch，0.7 秒）、沒樣板 / 沒找到才用 OCR（ocr.ps1，成功會存樣板）找 --task 那一格，必要時捲動列表，確認標題相符才點 → 開始（繼續）巡路
   不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）
   追蹤沒反應 點了任務追蹤約 5 秒（TRACK_RETRY_SECS 重點一次、再等一輪）都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
-退出碼：30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、0 正常結束（任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -769,6 +770,26 @@ def match_step(ts: list, texts: list[str], cur_map_fn=None) -> tuple[dict | None
     return ts[k0], f'說明文字 {texts} → 第 {ts[k0].get("step")} 步（相似度 {r0:.2f}）'
 
 
+def warn_not_battle(row: dict) -> None:
+    """--fight 點 NPC 前：任務表這一步不是戰鬥步（talk / monster）→ 印警告（可能是步驟抓錯，或這步其實只要對話）"""
+    kind, why = walk.psa.classify_step(row)
+    if kind != 'battle':
+        event(f'警告：第 {row.get("step")} 步不是戰鬥步（{kind}；{why}）→ 點 NPC 後可能不開打（退出碼 {EXIT_NO_BATTLE}）；確認步驟對不對')
+
+
+def npc_map_of_xy(task: str, xy: tuple[int, int]):
+    """--npc X,Y 有 --task 時：用任務表各步 endNpc 的座標反查該 NPC 的地圖（座標只對到一張圖才回；對不到 / 多張圖 → None）"""
+    try:
+        g, ts, _ = walk.psa.task_steps(task)
+        npcs = walk.psa.by_id('Npc')
+        maps = {(npcs.get(t.get('endNpc')) or {}).get('map') for t in ts
+                if (npcs.get(t.get('endNpc')) or {}).get('x') == xy[0] and (npcs.get(t.get('endNpc')) or {}).get('y') == xy[1]}
+    except Exception:
+        return None
+    maps.discard(None)
+    return maps.pop() if len(maps) == 1 else None
+
+
 def resolve_npc(a) -> tuple[int, int] | None:
     """--fight 的 NPC 地圖座標：--npc X,Y，或 --npc auto = 「目前步驟」的 endNpc（--task 任務；--step N 明確指定，不給就 OCR 追蹤條目下方的說明行
     對照 Task 表 explandTn）。讀不到 / 對不到 → 不退回第一個戰鬥步（2026-10-10 抓錯 8 樓守護獸的事故），a.resolve_rc = EXIT_STEP_UNKNOWN，回 None"""
@@ -797,6 +818,7 @@ def resolve_npc(a) -> tuple[int, int] | None:
             a.resolve_rc = EXIT_STEP_UNKNOWN
             return None
         kind = walk.psa.classify_step(row)[0]
+        warn_not_battle(row)
         event(f'--npc auto：目前步驟 = 第 {row.get("step")} 步（{why}；{kind}）→ {walk.psa.nm(n)} @ 地圖 {n.get("map")}:{n.get("x")},{n.get("y")}')
         a.npc_map = n.get('map')
         a.step_no = row.get('step')           # 點 NPC 前的步驟（BOSS 戰後比對輸贏用）
@@ -805,7 +827,9 @@ def resolve_npc(a) -> tuple[int, int] | None:
     if not m:
         log('--fight 要給 --npc X,Y（NPC 地圖座標）/ --npc auto（用 --task 查），或加 --no-click（已自己點過 NPC）')
         return None
-    return (int(m[1]), int(m[2]))
+    xy = (int(m[1]), int(m[2]))
+    a.npc_map = getattr(a, 'npc_map_arg', None) or (npc_map_of_xy(a.task, xy) if a.task else None)
+    return xy
 
 
 GONE = 'GONE'                        # 步驟比對：任務已不在追蹤列表（= 任務完成）
@@ -859,6 +883,10 @@ def capture_pre(a) -> dict:
     if pre['step'] is None and a.task and not a.no_click:
         v = read_step_no(a.task, lambda: (pre['pos'] or (None,))[0])
         pre['step'] = None if v == GONE else v
+        if pre['step'] is not None:
+            row = next((t for t in walk.psa.task_steps(a.task)[1] if t.get('step') == pre['step']), None)
+            if row:
+                warn_not_battle(row)
     return pre
 
 
@@ -896,7 +924,8 @@ def click_npc(npc: tuple[int, int], a) -> bool:
         return False
     want_map = getattr(a, 'npc_map', None)
     if want_map and cur[0] and cur[0] != want_map:
-        log(f'目前在地圖 {cur[0]}，NPC 在地圖 {want_map}：不在同一張圖，先傳送 / 走過去（--fight 不巡路）')
+        event(f'目前在地圖 {cur[0]}，NPC 在地圖 {want_map}：不在同一張圖，先傳送 / 走過去（--fight 不巡路）→ 沒點 NPC，退出碼 {EXIT_NPC_MAP}')
+        a.click_rc = EXIT_NPC_MAP
         return False
     at = (cur[1], cur[2])
     dx, dy = npc[0] - at[0], npc[1] - at[1]
@@ -918,6 +947,7 @@ def _main() -> int:
     ap.add_argument('--disband-after', action='store_true', help='這步完成（--stop-after-dialog / --stop-after-rewards 結束）後立刻解散隊伍：切組隊分頁 → 點隊長列 → 解散，每步驗證，失敗退出碼 %d 且不亂點' % EXIT_DISBAND_FAIL)
     ap.add_argument('--fight', action='store_true', help='戰鬥步（要先站在 NPC 附近；不巡路）：點 NPC → 對話左鈕 → 開打；只有點 NPC / 按對話框後 %d 秒內開始的才是任務 / BOSS 戰（開自動戰鬥 + 刷新角色、打完退出碼 0）；其他戰鬥是路上小怪（關自動戰鬥、按逃跑、不刷新）；沒反應退出碼 22、對話後沒開打 23、被打飛 21' % QUEST_BATTLE_WINDOW)
     ap.add_argument('--npc', default='', help='--fight 用：NPC 的地圖座標 X,Y，或 auto（讀追蹤條目目前步驟說明對 --task 的任務表找 NPC；讀不到退出碼 31，可改 --step N）；不給 = 必須加 --no-click')
+    ap.add_argument('--npc-map', type=int, default=0, help='--fight --npc X,Y 用：NPC 所在地圖 ID（不給時，有 --task 會用任務表反查該座標的 NPC 地圖）；與目前所在地圖不同 → 退出碼 %d，不點' % EXIT_NPC_MAP)
     ap.add_argument('--step', type=int, default=0, help='--fight 用：明確指定任務第 N 步（Task.step）的 endNpc 當 NPC（等於 --npc auto 但不 OCR 追蹤條目；需要 --task）')
     ap.add_argument('--team-size', type=int, default=None, help='隊伍人數檢查（預設 5）：--fight 點 NPC 前、預設模式每次點追蹤 / 黃問號前，開切換面板確認 1 隊長 + (N-1) 隊員，不符 → 不點（--fight 退出碼 %d、執行中脫隊 %d）；開始前第一次點 / 按對話框前一定先驗（不符 30）；0 或 1 = 跳過；--solo / --fight --no-click 不檢查' % (EXIT_TEAM_MISMATCH, EXIT_TEAM_LOST))
     ap.add_argument('--at', default='', help='--fight 用：自己目前的座標 X,Y（不給就 OCR 讀右上角）')
@@ -929,6 +959,8 @@ def _main() -> int:
     ap.add_argument('--no-refresh', action='store_true', help='戰鬥不按刷新角色（預設：--solo / --fight 只在任務 / BOSS 戰刷新，組隊預設模式每場都刷新）')
     ap.add_argument('--stop-after-rewards', type=int, default=0, help='領到第 N 次獲得物品視窗後停（0 = 不停）')
     a = ap.parse_args()
+    a.npc_map_arg = a.npc_map or None
+    a.npc_map = None
     if a.step and not a.npc:
         a.npc = 'auto'
     if layout.current() != '2880x1659':
