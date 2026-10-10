@@ -8,7 +8,6 @@
   選項：--task 任務名（要點追蹤時，先用 OCR 認出追蹤列表每一格的標題，名稱相符才點；不符就捲動列表再找，找不到退出碼 5，絕不點其他任務。
           沒給 --task 又沒給 --no-track 會直接拒絕執行）、--no-marker（不找 NPC 頭上的黃色問號）、
         --every 1.0（輪詢秒數；2026-10-10 起預設 1 秒，所有「連續 N 次」的規則已改成以秒計，見 IDLE_CONFIRM_SECS 等常數）、--no-track（不主動點任務追蹤，只處理對話 / 戰鬥）、--no-refresh（戰鬥不按刷新角色）、
-        --no-clef（不用 Clef 加速層；也可設環境變數 PSA_NO_CLEF=1。預設有 token 就用，失敗 / 額度用完自動退回 OCR 與規則，見 ui/quest.md「Clef 加速層」）、
         --stop-after-rewards N（領到第 N 次「獲得物品」確認窗後停；避免自動接下一個任務。成人儀式 = 2）
   --solo   單人逃跑風格（/psa-quest-solo）：**一律手動逃跑**（2026-10-10 使用者：外掛「自動逃跑」不再使用、不看那個勾選框）。
            遇敵 → 完整戰鬥下指令階段按右上「逃跑」1283,168；自動戰鬥開著（指令框不出現）先按 1380,600 關掉再逃；
@@ -59,7 +58,6 @@ import time
 from pathlib import Path
 
 import battleguard
-import clef
 import screen_sigs
 import layout
 import netwatch
@@ -94,7 +92,6 @@ IDLE_CONFIRM_SECS = 2.5              # 連續閒置至少這麼久（且連續 >
 UNKNOWN_CONFIRM_SECS = 5.0           # 連續 3 次不認得 + 至少這麼久才停手（舊：3 次 × 2.5 秒 ≈ 5 秒；鐵則 5 的 3 次規則仍在，只是多一道時間條件）
 SELECT_MAX_TRIES = 4                # 「選擇對象」面板連續出現幾輪還沒消失就不再點（交給不認得規則）
 TRACK_RETRY_SECS = 2.5               # 點了任務追蹤後，等這麼久沒反應才算 1 次失敗（重點一次；連續 2 次失敗退出碼 3，約 5 秒）
-CLEF_WAIT_SECS = 50.0                # Clef 判成「載入畫面 / 戰鬥中」時，最多連續這麼久不算「不認得」（舊：20 次 × 2.5 秒）
 
 # ---- 座標與特徵色（2880×1659 版面，截圖座標；2026-10-09 實測）----
 TRACKER = (205, 325)                 # 左側任務追蹤第一條：點了自動尋路到任務 NPC
@@ -236,16 +233,6 @@ def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | N
     ensure_task_tab()
     mode = 'tpl' if _tm_has(want) else 'ocr'
     t0 = time.time()
-    if mode == 'ocr' and click and clef.available():
-        # Clef-flash 取代 OCR 的「第一格」快速通道：只在主畫面（呼叫端已確認 idle，非登入畫面）才上傳追蹤區裁圖；
-        # 最上面一格標題 = want 且 choice / noul 機率都 >= 0.9 才直接點第一格；否則 / 失敗 → 照舊 OCR 掃描
-        img = clef_shot_bytes()
-        hit = clef.check_track_top(img, want, known_task_titles()) if img else None
-        if hit:
-            gui('seq', f'click {TRACKER[0]} {TRACKER[1]}', note=f'點追蹤「{want}」（Clef，--task {want}）')
-            event(f'追蹤列表第一格由 Clef 認出「{want}」→ 點 {TRACKER[0]},{TRACKER[1]}（耗時 {time.time() - t0:.1f}s，略過 OCR）')
-            return True
-        log('Clef 沒認出第一格是目標（或不可用）→ 退回 OCR 掃描' if hit is not None else 'Clef 不可用 → 退回 OCR 掃描')
     try:
         sig = list_signature()
         y = _find_on_page(want, mode)
@@ -469,35 +456,6 @@ def snap(tag: str) -> str:
     p = SHOT_DIR / f'{time.strftime("%H%M%S")}-{tag}.png'
     gui('shot', winenv.to_windows(p))
     return str(p.relative_to(ROOT))
-
-
-CLEF_WAIT_SCENES = ('載入畫面', '戰鬥中')
-
-
-def clef_shot_bytes() -> bytes | None:
-    """背景截一張遊戲視窗（PrintWindow，只含遊戲客戶區，不含桌面）→ bytes；截完立刻刪檔。
-    上傳前先用本地規則排除登入畫面 / 網路異常提示（netwatch.detect），這兩種不上傳。"""
-    try:
-        if netwatch.detect() is not None:
-            return None
-        SHOT_DIR.mkdir(parents=True, exist_ok=True)
-        p = SHOT_DIR / 'clef-tmp.png'
-        gui('shot', winenv.to_windows(p))
-        data = p.read_bytes()
-        p.unlink(missing_ok=True)
-        return data
-    except Exception as e:
-        log(f'Clef 截圖失敗（{type(e).__name__}），退回原流程')
-        return None
-
-
-def known_task_titles() -> list[str]:
-    """已有標題樣板的任務名（titlematch 的樣板檔名「任務@N.png」），給 Clef 當 choice 候選"""
-    d = ROOT / 'tools' / '.cache' / 'task-titles'
-    try:
-        return sorted({f.name.split('@')[0] for f in d.glob('*.png')})
-    except OSError:
-        return []
 
 
 def is_quest_battle(last_action: float, now: float, window: float = QUEST_BATTLE_WINDOW) -> bool:
@@ -882,7 +840,6 @@ def _main() -> int:
     ap.add_argument('--task', default='', help='追蹤列表上的任務名（例：黃金羚羊之謎）；點追蹤前先 OCR 核對標題，名稱不符絕不點')
     ap.add_argument('--no-marker', action='store_true', help='不找 NPC 頭上的黃色問號')
     ap.add_argument('--no-track', action='store_true', help='不主動點任務追蹤')
-    ap.add_argument('--no-clef', action='store_true', help='不用 Clef（Cloudflare Workers AI）加速層，全走原本的規則 / OCR（也可設環境變數 PSA_NO_CLEF=1）')
     ap.add_argument('--no-refresh', action='store_true', help='戰鬥不按刷新角色（預設：--solo / --fight 只在任務 / BOSS 戰刷新，組隊預設模式每場都刷新）')
     ap.add_argument('--stop-after-rewards', type=int, default=0, help='領到第 N 次獲得物品視窗後停（0 = 不停）')
     a = ap.parse_args()
@@ -910,17 +867,10 @@ def _main() -> int:
     if not a.no_track and not a.task:
         log('沒給 --task：不知道要點哪個任務追蹤（點錯任務是之前的老問題）。請加 --task 任務名，或用 --no-track（只處理對話 / 戰鬥）')
         return 4
-    clef.set_logger(event)
     n_old = cleanup_old_shots()
     if n_old:
         event(f'清理 {n_old} 張 {SHOT_KEEP_DAYS} 天前截圖')
-    if a.no_clef:
-        clef.set_enabled(False)
-    else:
-        clef.available()         # 啟動時檢查一次：沒 token 會在 stderr 醒目提示並寫事件 log
     end = time.time() + a.max_seconds
-    clef_wait = 0                # 連續被 Clef 解釋成「載入 / 戰鬥」的 unknown 次數
-    clef_wait_t0 = 0.0           # 這一串 Clef「載入 / 戰鬥」判斷的起始時間（CLEF_WAIT_SECS 用）
     marker_fail = 0              # 連續點黃色問號沒反應的次數
     task_miss = 0
     event(f'開始監測（每 {a.every}s，最長 {a.max_seconds}s）')
@@ -1045,7 +995,6 @@ def _main() -> int:
         last = st
         if st != 'unknown':
             unknown = 0
-            clef_wait = 0
         if st == 'idle':
             if idle_streak == 0:
                 idle_t0 = time.time()
@@ -1251,24 +1200,6 @@ def _main() -> int:
                         event(f'追蹤列表掃完（到頂 + 到底）都找不到「{a.task}」（連續 {task_miss} 次，沒領過獎勵）→ 沒點任何東西，退出', shot)
                         return 5
         elif st == 'unknown' or st == 'error':
-            if st == 'unknown' and (clef_wait == 0 or time.time() - clef_wait_t0 < CLEF_WAIT_SECS) and clef.available() and (img := clef_shot_bytes()):
-                cr = clef.classify_scene(img)
-                if cr:
-                    log(f'Clef 場景：{cr["scene"] or "信心不足"} p={cr["p"]:.2f}（{cr["model"]}）驗證窗機率 {cr["verify_p"]:.3f}')
-                    if cr['alarm']:          # 只多一道警報：verify >= clef.VERIFY_ALARM（高信心）或場景判驗證窗 → 馬上停手（鐵則 5）；模型說沒有不會放行任何事
-                        shot = snap('UNKNOWN')
-                        event(f'警告：Clef 判斷可能是答題 / 驗證視窗（verify p={cr["verify_p"]:.3f}，場景 {cr["scene"]}）→ 停止自動操作，請使用者處理', shot)
-                        print('!!! 請人工檢查畫面（鐵則 5：驗證視窗不可亂猜答案）', flush=True)
-                        return 2
-                    if cr['scene'] in CLEF_WAIT_SCENES and (clef_wait == 0 or time.time() - clef_wait_t0 < CLEF_WAIT_SECS):
-                        clef_wait += 1
-                        if clef_wait == 1:
-                            clef_wait_t0 = time.time()
-                            event(f'Clef 判斷為「{cr["scene"]}」（p={cr["p"]:.2f}），不算不認得（最多連續 {CLEF_WAIT_SECS:.0f} 秒）')
-                        if a.once:
-                            return 0
-                        time.sleep(a.every)
-                        continue
             if unknown == 0:
                 unknown_t0 = time.time()
             unknown += 1

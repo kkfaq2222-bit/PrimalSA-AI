@@ -28,7 +28,7 @@
 - **點任務追蹤 205,325 = 自動巡路**：隊伍自己走（含跨樓層）到下一步的 NPC，到了會自動開對話框；畫面中央出現金黃色「**Auto Walking**」字樣、右上圓形小地圖鈕變成「傳送」字樣。走一趟約 5～10 秒。
 - 任務詳情裡進行中任務右邊的箭頭 361,299 點了沒有明顯效果（未用）。
 - **不是每一步都會巡路**：成人儀式第 2 步（接受後去 188,13 找差使）點追蹤原地不動 → 要手動 `walk.py 10204 188 13`（路線 14,6 → 188,13 約 25 段，途中遇敵會讓 walk.py 讀不到座標而中斷，重跑即可，它從目前位置重算）。走到 NPC 附近對話框反而會自己開。巡路用的是設定表 Task 的 taskNavigate 欄位；沒有路徑的步驟、`TeamCountLimit.noTaskNavigate` 列的地圖都不會巡路。
-- **畫面像素特徵 / 分類在 `tools/gui/screen_sigs.py`**（2026-10-10 從 quest.py / netwatch.py / heal.py 搬出；quest.read_screen = 取點 + `screen_sigs.classify`）。改特徵或容差要跑 `uv run --no-project python tools/gui/test_screen_sigs.py`（fixture `tools/gui/fixtures/screen_px.json` 是重構前對舊截圖凍結的像素 + 分類，必須 0 差異；每組特徵另有 tol / tol+1 邊界測試）。PNG 解碼在 `tools/gui/pngread.py`（clef.py 共用）。
+- **畫面像素特徵 / 分類在 `tools/gui/screen_sigs.py`**（2026-10-10 從 quest.py / netwatch.py / heal.py 搬出；quest.read_screen = 取點 + `screen_sigs.classify`）。改特徵或容差要跑 `uv run --no-project python tools/gui/test_screen_sigs.py`（fixture `tools/gui/fixtures/screen_px.json` 是重構前對舊截圖凍結的像素 + 分類，必須 0 差異；每組特徵另有 tol / tol+1 邊界測試）。PNG 解碼在 `tools/gui/pngread.py`。
 - 對話框（都在右側）：棕底，左鈕 948,461（接受 / 成人勾玉 / 完成，推進用）、右鈕 1220,461（再見）。偵測 = 1360,300 與 1100,350 為 (107,70,44) 且 948,445 / 1220,445 為米色 (229,199,157)。
 - **獲得物品視窗**（交道具 / 完成任務後）：中央米色框，藍色「確認」720,572。偵測 = 720,572 (62,106,158)、680,560 (82,125,178)、560,620 (233,203,161)、720,640 (104,72,46)。完成任務會有第二個（石幣 / 聲望 / 經驗）。
 - **刷新角色**：切換 763,760 → 面板（右上紅 ✕ 1064,208 = (197,69,41)）→ 刷新角色 910,578；按完面板自己關（實測 1 秒內），不用再 ESC、不影響位置。換地圖 / 關窗後的第一下左鍵可能被吃掉，所以腳本用 waitpix 等面板出現才點。
@@ -106,12 +106,10 @@
     四點全部一致才算（`tab_state()` 回 'team' / 'task'，混雜回 None 不動作）。
   - **隊長紅「隊」標 `LEADER_BADGE`**（組隊分頁隊長列左上角）：(100,306) (128,306) (100,312) (130,312) 在組隊分頁自己是隊長時都 ≈ (217,33,33)；任務分頁同位置是米色 ≈ (245,223,187)。**未量到**：未組隊（只剩「創建隊伍」）與隊員身分的像素（沒解散隊伍就看不到）。
 
-### Clef 加速層（`tools/gui/clef.py`，2026-10-10；Cloudflare Workers AI，會上傳遊戲截圖）
-只是「加速層」：失敗一律退回原本的規則 / OCR，不卡住、不讓 quest.py 失敗。實驗數據見 `notes/clef-eval.md`。
-- **接點 1（unknown）**：`read_screen` 判不出（state=unknown）且 netwatch 先排除登入畫面 / 網路異常提示後，才截圖（縮 960 寬）問 Clef-flash「場景 + 有沒有驗證視窗」；top < 0.85 升級 Clef 複核。
-  場景判「載入畫面 / 戰鬥中」（p >= 0.85 且 verify 未達警報門檻）→ 不算「不認得」（連續最多 `CLEF_WAIT_SECS` 50 秒，之後照舊 3 次停手；原本是 20 次 × 2.5 秒，改輪詢 1 秒後換算成秒）；其他場景只記 log，仍走原本 3 次停手。
-- **驗證視窗只多一道警報**：確定性規則（3 次 unknown 停手、退出碼 2）完全保留；Clef 任一次呼叫 verify >= `clef.VERIFY_ALARM`（**0.6，高信心**；原 0.05，2026-10-10 14:03 真實單人戰鬥下指令畫面給 0.105 誤停 → 調高）或場景判「答題或驗證視窗」（p >= 0.85）→ 立刻存圖停手（退出碼 2）。**低於 0.6 不是放行**：當成「不認得」繼續累計，連續 3 次且滿 `UNKNOWN_CONFIRM_SECS` 5 秒照舊停手（鐵則 5 不削弱，真驗證視窗最多晚幾秒停，停手期間腳本不點任何東西）。模型說「沒有」絕不放行任何事。尚無真驗證視窗正例，0.6 對真驗證視窗抓不抓得到未驗證（抓不到也會被 3 次不認得規則擋下）。
-- **14:03 誤判的原因**：存下的 `140335-UNKNOWN.png`（單人戰鬥下指令畫面）對 `read_screen` 全部特徵點（SIG_BATTLE 9 點、SIG_CMD 5 點、自動戰鬥鈕）都符合，離線重判是 `battle` + `cmd`；所以當下的 `unknown` 是過場瞬間（回合轉場 / 戰鬥框滑入 / 戰鬥剛結束）的暫態畫面，不是特徵太嚴。處理：不改特徵，靠「門檻 0.6 + unknown 要連續 3 次且 5 秒」讓單次暫態不會停手。
+### unknown 畫面規則（鐵則 5）
+- `read_screen` 判不出（state=unknown）時只靠確定性規則：連續 3 次且滿 `UNKNOWN_CONFIRM_SECS` 5 秒 → 存圖、寫警告事件、退出碼 2 停手，停手期間不點任何東西。
+- Clef（Cloudflare Workers AI 視覺分類）加速層已於 2026-10-10 依使用者指示移除（`clef.py`、`--no-clef`、`PSA_NO_CLEF`、`CLEF_WAIT_SECS`、`tools/experiments/clef/` 全刪；實驗數據留在 `notes/clef-eval.md`）。沒有任何截圖會上傳；`track_task` 沒標題樣板時直接走 OCR。
+- 14:03 誤停的原因（保留供參考）：存下的 `140335-UNKNOWN.png`（單人戰鬥下指令畫面）對 `read_screen` 全部特徵點都符合，離線重判是 `battle` + `cmd`；所以當下的 `unknown` 是過場瞬間（回合轉場 / 戰鬥框滑入 / 戰鬥剛結束）的暫態畫面，不是特徵太嚴。靠「連續 3 次且 5 秒」讓單次暫態不會停手。
 
 ### 輪詢間隔與時間常數（2026-10-10，預設 `--every 1.0`）
 原本多處用「連續 N 次輪詢」當等待時間，間隔改 1 秒後改成以秒計，實際等待時間不變：
@@ -120,16 +118,7 @@
 | `IDLE_CONFIRM_SECS` | 2.5 | 連續閒置 2 次（2×2.5 秒）才算步驟結束 / BOSS 戰打完 / 打飛偵測的第二輪；現在要「>= 2 次且從第一次閒置起 >= 2.5 秒」（`idle_confirmed()`） |
 | `UNKNOWN_CONFIRM_SECS` | 5.0 | 連續 3 次不認得（3×2.5 秒）才停手；現在要「3 次 + 滿 5 秒」 |
 | `TRACK_RETRY_SECS` | 2.5 | 點任務追蹤後每輪就算 1 次失敗；現在等滿 2.5 秒沒反應才算 1 次（期間不重點），連續 2 次失敗 → 退出碼 3（約 5 秒） |
-| `CLEF_WAIT_SECS` | 50 | 舊 `CLEF_WAIT_MAX` 20 次 |
 | 不變 | | 逃跑 / 自動戰鬥鈕連點間隔（秒計）、`QUEST_BATTLE_WINDOW` 15 秒、`NPC_WAIT` 12 秒、被打飛每 12 秒查位置、`AUTO_STUCK_MAX` 4 次（受 3 秒點擊間隔限制）、黃問號點完最多等 8 秒 |
-Clef 在 unknown 時每輪都會呼叫一次（約 1 秒、≈$0.0001），1 秒輪詢下載入畫面最多多幾十次呼叫。
-- **接點 2（track_task）**：該任務**沒有標題樣板**時（原本要走 OCR），先裁左側追蹤區（360x135）問 Clef-flash「最上面一格標題是不是目標」（choice：目標 + 已有樣板的任務名 + 沒有任務；noul：是目標嗎），兩者機率都 >= 0.9 → 直接點第一格 205,325 並略過 OCR（約 0.7 秒）；否則照舊 OCR 掃描 / 捲動。有樣板的任務仍用本機樣板比對（更快、不上傳）。Clef 只認得「第一格」，不給位置，其他格仍靠 OCR。
-- **認證**：只讀環境變數 `CF_AI_TOKEN`（Workers AI 專用 API token）與帳號 ID `CF_ACCOUNT_ID`（必填；或寫在 `~/.config/psa-ai/cf_account_id` 一行；沒設就停用 Clef，repo 不寫死帳號），其次使用者設定檔 `~/.config/psa-ai/cf_ai_token`（只讀不建立，一行 token；WSL / Windows 都在使用者家目錄）。**已移除 wrangler OAuth 退回**。token 不印出、不寫檔、不進 log。
-  - **沒有 token 會明確告知使用者**：quest.py 啟動時在 stderr 印「[Clef] 未設定 CF_AI_TOKEN，Clef 加速已停用，改用原本模式…」並寫進事件 log，然後照原本模式跑（`--no-clef` 不印）。token 401/403 也會印「token 無效或權限不足」。
-  - 設定陷阱：`~/.bashrc` 開頭通常有「非互動 shell 就 return」的守衛，export 放在守衛之後的話，agent / 腳本的非互動 shell 讀不到。請把 `export CF_AI_TOKEN=...` 移到守衛**之前**，或放進 `~/.profile`，或改寫進設定檔 `~/.config/psa-ai/cf_ai_token`。Windows 桌面 App 要設「使用者環境變數」（系統內容 → 環境變數，或 `setx CF_AI_TOKEN ...`）。改完要**重開 Claude Code session** 才讀得到。檢查只看有無 / 長度，不要 echo 出來。
-- **關閉**：`quest.py --no-clef` 或環境變數 `PSA_NO_CLEF=1`。
-- **limit 退回**：額度 / 限流錯誤（HTTP 429、402、Workers AI code 4006、錯誤文字含 neuron / quota / rate limit / daily / allocation）→ 立刻停用並把 UTC 日期寫進 `tools/.cache/clef-state.json`，同一個 UTC 日之後的執行直接不呼叫（隔天自動恢復；免費額度每日 10,000 neurons，UTC 0 點重置是推測）。token 失效（401 / 403）或其他 4xx → 本次執行停用（不寫狀態檔）。逾時（5 秒）/ 網路 / 5xx / 回應壞掉 → 連續 3 次才本次停用，成功一次歸零。停用事件寫進 `notes/quest-events.log`（「Clef 已停用，退回 OCR / 規則流程：原因」）。
-- 想手動重新啟用當日已記錄額度用完的狀態：刪 `tools/.cache/clef-state.json`。
 
 ### 追蹤列表標題辨識（`tools/gui/ocr.ps1` + quest.py `track_task()`）
 - ocr.ps1：`ocr.ps1 X Y W H [-Zooms 2,3,4,5,6,7] [-Dark 150]`（截圖座標）→ JSON 每行 `{text,x,y,zoom}`。深色字二值化（max(R,G,B)<150）後交給 Windows 內建 OCR（zh-Hant）。

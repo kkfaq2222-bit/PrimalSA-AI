@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PNG 解碼（純標準函式庫）：遊戲截圖是 8 bit RGB / RGBA、非交錯，支援 filter 0～4。
-從 clef.py 抽出的共用模組（clef 的縮放 / 裁切、watch 與 fixture 取像素都用它）。"""
+純標準函式庫 PNG 解碼（watch 與 fixture 取像素用）。"""
 import struct
 import zlib
 

@@ -73,7 +73,6 @@ def run(argv, sim):
     quest.snap = lambda tag: 'sim.png'
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
     quest.layout.current = lambda: '2880x1659'
-    quest.clef.available = lambda: False
     quest.netwatch.guard = lambda *_: {'status': 'ok'}
     sys.argv = ['quest.py'] + argv
     return quest.main()
@@ -188,7 +187,7 @@ class Script:
         return ''
 
 
-def run2(argv, sim, clef_ret=None, team=False):
+def run2(argv, sim, team=False):
     if not team and '--team-size' not in argv and '--solo' not in argv:
         argv = argv + ['--team-size', '0']      # 舊案例不測隊伍；要測隊伍檢查的案例傳 team=True
     quest.time.time, quest.time.sleep = sim.time, sim.sleep
@@ -198,10 +197,6 @@ def run2(argv, sim, clef_ret=None, team=False):
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
     quest.layout.current = lambda: '2880x1659'
     quest.check_team = fake_team
-    quest.clef.available = lambda: clef_ret is not None
-    if clef_ret is not None:
-        quest.clef_shot_bytes = lambda: b'x'
-        quest.clef.classify_scene = lambda img: dict(clef_ret)
     quest.netwatch.guard = lambda *_: {'status': 'ok'}
     quest.find_marker = lambda: (_ for _ in ()).throw(AssertionError('不該找黃問號'))
     quest.track_task = lambda *a, **k: (_ for _ in ()).throw(AssertionError('不該點追蹤'))
@@ -328,41 +323,11 @@ s = Script([DIALOG, IDLE, IDLE, IDLE, IDLE])
 run2(['--stop-after-dialog', '--task', 'x', '--max-seconds', '60'], s)
 ok &= check('main 啟動時呼叫清理', len(calls) == 1)
 
-print('(j) Clef 驗證視窗門檻：低信心當不認得，高信心停手')
-import clef as _clef
-_clef.available = lambda: True
-_clef.prepare = lambda png, box=None, width=None: b'img'
-
-
-def fake_run(vp, scene_p=0.5):
-    def run(model, state, qs, imgs):
-        return {'scene': {'probabilities': {'戰鬥中': scene_p, '其他': 1 - scene_p}}, 'verify': {'noul': vp}}
-    return run
-
-
-for vp, want in [(0.105, False), (0.3, False), (0.6, True), (0.9, True)]:
-    _clef.run = fake_run(vp)
-    ok &= check(f'classify_scene verify={vp} → alarm {want}', _clef.classify_scene(b'x')['alarm'] is want)
-_clef.run = lambda *a: {'scene': {'probabilities': {'答題或驗證視窗': 0.95, '其他': 0.05}}, 'verify': {'noul': 0.01}}
-ok &= check('場景判驗證窗（p>=0.85）仍 alarm', _clef.classify_scene(b'x')['alarm'] is True)
-
 UNK = dict(IDLE, state='unknown')
-print('(k) quest.py：Clef verify=0.105 不立刻停手，照 3 次不認得（滿 5 秒）才停 → 鐵則 5')
-s = Script([UNK])
-rc = run2(['--no-track', '--max-seconds', '60'], s, clef_ret={'scene': None, 'p': 0.4, 'model': 'clef', 'verify_p': 0.105, 'alarm': False})
-ok &= check('exit 2 且不是第 1 次就停（>= 5 秒）', rc == 2 and s.t - 1000 >= quest.UNKNOWN_CONFIRM_SECS, f'rc={rc} t={s.t - 1000}')
-print('(k2) verify=0.9（alarm）→ 第 1 次就停')
-s = Script([UNK])
-rc = run2(['--no-track', '--max-seconds', '60'], s, clef_ret={'scene': None, 'p': 0.4, 'model': 'clef', 'verify_p': 0.9, 'alarm': True})
-ok &= check('exit 2 立刻', rc == 2 and s.t - 1000 < 1, f'rc={rc} t={s.t - 1000}')
-print('(k3) 沒有 Clef：連續 3 次不認得但沒滿 5 秒不停；滿 5 秒才停')
+print('(k3) 鐵則 5：連續 3 次不認得但沒滿 5 秒不停；滿 5 秒才停')
 s = Script([UNK])
 rc = run2(['--no-track', '--max-seconds', '60'], s)
 ok &= check('exit 2，t >= 5', rc == 2 and s.t - 1000 >= 5.0, f'rc={rc} t={s.t - 1000}')
-print('(k4) Clef 載入 / 戰鬥判斷：最多連續 CLEF_WAIT_SECS 秒不算不認得，之後照舊停手')
-s = Script([UNK])
-rc = run2(['--no-track', '--max-seconds', '300'], s, clef_ret={'scene': '戰鬥中', 'p': 0.9, 'model': 'clef-flash', 'verify_p': 0.0, 'alarm': False})
-ok &= check('exit 2，約 50 秒後', rc == 2 and quest.CLEF_WAIT_SECS <= s.t - 1000 <= quest.CLEF_WAIT_SECS + 8, f'rc={rc} t={s.t - 1000}')
 
 
 # ---- 事故後新增：隊伍檢查 / 戰鬥鎖檔 / --npc auto 取目前步驟 ----
@@ -502,7 +467,6 @@ quest.walk.gui = s.gui
 quest.snap = lambda tag: 'sim.png'
 quest.event = lambda m, shot=None: None
 quest.layout.current = lambda: '2880x1659'
-quest.clef.available = lambda: False
 quest.netwatch.guard = lambda *_: {'status': 'ok'}
 sys.argv = ['quest.py', '--task', 'x', '--max-seconds', '8']
 rc = quest.main()
