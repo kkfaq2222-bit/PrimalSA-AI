@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -56,7 +57,10 @@ SLOT_CACHE: dict = {}                              # 角色 → 金布伊所在�
 
 
 def ocr(box, *opts) -> list:
-    r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
+    try:
+        r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
+    except subprocess.TimeoutExpired:
+        return []          # 讀圖逾時視同讀不到，呼叫端進下一輪
     line = (r.stdout.strip().splitlines() or [''])[-1]
     try:
         d = json.loads(line)

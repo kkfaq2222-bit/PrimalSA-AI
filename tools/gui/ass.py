@@ -243,7 +243,11 @@ def _ocr(box, *opts) -> str:
     """區域 OCR，回傳所有行文字接起來（可替換給測試）"""
     import json
     import winenv
-    r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
+    import subprocess
+    try:
+        r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
+    except subprocess.TimeoutExpired:
+        return ''          # 讀圖逾時視同讀不到
     try:
         return ''.join(l['text'] for l in json.loads(r.stdout.strip().splitlines()[-1])['lines'])
     except (ValueError, KeyError, IndexError):

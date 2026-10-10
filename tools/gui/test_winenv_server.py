@@ -46,6 +46,8 @@ for line in sys.stdin:
     elif a == 'stale':
         send({'id': q['id'] - 100, 'rc': 0, 'out': 'STALE', 'err': ''})
         send({'id': q['id'], 'rc': 0, 'out': 'fresh', 'err': ''})
+    elif a == 'byeme':
+        send({'id': q['id'], 'rc': 0, 'out': 'last', 'err': '', 'bye': True}); break
     elif a == 'big':
         send({'id': q['id'], 'rc': 0, 'out': '中文' * 50000, 'err': ''})
     elif a == 'stderr':
@@ -215,6 +217,26 @@ check('ocr Zooms 每倍數 +2 s', et('ocr', [], {'Zooms': '2,3,4,5,6,7'}) == (32
 check('click 是輸入類', et('gui', ['click', '1', '2'], {}) == (30.0, True))
 check('seq 內有 click：等待 ×2 + 30', et('gui', ['seq', 'click 1 2; wait 500; waitpix 1500 1,2,3,4,5; ifok click 3 4'], {}) == (34.0, True))
 check('seq 只有 ifnok key 也是輸入類', et('gui', ['seq', 'ifnok key {ESC}'], {})[1])
+check('ifok / ifnok 前綴剝掉後再算等待', et('gui', ['seq', 'ifok wait 2000'], {}) == (27.0, False) and et('gui', ['seq', 'ifnok waitpix 1000 1,2,3,4,5'], {}) == (26.0, False), str(et('gui', ['seq', 'ifok wait 2000'], {})))
+check('fg 前綴：輸入類且等待照算', et('gui', ['seq', 'fg click 1 2; fg wait 1000'], {}) == (32.0, True), str(et('gui', ['seq', 'fg click 1 2; fg wait 1000'], {})))
+check('ifok fg click 疊前綴也是輸入類', et('gui', ['seq', 'ifok fg click 1 2'], {}) == (30.0, True))
+check('waitstill 兩個參數相加', et('gui', ['seq', 'waitstill 3000 600'], {}) == (28.6, False) and et('gui', ['seq', 'waitstill 3000'], {}) == (28.0, False), str(et('gui', ['seq', 'waitstill 3000 600'], {})))
+
+# 9b) 閒置快到期先重開 server；server 回 bye 時 client 主動關
+srv = new_server('t9b'); enable(srv)
+winenv.run_ps(G, 'x'); pid1 = srv.proc.pid
+srv.last_resp = time.time() - (winenv.SERVER_IDLE_MIN * 60 - winenv.IDLE_MARGIN + 1)
+r = winenv.run_ps(G, 'click', '1', '2')
+check('閒置超過 (IDLE-15s) → 送輸入類前先重開 server', r.returncode == 0 and srv.proc.pid != pid1, f'{r.returncode}')
+pid2 = srv.proc.pid
+srv.last_resp = time.time() - 60
+winenv.run_ps(G, 'x')
+check('閒置未到門檻 → 不重開', srv.proc.pid == pid2)
+r = winenv.run_ps(G, 'byeme')
+check('回應帶 bye → 回應照常回傳、client 主動 close', r.returncode == 0 and r.stdout == 'last' and not srv.alive(), f'{r.returncode} {r.stdout!r}')
+r = winenv.run_ps(G, 'click', '3', '4')
+check('bye 之後下一次呼叫自動重開（不是 rc=125）', r.returncode == 0 and srv.alive())
+srv.close()
 
 # 10) 熱重載：腳本 mtime 變了 → 重開
 srv = new_server('t10'); enable(srv)
@@ -364,6 +386,33 @@ finally:
             os.kill(spid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+
+# 13) 呼叫端：walk.gui 對 rc=125 / 唯讀逾時 / 輸入類逾時的處理（monkeypatch run_ps，不碰遊戲）
+import walk  # noqa: E402
+_logs = []
+_orig_log, _orig_run = walk.log, winenv.run_ps
+walk.log = lambda msg, act=True: _logs.append(msg)
+try:
+    def _fake_run(kind):
+        def f(script, *a, timeout=None):
+            if kind == '125':
+                return subprocess.CompletedProcess(['x'], 125, '', 'server 中途結束，輸入類指令不重送\n')
+            raise subprocess.TimeoutExpired(['x'], 1)
+        return f
+    winenv.run_ps = _fake_run('125')
+    out = walk.gui('click', '1', '2')
+    check('walk.gui rc=125 → 寫警告事件、回錯誤文字', len(_logs) == 1 and 'rc=125' in _logs[0] and '中途結束' in out, str(_logs))
+    winenv.run_ps = _fake_run('to'); _logs.clear()
+    check('walk.gui 唯讀逾時 → 回空字串、不丟例外', walk.gui('pixel', '1,2') == '' and len(_logs) == 1)
+    check('walk.gui seq 無輸入類逾時也回空', walk.gui('seq', 'waitpix 1000 1,2,3,4,5') == '')
+    try:
+        walk.gui('seq', 'click 1 2; wait 100'); ok = False
+    except subprocess.TimeoutExpired:
+        ok = True
+    check('walk.gui 輸入類逾時 → 仍丟 TimeoutExpired（動作狀態不明）', ok)
+    check('walk.stat 逾時 → ok=False 字典', walk.stat().get('ok') is False)
+finally:
+    walk.log, winenv.run_ps = _orig_log, _orig_run
 
 print(f'failed={failed}')
 sys.exit(1 if failed else 0)

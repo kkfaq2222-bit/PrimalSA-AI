@@ -107,7 +107,8 @@ def run_ps(script: str, *args: str, timeout: float | None = None) -> subprocess.
 #      並用記下的 Windows PID `taskkill /f`（殺代理不保證 Windows 側的 powershell.exe 跟著死）；
 #   ② SIGTERM / SIGHUP 先 close() 再 raise SystemExit（讓 finally / atexit 跑；呼叫端自裝 handler 則串接）；
 #   ③ 父程序死掉 → stdin EOF → server 自己結束；
-#   ④ serve.ps1 閒置看門狗 SERVER_IDLE_MIN 分鐘（舊 15 分鐘）；
+#   ④ serve.ps1 閒置看門狗 SERVER_IDLE_MIN 分鐘（舊 15 分鐘；到期無聲結束，所以 client 閒置超過 IDLE−15 s 先重開再送）；
+#      serve.ps1 記憶體 / GDI 自保要退出時，最後一個回應帶 bye=true，client 收到就主動 close；
 #   ⑤ gui-server.pids 登記「擁有者 Python PID ↔ server Windows PID」：下次有程序起 server 時，擁有者已死的殘留 server 一併清掉（reap_orphans；登記含平台，只回收同平台）。
 # ---------------------------------------------------------------------------------------------
 SERVER_SCRIPTS = {'gui', 'ocr', 'stat', 'findmark', 'titlematch'}
@@ -122,6 +123,7 @@ SERVER_NAMED = {
 }
 INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'max', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
 START_TIMEOUT = 20.0
+IDLE_MARGIN = 15.0          # client 閒置超過 (SERVER_IDLE_MIN*60 − 此秒數) 就先重開 server
 SERVER_IDLE_MIN = 3         # serve.ps1 閒置看門狗（分鐘）：長程序每秒都有請求，不會誤殺；殘留的 server 最多活這麼久
 CLOSE_WAIT = 2.0            # close()：送 quit + 關 stdin 後等 server 自己退出的秒數，逾時才 kill
 PIDS_FILE = ROOT / 'tools' / '.cache' / 'gui-server.pids'   # 登記擁有者 / server PID，給 reap_orphans 用
@@ -195,17 +197,26 @@ def estimate_timeout(script: str, pos: list[str], named: dict[str, str]) -> tupl
     waits = 0
     is_input = False
     for t in steps:
+        while t and t[0] in ('ifok', 'ifnok', 'fg') and len(t) > 1:   # 剝掉條件 / 前景前綴再判斷真正的指令
+            t = t[1:]
         if not t:
             continue
-        if t[0] in INPUT_CMDS or (t[0] in ('ifok', 'ifnok') and len(t) > 1 and t[1] in INPUT_CMDS):
+        if t[0] in INPUT_CMDS:
             is_input = True
-        if t[0] in ('wait', 'waitpix', 'waitstill') and len(t) > 1 and t[1].isdigit():
+        if t[0] in ('wait', 'waitpix') and len(t) > 1 and t[1].isdigit():
             waits += int(t[1])
-        if t[0] == 'ocr':
-            waits += 0
+        elif t[0] == 'waitstill':          # waitstill <逾時> [開始等待]：兩個參數相加（最壞情況）
+            waits += sum(int(x) for x in t[1:3] if x.isdigit())
     if is_input:
         return waits / 1000.0 * 2 + 30.0, True
     return 20.0 + waits / 1000.0 + (5.0 if waits else 0.0), False
+
+
+def is_input_call(script: str, args) -> bool:
+    """這個呼叫是不是輸入類（會動到輸入 / 前景）：給呼叫端決定逾時後能不能當「讀圖失敗」略過"""
+    name = Path(script).stem
+    pos, named = split_named(name, [str(a) for a in args])
+    return estimate_timeout(name, pos, named)[1]
 
 
 class GuiServer:
@@ -220,6 +231,7 @@ class GuiServer:
         self.next_id = 0
         self.mtimes: dict = {}
         self.mt_checked = 0.0
+        self.last_resp = 0.0        # 上次收到回應的時間：閒置快到期的 server 先重開，避免輸入類請求被看門狗無聲吃掉
 
     # ---- 啟動 / 關閉 ----
     def _argv(self) -> list[str]:
@@ -291,6 +303,7 @@ class GuiServer:
         _start_fails = 0
         self.mtimes = self._watch_files()
         self.mt_checked = time.time()
+        self.last_resp = time.time()
         return True
 
     def _start_failed(self, why: str) -> bool:
@@ -346,6 +359,8 @@ class GuiServer:
             self.mt_checked = now
             if self._watch_files() != self.mtimes:
                 self.close()
+        if self.alive() and self.last_resp and now - self.last_resp > SERVER_IDLE_MIN * 60 - IDLE_MARGIN:
+            self.close()           # serve.ps1 閒置看門狗快到期（到期直接 Exit、不通知）：趁還沒送請求先重開
         return self.alive() or self.start()
 
     def _request(self, req: dict, timeout: float):
@@ -371,6 +386,7 @@ class GuiServer:
             if m is None:
                 return 'eof', None
             if m.get('id') == rid:
+                self.last_resp = time.time()
                 return 'ok', m
             # id 不符（逾時後晚到的舊回應）→ 丟棄
 
@@ -406,6 +422,8 @@ class GuiServer:
             r = subprocess.CompletedProcess(self._argv(), int(m.get('rc', 1)), m.get('out', '') or '', m.get('err', '') or '')
             r.stdout = r.stdout.replace('\r', '')
             r.stderr = r.stderr.replace('\r', '')
+            if m.get('bye'):
+                self.close()       # server 自保（記憶體 / GDI）要退出：回應已拿到，主動關掉，下次呼叫重開
             return r
 
     def admin(self, cmd: str, timeout: float = 10.0) -> dict | None:

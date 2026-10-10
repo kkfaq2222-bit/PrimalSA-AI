@@ -98,10 +98,12 @@ while ($true) {
   if (-not $__psa_line.Trim()) { continue }
   [PsaSrv]::Disarm()
   $__psa_state.req++
-  Send-Psa (Invoke-PsaRequest $__psa_line)
-  if ($__psa_state.quit) { break }
-  # 記憶體 / GDI 自保：超門檻回應後自行結束，client 下次呼叫會重開
+  $__psa_resp = Invoke-PsaRequest $__psa_line
+  # 記憶體 / GDI 自保：超門檻 → 這個回應帶 bye=true 後自行結束，client 收到會主動 close、下次呼叫重開
   $__psa_st = Get-PsaStats
-  if ($__psa_st.gdi -gt $GdiMax -or $__psa_st.mb -gt $MemMaxMB) { break }
+  $__psa_bye = ($__psa_st.gdi -gt $GdiMax -or $__psa_st.mb -gt $MemMaxMB)
+  if ($__psa_bye) { $__psa_resp.bye = $true }
+  Send-Psa $__psa_resp
+  if ($__psa_state.quit -or $__psa_bye) { break }
   [PsaSrv]::Arm($IdleMin * 60000)
 }

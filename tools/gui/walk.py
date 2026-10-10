@@ -102,7 +102,16 @@ def log(msg: str, act: bool = True) -> None:
 def gui(*args: str, note: str = '') -> str:
     """直接呼叫 powershell.exe -File gui.ps1（不經 bash）；WSL / Windows 原生都通。
     動到遊戲的指令 gui.ps1 會自己寫操作 log；note = 附註用途（-Note）"""
-    r = winenv.run_ps('gui.ps1', *args, *(['-Note', note] if note else []))
+    try:
+        r = winenv.run_ps('gui.ps1', *args, *(['-Note', note] if note else []))
+    except subprocess.TimeoutExpired:
+        if winenv.is_input_call('gui.ps1', args):
+            raise          # 輸入類逾時：動作做到哪不明，不能當沒事，交給呼叫端 / 使用者
+        log(f'警告：唯讀 gui {args[0]} 逾時（server 已重開），視同讀圖失敗', act=False)
+        return ''          # 唯讀逾時 = 這一輪讀圖失敗，回空結果讓呼叫端進下一輪
+    if r.returncode == 125:
+        # 常駐 server 處理輸入類請求時中途結束：動作可能做了一半，不重送；留事件讓使用者 / 呼叫端知道
+        log(f'警告：gui {args[0]} 時常駐 server 中途結束（rc=125，輸入類不重送，動作可能沒做完）')
     out = (r.stdout.strip() or r.stderr.strip())
     if os.environ.get('WALK_DEBUG') or os.environ.get('HEAL_DEBUG'):
         print('   ', args[0], '→', out.replace('\n', ' | '), flush=True)
@@ -155,7 +164,10 @@ def split(a: tuple[int, int], b: tuple[int, int], lim: int = MAX_TILES) -> list[
 
 # ---------------- 讀座標（stat.ps1 OCR，每次約 0.18 秒；一次性約 0.9 秒、常駐 server 約 0.18 秒）----------------
 def stat() -> dict:
-    r = winenv.run_ps('stat.ps1')
+    try:
+        r = winenv.run_ps('stat.ps1')
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'error': 'stat 逾時（server 已重開）'}
     line = (r.stdout.strip().splitlines() or [''])[-1]
     try:
         return json.loads(line)
