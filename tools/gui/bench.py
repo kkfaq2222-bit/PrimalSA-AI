@@ -77,7 +77,7 @@ PY_TARGETS = {
 def run_once(script: str, args: list[str], script_dir: Path | None = None, server: bool = False) -> tuple[float, str]:
     """跑一次，回 (秒, 輸出文字)。script_dir 不是 None 且底下有該腳本就用它（舊版對照）；server=True 經常駐 server"""
     winenv._enabled = server
-    winenv.DEFAULT_ON = True     # bench 自己決定走不走 server，不受預設關影響
+    winenv.DEFAULT_ON = True     # bench 自己決定走不走 server，不受平台預設影響
     if script in PY_TARGETS:
         t0 = time.perf_counter()
         out = PY_TARGETS[script]()

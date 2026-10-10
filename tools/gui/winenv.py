@@ -7,7 +7,7 @@
   winenv.to_windows(path)         # 專案內（或任意）路徑 → Windows 路徑字串，給 powershell.exe 當參數
   winenv.ps_argv('gui.ps1', 'info')   # → ['powershell.exe', '-NoProfile', ..., '-File', <Windows 路徑>, 'info']
   winenv.run_ps('gui.ps1', 'shot')    # 執行並回傳 CompletedProcess（UTF-8、errors=replace、已去掉 \\r）
-  winenv.enable_server()          # 長程序（quest / heal / petwatch / walk 主流程）明確呼叫；目前預設關，PSA_GUI_SERVER=1 才走常駐 serve.ps1（=0 一律關）
+  winenv.enable_server()          # 長程序（quest / heal / petwatch / walk 主流程）明確呼叫；WSL 預設走常駐 serve.ps1、Windows 原生需 PSA_GUI_SERVER=1（=0 一律關）
 
 命令列自測：python tools/gui/winenv.py
 """

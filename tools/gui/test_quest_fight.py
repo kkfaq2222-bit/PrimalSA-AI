@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import quest  # noqa: E402
+_REAL_PS_JSON = quest.ps_json   # 後面測試會把 ps_json 換成假的，這裡留真的給 ps_json 自己的測試
 import battleguard  # noqa: E402
 import tempfile as _tf
 battleguard.LOCK_FILE = Path(_tf.mkdtemp()) / 'battle.lock'      # 測試用鎖檔位置，不碰真正的 tools/.cache/battle.lock
@@ -861,6 +862,24 @@ quest.warn_not_battle(next(t for t in quest.walk.psa.task_steps('碧青洞窟')[
 quest.warn_not_battle(next(t for t in quest.walk.psa.task_steps('碧青洞窟')[1] if t.get('step') == 5))
 ok &= check('步 6（對話）警告、步 5（戰鬥）不警告', len(EV) == 1 and '第 6 步不是戰鬥步' in EV[0], str(EV))
 quest.event = lambda m, shot=None: print(f'   {m}')
+
+# ---- ps_json：唯讀逾時回 {'ok': False}、rc=125 寫警告 ----
+import subprocess as _sp, types as _ty
+_real_run_ps, _real_log = quest.winenv.run_ps, quest.log
+_LOGS = []
+quest.ps_json = _REAL_PS_JSON
+quest.log = lambda m, act=True: _LOGS.append(m)
+def _raise(*a, **k): raise _sp.TimeoutExpired('ps', 1)
+quest.winenv.run_ps = _raise
+r = quest.ps_json('ocr.ps1', 1, 2, 3, 4)
+ok &= check('ps_json 唯讀逾時 → ok False、不丟例外', r.get('ok') is False and any('逾時' in m for m in _LOGS), str(r))
+_LOGS.clear()
+quest.winenv.run_ps = lambda *a, **k: _ty.SimpleNamespace(returncode=125, stdout='', stderr='boom')
+r = quest.ps_json('findmark.ps1')
+ok &= check('ps_json rc=125 → 寫警告、ok False', r.get('ok') is False and any('rc=125' in m for m in _LOGS), str(r))
+quest.winenv.run_ps = lambda *a, **k: _ty.SimpleNamespace(returncode=0, stdout='noise\n{"ok": true, "lines": []}\n', stderr='')
+ok &= check('ps_json 正常解析', quest.ps_json('ocr.ps1').get('ok') is True)
+quest.winenv.run_ps, quest.log = _real_run_ps, _real_log
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

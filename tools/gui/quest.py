@@ -54,6 +54,7 @@ import argparse
 import os
 import difflib
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -154,7 +155,14 @@ def read_screen() -> dict:
 
 def ps_json(script: str, *args) -> dict:
     """跑 tools/gui 的 PowerShell 腳本（ocr.ps1 / findmark.ps1）→ 解析輸出的 JSON；失敗回 {'ok': False}"""
-    r = winenv.run_ps(script, *[str(a) for a in args])
+    try:
+        r = winenv.run_ps(script, *[str(a) for a in args])
+    except subprocess.TimeoutExpired:
+        # ocr.ps1 / findmark.ps1 都是唯讀：逾時（server 已重開）當這一輪讀圖失敗，呼叫端進下一輪
+        log(f'警告：唯讀 {script} 逾時（server 已重開），視同讀圖失敗', act=False)
+        return {'ok': False, 'error': f'{script} 逾時'}
+    if r.returncode == 125:
+        log(f'警告：{script} 時常駐 server 中途結束（rc=125），視同讀圖失敗')
     try:
         return json.loads(r.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -1369,7 +1377,7 @@ def _main() -> int:
 
 def main() -> int:
     """包一層：不論怎麼結束（含例外 / Ctrl-C）都刪自己的戰鬥鎖檔"""
-    winenv.enable_server()   # 長程序：用常駐 server 讀畫面（預設關，PSA_GUI_SERVER=1 才啟用）
+    winenv.enable_server()   # 長程序：用常駐 server 讀畫面（WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）
     try:
         return _main()
     finally:

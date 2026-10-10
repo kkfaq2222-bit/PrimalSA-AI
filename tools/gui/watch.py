@@ -645,7 +645,7 @@ def main(argv=None) -> int:
         print('不是 WSL / Windows，無法讀遊戲視窗', file=sys.stderr)
         return 2
     _install_signals()                                  # 先裝訊號 handler，再 enable_server()（winenv 會串接）
-    os.environ.setdefault('PSA_GUI_SERVER', '1')        # watch 強制走常駐 server（繞過 DEFAULT_ON=False；使用者顯式 =0 仍尊重）
+    os.environ.setdefault('PSA_GUI_SERVER', '1')        # watch 強制走常駐 server（Windows 原生預設關也強制開；使用者顯式 =0 仍尊重）
     if a.once:
         return cmd_once(a.dump_px)
     if a.bench:
