@@ -262,7 +262,7 @@ def low(s: dict, hp: int, mp: int) -> bool | None:
 
 
 def main() -> int:
-    winenv.enable_server()   # 長程序：預設關，PSA_GUI_SERVER=1 才啟用常駐 server
+    winenv.enable_server()   # 長程序：WSL 預設啟用常駐 server（Windows 原生需 PSA_GUI_SERVER=1；=0 關閉）
     ap = argparse.ArgumentParser(description='回村補血再回練功點')
     ap.add_argument('--spot', default='波拉島', choices=SPOTS)
     ap.add_argument('--no-return', action='store_true', help='補完血停在醫院，不傳回練功點、不開原地遇敵（解任務被打飛後用；不能和 --watch 併用）')

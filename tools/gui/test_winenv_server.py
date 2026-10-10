@@ -177,7 +177,26 @@ winenv._enabled = True; winenv.DEFAULT_ON = False
 check('DEFAULT_ON=False 且沒設 PSA_GUI_SERVER=1 → 不走 server', not winenv._server_wanted('gui.ps1'))
 os.environ['PSA_GUI_SERVER'] = '1'
 check('PSA_GUI_SERVER=1 → 走 server', winenv._server_wanted('gui.ps1'))
-del os.environ['PSA_GUI_SERVER']; winenv.DEFAULT_ON = True
+del os.environ['PSA_GUI_SERVER']
+# DEFAULT_ON=None：依平台（WSL 預設開、Windows 原生 / linux 預設關）
+winenv.DEFAULT_ON = None
+_pk = winenv.platform_kind
+try:
+    winenv.platform_kind = lambda *a, **k: 'wsl'
+    check('DEFAULT_ON=None + WSL → 走 server', winenv._server_wanted('gui.ps1'))
+    os.environ['PSA_GUI_SERVER'] = '0'
+    check('DEFAULT_ON=None + WSL + PSA_GUI_SERVER=0 → 不走 server', not winenv._server_wanted('gui.ps1'))
+    del os.environ['PSA_GUI_SERVER']
+    for kind in ('windows', 'linux'):
+        winenv.platform_kind = lambda *a, _k=kind, **k: _k
+        check(f'DEFAULT_ON=None + {kind} → 不走 server', not winenv._server_wanted('gui.ps1'))
+    winenv.platform_kind = lambda *a, **k: 'windows'
+    os.environ['PSA_GUI_SERVER'] = '1'
+    check('DEFAULT_ON=None + windows + PSA_GUI_SERVER=1 → 走 server', winenv._server_wanted('gui.ps1'))
+    del os.environ['PSA_GUI_SERVER']
+finally:
+    winenv.platform_kind = _pk
+winenv.DEFAULT_ON = True
 srv.close()
 
 # 8) 參數拆解

@@ -129,7 +129,7 @@ CLOSE_WAIT = 2.0            # close()：送 quit + 關 stdin 後等 server 自�
 PIDS_FILE = ROOT / 'tools' / '.cache' / 'gui-server.pids'   # 登記擁有者 / server PID，給 reap_orphans 用
 START_FAILS_MAX = 3         # 連續起不來幾次就退回一次性
 COOLDOWN = 300.0            # 退回一次性的冷卻秒數
-DEFAULT_ON = False          # 預設關：完整跑過一次真實任務、使用者同意後才改 True；在此之前用環境變數 PSA_GUI_SERVER=1 試用
+DEFAULT_ON = None           # None = 依平台：WSL 預設開、Windows 原生預設關（2026-10-10 使用者同意；Windows 原生未量測，需 PSA_GUI_SERVER=1）
 _enabled = False
 _cooldown_until = 0.0
 _start_fails = 0
@@ -139,7 +139,7 @@ _errlog_last: dict = {}
 
 def enable_server() -> None:
     """長程序明確呼叫一次：標記「這個程序適合用常駐 server」。短命程序不要呼叫（起 server 要 ~0.5 秒）。
-    實際是否啟用還要看 DEFAULT_ON 或環境變數 PSA_GUI_SERVER=1（=0 一律關閉）。"""
+    實際是否啟用還要看 _default_on()（WSL 預設開）或環境變數 PSA_GUI_SERVER=1（=0 一律關閉）。"""
     global _enabled
     _enabled = True
 
@@ -162,9 +162,14 @@ def split_named(script: str, args) -> tuple[list[str], dict[str, str]]:
     return pos, named
 
 
+def _default_on() -> bool:
+    """DEFAULT_ON 明確設 True / False 就照用；None 時只有 WSL 預設開。"""
+    return DEFAULT_ON if DEFAULT_ON is not None else platform_kind() == 'wsl'
+
+
 def _server_wanted(script: str) -> bool:
     env = os.environ.get('PSA_GUI_SERVER')
-    if not _enabled or env == '0' or not (DEFAULT_ON or env == '1') or time.time() < _cooldown_until:
+    if not _enabled or env == '0' or not (_default_on() or env == '1') or time.time() < _cooldown_until:
         return False
     p = Path(script)
     if p.is_absolute() and p.parent != GUI_DIR:

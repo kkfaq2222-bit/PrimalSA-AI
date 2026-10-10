@@ -221,7 +221,7 @@ def take_lock() -> bool:
 
 
 def main() -> int:
-    winenv.enable_server()   # 長程序：預設關，PSA_GUI_SERVER=1 才啟用常駐 server
+    winenv.enable_server()   # 長程序：WSL 預設啟用常駐 server（Windows 原生需 PSA_GUI_SERVER=1；=0 關閉）
     ap = argparse.ArgumentParser(description='監測金布伊等級，到門檻換回迪基格斯')
     ap.add_argument('--once', action='store_true', help='只掃一輪（預設只讀；加 --apply 才換）')
     ap.add_argument('--apply', action='store_true', help='--once 時也執行換回')
