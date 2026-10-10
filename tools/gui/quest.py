@@ -27,7 +27,7 @@
            （OCR）對照 Task 表 explandTn 找目前步驟的 endNpc；讀不到 / 對不到（或兩步相似且 NPC 不同）→ 退出碼 31，不點任何東西，絕不退回「第一個戰鬥步」
   --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過）：--fight 點 NPC 前、預設模式（要點追蹤 / 黃問號時）每次點之前（至少隔 TEAM_CHECK_GAP=20 秒）開切換面板 763,760，
            讀 5 張卡片的隊伍標籤，要「1 隊長 + (N-1) 隊員」（N=5 即 5 人都要在隊）；面板上其他卡片是單人 / 不在隊（例如單人 DKB0）不算錯；隊員不夠 / 隊長不是 1 個 / 讀不到 → 不點、事件 log 寫出誰不在隊、關面板（✕ 1064,208）；--fight 開打前退出碼 30、執行中發現脫隊退出碼 32。
-           --solo / --no-click / --no-track 不檢查。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
+           --solo / --fight --no-click 不檢查。**開始前一定先驗**：非 --solo 模式（含 --no-track / --stop-after-*）第一次點 / 按對話框前先驗一次（不受 GAP 限制），不符退出碼 30；啟動時對話框已開 → 先 ESC 再驗（2026-10-10 18:44 事件：--solo 後單人直接 --stop-after-rewards 只有 DKB0 交任務）。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
   戰鬥鎖檔  所有模式一進戰鬥就寫 tools/.cache/battle.lock（pid + 開始時間），戰鬥結束 / 程式結束（finally）刪除；ass.py 看到有效鎖檔 = 戰鬥中，不改外掛設定（見 ui/ass.md）
   組隊預設模式（非 --solo / --fight）：**每一場戰鬥**（完整戰鬥或快速戰鬥、不分任務 / 路上）都刷新角色；完整戰鬥自動戰鬥鈕是關的 → 先按 1380,600；同一場按 4 次仍關（寵物指令視窗等）→ 退出碼 25
   刷新角色規則：--solo / --fight 只有任務 / BOSS 戰（點 NPC / 對話後 QUEST_BATTLE_WINDOW 內開始）刷新，路上小怪直接逃、不刷新；預設模式每場都刷新（--no-refresh 全關）。同一場最多每 REFRESH_GAP 秒刷新一次。
@@ -46,7 +46,7 @@
            2. 沒有 → 在追蹤列表先用標題圖片樣板比對（titlematch，0.7 秒）、沒樣板 / 沒找到才用 OCR（ocr.ps1，成功會存樣板）找 --task 那一格，必要時捲動列表，確認標題相符才點 → 開始（繼續）巡路
   不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）
   追蹤沒反應 點了任務追蹤約 5 秒（TRACK_RETRY_SECS 重點一次、再等一輪）都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
-退出碼：30 隊伍不符（--fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、0 正常結束（任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、0 正常結束（任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -912,7 +912,7 @@ def _main() -> int:
     ap.add_argument('--fight', action='store_true', help='戰鬥步（要先站在 NPC 附近；不巡路）：點 NPC → 對話左鈕 → 開打；只有點 NPC / 按對話框後 %d 秒內開始的才是任務 / BOSS 戰（開自動戰鬥 + 刷新角色、打完退出碼 0）；其他戰鬥是路上小怪（關自動戰鬥、按逃跑、不刷新）；沒反應退出碼 22、對話後沒開打 23、被打飛 21' % QUEST_BATTLE_WINDOW)
     ap.add_argument('--npc', default='', help='--fight 用：NPC 的地圖座標 X,Y，或 auto（讀追蹤條目目前步驟說明對 --task 的任務表找 NPC；讀不到退出碼 31，可改 --step N）；不給 = 必須加 --no-click')
     ap.add_argument('--step', type=int, default=0, help='--fight 用：明確指定任務第 N 步（Task.step）的 endNpc 當 NPC（等於 --npc auto 但不 OCR 追蹤條目；需要 --task）')
-    ap.add_argument('--team-size', type=int, default=None, help='隊伍人數檢查（預設 5）：--fight 點 NPC 前、預設模式每次點追蹤 / 黃問號前，開切換面板確認 1 隊長 + (N-1) 隊員，不符 → 不點（--fight 退出碼 %d、執行中脫隊 %d）；0 或 1 = 跳過；--solo / --no-click / --no-track 不檢查' % (EXIT_TEAM_MISMATCH, EXIT_TEAM_LOST))
+    ap.add_argument('--team-size', type=int, default=None, help='隊伍人數檢查（預設 5）：--fight 點 NPC 前、預設模式每次點追蹤 / 黃問號前，開切換面板確認 1 隊長 + (N-1) 隊員，不符 → 不點（--fight 退出碼 %d、執行中脫隊 %d）；開始前第一次點 / 按對話框前一定先驗（不符 30）；0 或 1 = 跳過；--solo / --fight --no-click 不檢查' % (EXIT_TEAM_MISMATCH, EXIT_TEAM_LOST))
     ap.add_argument('--at', default='', help='--fight 用：自己目前的座標 X,Y（不給就 OCR 讀右上角）')
     ap.add_argument('--no-click', action='store_true', help='--fight 用：不點 NPC（已手動點過 / 對話已開），從現在起算開打時間窗')
     ap.add_argument('--max-seconds', type=int, default=900, help='最長執行秒數（預設 900）')
@@ -996,14 +996,16 @@ def _main() -> int:
     if guard_ko:
         event(f'模式：{"單人逃跑 --solo" if a.solo else "戰鬥步 --fight"}；起點 {last_pos}')
     team_size = 5 if a.team_size is None else a.team_size
-    team_on = team_size > 1 and not a.solo and (bool(npc_xy) if a.fight else not a.no_track)     # --solo 本來就是單人跑；--no-click / --no-track 不會點 NPC / 追蹤
+    team_on = team_size > 1 and not a.solo and (bool(npc_xy) if a.fight else True)     # --solo 本來就是單人跑；--fight --no-click 不點 NPC。預設模式即使 --no-track 也會按對話框 → 一樣要驗隊伍
     last_team_check = 0.0
+    pre_checked = not team_on    # 第一次點任何東西 / 按對話框之前是否已驗過隊伍（不受 TEAM_CHECK_GAP 限制）
+    dialog_esc = 0               # 啟動時對話框已開：為了開切換面板先 ESC 關掉的次數
 
-    def team_gate(tag: str, code: int) -> int:
+    def team_gate(tag: str, code: int, force: bool = False) -> int:
         """點 NPC / 追蹤前的隊伍檢查（脫隊偵測的保底做法：聊天日誌「離開了隊伍」讀不可靠，所以每次要點之前確認隊伍還在）。
         符合（或不檢查 / 剛檢查過）回 0；隊伍不符或讀不到 → 寫事件 log 回 code（呼叫端直接 return）"""
         nonlocal last_team_check
-        if not team_on or time.time() - last_team_check < TEAM_CHECK_GAP:
+        if not team_on or (not force and time.time() - last_team_check < TEAM_CHECK_GAP):
             return 0
         ok_, desc = check_team(team_size, tag)
         last_team_check = time.time()
@@ -1020,9 +1022,10 @@ def _main() -> int:
 
     if a.fight:
         if npc_xy and read_screen()['state'] == 'idle':
-            rc = team_gate('--fight 點 NPC 前：', EXIT_TEAM_MISMATCH)
+            rc = team_gate('--fight 點 NPC 前：', EXIT_TEAM_MISMATCH, force=True)
             if rc:
                 return rc
+            pre_checked = True
         if npc_xy:
             if not click_npc(npc_xy, a):
                 return 4
@@ -1092,6 +1095,20 @@ def _main() -> int:
         if st in ('walking', 'dialog', 'reward', 'battle'):
             if tracked:
                 tracked, track_fail = False, 0
+        if not pre_checked and st in ('idle', 'dialog'):
+            # 啟動後第一次點 / 按之前一定先驗隊伍（2026-10-10 18:44 事件：--solo 後單人，--stop-after-rewards 啟動直接按對話框 → 只有 DKB0 交任務）
+            if st == 'dialog':
+                # 對話框開著蓋住切換面板鈕：先 ESC 關掉（不回答任何選項，同 --solo），回主迴圈等 idle 再驗；ESC 3 次還開著 → 無法驗證，不按
+                if dialog_esc >= 3:
+                    event(f'啟動時對話框開著，ESC {dialog_esc} 次仍關不掉 → 無法先驗隊伍，不按對話框，退出碼 {EXIT_TEAM_MISMATCH}', snap('team-mismatch'))
+                    return EXIT_TEAM_MISMATCH
+                dialog_esc += 1
+                gui('key', '{ESC}', note='啟動時對話框已開：先 ESC 關閉（不回答），驗過隊伍才處理')
+                time.sleep(a.every)
+                continue
+            if (rc := team_gate('開始前：', EXIT_TEAM_MISMATCH, force=True)):
+                return rc
+            pre_checked = True
         if st == 'dialog' and a.solo:
             shot = snap('npc-dialog')
             gui('key', '{ESC}', note='到達 NPC：ESC 關閉對話框（不回答任何選項）')

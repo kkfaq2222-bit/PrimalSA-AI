@@ -188,7 +188,9 @@ class Script:
         return ''
 
 
-def run2(argv, sim, clef_ret=None):
+def run2(argv, sim, clef_ret=None, team=False):
+    if not team and '--team-size' not in argv and '--solo' not in argv:
+        argv = argv + ['--team-size', '0']      # 舊案例不測隊伍；要測隊伍檢查的案例傳 team=True
     quest.time.time, quest.time.sleep = sim.time, sim.sleep
     quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: None
     quest.walk.gui = sim.gui
@@ -452,13 +454,41 @@ print('(n2) 預設模式（要點追蹤）：開跑前檢查；脫隊 → 退出
 TEAM['calls'] = []
 s = Script([IDLE, IDLE])
 TEAM['ret'] = (False, "不在隊 ['DKB03']")
-rc = run2(['--task', 'x', '--max-seconds', '60'], s)
-ok &= check('exit 32 且沒有點擊（find_marker / track_task 沒被呼叫）', rc == quest.EXIT_TEAM_LOST and not s.clicks and len(TEAM['calls']) == 1, f'rc={rc} {s.clicks}')
-for extra in (['--no-track'], ['--solo', '--no-track']):
+rc = run2(['--task', 'x', '--max-seconds', '60'], s, team=True)
+ok &= check('exit 30（開始前驗隊伍）且沒有點擊（find_marker / track_task 沒被呼叫）', rc == quest.EXIT_TEAM_MISMATCH and not s.clicks and len(TEAM['calls']) == 1, f'rc={rc} {s.clicks}')
+for extra in (['--solo', '--no-track'], ['--no-track', '--team-size', '0']):
     TEAM['calls'] = []
     s = Script([IDLE, IDLE, IDLE, IDLE])
-    rc = run2(extra + ['--max-seconds', '4'], s)
+    rc = run2(extra + ['--max-seconds', '4'], s, team=True)
     ok &= check(f'{" ".join(extra)} 不檢查隊伍', not TEAM['calls'] and rc == 0, f'rc={rc}')
+TEAM['calls'], TEAM['ret'] = [], (False, "不在隊 ['DKB03']")
+s = Script([IDLE, IDLE])
+rc = run2(['--no-track', '--max-seconds', '4'], s, team=True)
+ok &= check('預設模式 --no-track 也先驗隊伍：不符 → 30、沒點擊', rc == quest.EXIT_TEAM_MISMATCH and not s.clicks and len(TEAM['calls']) == 1, f'rc={rc} {s.clicks}')
+
+print('(n4) 2026-10-10 18:44 事件：--solo 後隊伍散成單人，--stop-after-rewards 啟動 → 先驗隊伍，不符退出碼 30、沒有任何點擊')
+TEAM['calls'], TEAM['ret'] = [], (False, "隊長 無、隊員 無、不在隊 / 單人 / 離線 ['DKB0', 'DKB02', 'DKB03', 'DKB04', 'DKB05']")
+for first in (IDLE, DIALOG):
+    s = Script([first, IDLE, IDLE, DIALOG, REWARD, IDLE])
+    rc = run2(['--task', '碧青洞窟', '--stop-after-rewards', '1', '--max-seconds', '180'], s, team=True)
+    ok &= check(f'起始畫面 {first["state"]}：exit 30、沒有任何點擊（含對話左鈕 / 獎勵確認）', rc == quest.EXIT_TEAM_MISMATCH and not s.clicks, f'rc={rc} clicks={s.clicks} calls={TEAM["calls"]}')
+    ok &= check('  開始前驗了一次（人數 5）', TEAM['calls'] and TEAM['calls'][-1] == (5, '開始前：'), str(TEAM['calls']))
+    TEAM['calls'] = []
+print('(n5) 啟動時對話框已開：先 ESC（不按左鈕）、回 idle 驗隊伍；通過才處理對話 / 獎勵')
+TEAM['calls'], TEAM['ret'] = [], (True, 'ok')
+s = Script([DIALOG, IDLE, DIALOG, DIALOG, REWARD, IDLE])
+rc = run2(['--no-track', '--stop-after-rewards', '1', '--max-seconds', '180'], s, team=True)
+keys = [c for c in s.clicks if c[1].startswith('click 948 461')]
+ok &= check('exit 0（5 人隊正常領獎）、第一次驗隊伍在第一次按左鈕之前', rc == 0 and len(TEAM['calls']) == 1 and len(keys) == 2 and bool(has(s, 'click 720 572')), f'rc={rc} {s.clicks} {TEAM["calls"]}')
+s = Script([DIALOG])
+rc = run2(['--task', 'x', '--max-seconds', '60'], s, team=True)
+ok &= check('對話框 ESC 3 次仍關不掉 → 30、不按左鈕', rc == quest.EXIT_TEAM_MISMATCH and not has(s, 'click 948 461'), f'rc={rc} {s.clicks}')
+print('(n6) 正常 5 人隊 idle 啟動：驗過一次後照常按對話 / 領獎')
+TEAM['calls'] = []
+s = Script([IDLE, DIALOG, DIALOG, REWARD, IDLE])
+rc = run2(['--no-track', '--stop-after-rewards', '1', '--max-seconds', '180'], s, team=True)
+ok &= check('exit 0、只驗 1 次（開始前）、有按對話左鈕', rc == 0 and TEAM['calls'] == [(5, '開始前：')] and len(has(s, 'click 948 461')) == 2, f'rc={rc} {TEAM["calls"]} {s.clicks}')
+TEAM['ret'] = (True, 'ok')
 print('(n3) 預設模式：兩次檢查間隔 >= TEAM_CHECK_GAP（通過後不每秒都開面板）')
 TEAM['ret'], TEAM['calls'] = (True, 'ok'), []
 tracked_n = []
