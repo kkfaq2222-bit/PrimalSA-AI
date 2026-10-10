@@ -18,6 +18,7 @@ import time
 
 import layout
 import netwatch
+import screen_sigs
 import winenv
 from walk import LAYOUT, PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
 
@@ -53,8 +54,8 @@ SIG_TAB = {TAB_TOWN: '185,175,243,173,63', TAB_LEVEL: '185,293,243,175,64'}   # 
 SIG_HUD = '1300,745,254,0,0/520,57,208,167,118'
 # 小護士對話框：兩顆按鈕米色 + 對話框棕底（主畫面沙地 245,225,171 很像米色，所以一定要配棕底一起判斷）
 SIG_DIALOG = '948,445,229,197,155/1220,445,229,197,155/1360,300,107,70,44/1100,350,107,70,44'
-SIG_ENC_ON = '1380,630,129,6,0/1360,632,179,12,0'          # 「取消遇敵」紅龍頭（容差 50）
-SIG_ENC_OFF = '1380,630,129,6,0!/1360,632,179,12,0!'
+SIG_ENC_ON = screen_sigs.sig_str(screen_sigs.ENC_ON)             # 「取消遇敵」紅龍頭（容差 50 = screen_sigs.ENC_TOL）
+SIG_ENC_OFF = screen_sigs.sig_str(screen_sigs.ENC_ON, neg=True)
 # 戰鬥中（快速戰鬥沒有戰鬥畫面）角色頭上有綠色「VS」牌；這時傳送會被擋「非正常狀態不能傳送」
 # 傳送抵達點的固定景物（HUD 回來後再比對，對得上就不用 OCR 讀座標，省約 1 秒；對不上才 OCR）
 SIG_ARRIVE = {
@@ -112,8 +113,8 @@ def encounter_on() -> bool:
 def encounter_steps(on: bool) -> str:
     """seq：先看一次，已經是目標狀態就不點（ifnok）；不是就點引子 + 遇敵鈕，再等圖示變色"""
     sig = SIG_ENC_ON if on else SIG_ENC_OFF
-    return (f'waitpix 0 {sig} 50; ifnok {PRIMER.replace("; wait", "; ifnok wait")}; '
-            f'ifnok click {ENCOUNTER[0]} {ENCOUNTER[1]}; ifnok waitpix 1500 {sig} 50')
+    return (f'waitpix 0 {sig} {screen_sigs.ENC_TOL}; ifnok {PRIMER.replace("; wait", "; ifnok wait")}; '
+            f'ifnok click {ENCOUNTER[0]} {ENCOUNTER[1]}; ifnok waitpix 1500 {sig} {screen_sigs.ENC_TOL}')
 
 
 def encounter_done(out: str) -> bool:

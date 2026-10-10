@@ -644,8 +644,8 @@ pt3 = quest.pick_select_card(row2)
 ok &= check('NPC 在第 2 排（y+100）→ y 跟著下移', pt3 is not None and pt3[1] == pt[1] + 100, str(pt3))
 ok &= check('沒有黃字（全是隊友白字）→ None，不亂點', quest.pick_select_card([b for b in SAMPLE_BLOBS if not (1100 < b['x'] < 1250 and 320 < b['y'] < 350)]) is None and quest.pick_select_card([]) is None)
 
-SELECT_COL = {(x, y): (r, g, b) for x, y, r, g, b in quest.SIG_SELECT}
-HUD_COL = {(x, y): (r, g, b) for x, y, r, g, b in quest.SIG_HUD}
+SELECT_COL = {(x, y): (r, g, b) for x, y, r, g, b, *_ in quest.SIG_SELECT}
+HUD_COL = {(x, y): (r, g, b) for x, y, r, g, b, *_ in quest.SIG_HUD}
 
 
 def fake_pixel_gui(colors):
@@ -688,7 +688,7 @@ rc = run2(['--no-track', '--max-seconds', '60'], s)
 ok &= check(f'最多點 {quest.SELECT_MAX_TRIES} 次，exit 2', rc == 2 and len([c for c in s.clicks if c[1].startswith('click 117')]) == quest.SELECT_MAX_TRIES, f'rc={rc} n={len(s.clicks)}')
 
 print('(s) 底部「關閉」列 + 5 頭像：刷新前先點左側關閉 510,745')
-ROW_BTN = {(x, y): (r, g, b) for x, y, r, g, b in quest.SIG_CLOSE_ROW}
+ROW_BTN = {(x, y): (r, g, b) for x, y, r, g, b, *_ in quest.SIG_CLOSE_ROW}
 
 
 class RowGame:

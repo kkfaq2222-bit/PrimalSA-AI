@@ -60,11 +60,14 @@ from pathlib import Path
 
 import battleguard
 import clef
+import screen_sigs
 import layout
 import netwatch
 import winenv
 import walk
 from walk import ROOT, gui, log, PRIMER, stat
+from screen_sigs import (SIG_CMD, SIG_AUTO_OFF, SIG_CLOSE_ROW, SIG_SELECT, SIG_DIALOG, SIG_REWARD, SIG_PANEL, SIG_HUD,  # noqa: F401
+                         SIG_BATTLE, VS_PROBE, VS_COLOR, AW_POINTS, AW_MIN, TOL, close)
 import re
 
 EXIT_AT_NPC = 20                     # --solo：到達 NPC（對話框已 ESC 關閉）
@@ -103,41 +106,29 @@ QUEST_BATTLE_WINDOW = 15.0           # 最後一次「按對話框 / 點 NPC / �
 ESCAPE_BTN = (1283, 168)             # 完整戰鬥下指令畫面右上角指令框的「逃跑」（跑步小人，第 2 排最右；2026-10-10 實測，點了出現 Escape! 泡泡）
 AUTO_BTN = (1380, 600)               # 戰鬥畫面右側「自動戰鬥」鈕（點一下切換開 / 關，同外掛 ASS 的自動戰鬥；日誌「你已開啟 / 關閉自動戰鬥」）
 # 下指令階段（右上指令框 + 上方「N回合 / 剩餘時間」）：播放中框會消失，用框的底色 / 邊框 + 逃跑鈕判斷（2026-10-10 實測，容差 25）
-SIG_CMD = [(1283, 168, 143, 119, 102), (1100, 170, 139, 117, 98), (1100, 60, 187, 161, 131), (1250, 60, 187, 161, 131), (1060, 200, 133, 100, 72)]
-# 自動戰鬥鈕「關」= 靜止的紅色圖示（兩點固定）；「開」是會擺動的刀劍動畫，顏色不固定 → 只判斷「是不是關」（容差 20）
-SIG_AUTO_OFF = [(1380, 600, 75, 29, 16), (1375, 605, 249, 181, 100)]
+# SIG_CMD（下指令階段）/ SIG_AUTO_OFF（自動戰鬥鈕關）：特徵與容差在 screen_sigs.py（2026-10-10 實測，容差 25 / 20）
 SAVE_POINT = (1000, 93, 99)          # 薩姆吉爾的儲存點巫女 1000:94,99、復活 / 傳送落點 92,99 附近（知識庫 Npc 3014）
 KO_RADIUS = 8                        # 地圖 1000 且離儲存點這麼近（格）才可能是「被打飛」
 # 戰鬥中底部「關閉」直式鈕 + 5 個角色頭像列（上方有綠字「如果遇到下指令出錯等問題，可使用下方[切換]按鈕切換至其他角色」）：它蓋住「切換」鈕，刷新前要先點左側「關閉」收起來。
 # 實機樣本 tools/.cache/battle-samples/cmd_a.png（2026-10-10）：關閉鈕半透明灰米色 ≈(188,162,134)（容差 22）、右側深色頭像條（RGB 都 < 95）；21 張戰鬥樣本全中、其餘 455 張截圖（含主畫面 / 對話 / 選擇面板）0 誤判
 CLOSE_ROW_BTN = (510, 745)
-SIG_CLOSE_ROW = [(480, 745, 188, 162, 134), (500, 710, 188, 162, 134), (490, 800, 182, 158, 130), (520, 745, 188, 162, 135)]
+# SIG_CLOSE_ROW（容差 22）在 screen_sigs.py
 CLOSE_ROW_DARK = [(555, 745), (1085, 745)]
 # 「選擇對象」面板（點 NPC 後右側跳出的米色面板：頭像卡片，名字在卡片下方，NPC 是黃 / 金字 (255,2xx,0)、隊友白字）。
 # 實機樣本 tools/.cache/quest-log/172356-no-npc.png（2026-10-10，碧青 8 樓水的守護獸）：面板外框 1106～1420 × 230～560，左右棕色邊框 + 內部米色漸層；
 # 8 點（容差 40）全中，其餘 475 張截圖 0 誤判。名字黃字用 findmark.ps1 的黃色色塊找（NPC 名字拆成十來塊 w<=16 h<=16）。
-SIG_SELECT = [(1112, 300, 104, 79, 48), (1112, 400, 104, 79, 48), (1112, 470, 104, 79, 48), (1416, 300, 93, 68, 36), (1416, 470, 93, 68, 36),
-              (1120, 470, 247, 216, 177), (1250, 490, 245, 229, 191), (1410, 470, 246, 219, 182)]
+# SIG_SELECT（8 點，容差 40）在 screen_sigs.py
 SELECT_BOX = (1115, 235, 1415, 555)  # 面板內部（找黃字名字的範圍）
 SELECT_NAME_DY = 48                  # 名字中心往上 48 = 那張卡片的頭像中心（實測：名字 y=337、頭像中心 y≈285~290）
 SELECT_MIN_N = 30                    # 一排黃字色塊的像素總數至少這麼多才算名字（單字名也 > 40；頭像高光 < 20）
 DIALOG_NEXT = (948, 461)             # NPC 對話框左鈕
 REWARD_OK = (720, 572)               # 「獲得物品」視窗的藍色確認鈕
 # 對話框：棕底 2 點 + 兩顆米色鈕（heal.py 同款）。主畫面沙地很像米色，所以一定要配棕底
-SIG_DIALOG = [(1360, 300, 107, 70, 44), (1100, 350, 107, 70, 44), (948, 445, 229, 197, 155), (1220, 445, 229, 197, 155)]
-SIG_REWARD = [(720, 572, 62, 106, 158), (680, 560, 82, 125, 178), (560, 620, 233, 203, 161), (720, 640, 104, 72, 46)]
-SIG_PANEL = [(1064, 208, 197, 69, 41), (880, 590, 55, 67, 13)]    # 切換角色面板：右上紅 ✕ + 刷新鈕深綠
-SIG_HUD = [(1300, 745, 254, 0, 0)]                                  # 外掛鈕 ASS 紅字（對話框開著時整個 UI 隱藏）
-VS_PROBE = battleguard.VS_PROBE                                     # 頭上 VS 牌綠框（heal.py SIG_NO_BATTLE 反過來；與 ass.py 共用，定義在 battleguard.py）
-VS_COLOR = battleguard.VS_COLOR
+# SIG_DIALOG / SIG_REWARD / SIG_PANEL / SIG_HUD（容差 40）在 screen_sigs.py
 # 完整戰鬥畫面（2026-10-10 實測，下指令 / 播放中兩種都量過）：上方中央棕框標籤（播放中 → 米色字；下指令 → 「N回合」+ 下方「剩餘時間 90」倒數），
 # 標籤文字會變，所以只取「外框」9 點（兩種畫面像素相同）；主畫面 / 對話 / 獲得物品 / 地圖載入在這些點都不同。9 點同時符合（容差 25）才算。
 # 完整戰鬥時 HUD 的 ASS 紅字還在，所以要排在 idle 之前
-SIG_BATTLE = battleguard.SIG_BATTLE
-# 「Auto Walking」金黃字：畫面中央 550～1000 × 500～540 取樣，金黃點（r>225, 150<g<205, b<50）≥ 10 個
-AW_POINTS = [(x, y) for y in range(500, 541, 8) for x in range(552, 1000, 12)]
-AW_MIN = 10
-TOL = 40
+# SIG_BATTLE / VS_PROBE / AW_POINTS / AW_MIN 也在 screen_sigs.py（完整戰鬥特徵來自 battleguard）
 
 # ---- 任務追蹤列表（左側，「任務 / 組隊」分頁下方；一格一個任務，標題 + 步驟說明，可上下捲動）----
 LIST_BOX = (75, 270, 260, 180)       # OCR 區域 x,y,w,h（截圖座標）：標題深棕字
@@ -147,42 +138,14 @@ SCROLL_UP = (200, 420, 200, 300)     # 往上拖 120px ≈ 捲一格（列表往
 SCROLL_DOWN = (200, 300, 200, 420)   # 反向
 
 
-def close(c, ref, tol=TOL):
-    return all(abs(a - b) <= tol for a, b in zip(c, ref))
-
-
 def read_screen() -> dict:
-    """一次 gui pixel 讀完所有特徵點 → 判斷狀態"""
-    pts = [(x, y) for x, y, *_ in SIG_DIALOG + SIG_REWARD + SIG_PANEL + SIG_SELECT + SIG_HUD + SIG_BATTLE + SIG_CMD + SIG_AUTO_OFF] + [VS_PROBE] + AW_POINTS
+    """一次 gui pixel 讀完所有特徵點 → screen_sigs.classify 判斷狀態（判定邏輯與特徵都在 screen_sigs.py）"""
+    pts = screen_sigs.points()
     out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
     cols = [tuple(int(v) for v in c.split(',')) for c in out]
     if len(cols) != len(pts):
         return {'state': 'error', 'raw': out[:3]}
-    px = dict(zip(pts, cols))
-    match = lambda sig: all(close(px[(x, y)], (r, g, b)) for x, y, r, g, b in sig)
-    full = False
-    gold = sum(1 for x, y in AW_POINTS if px[(x, y)][0] > 225 and 150 < px[(x, y)][1] < 205 and px[(x, y)][2] < 50)
-    if match(SIG_DIALOG):
-        st = 'dialog'
-    elif match(SIG_REWARD):
-        st = 'reward'
-    elif all(close(px[(x, y)], (r, g, b), 25) for x, y, r, g, b in SIG_BATTLE):
-        st, full = 'battle', True
-    elif match(SIG_PANEL):
-        st = 'panel'
-    elif match(SIG_SELECT):
-        st = 'select'                                  # 點 NPC 後的「選擇對象」面板（HUD 紅字還在，所以要排在 idle 之前）
-    elif close(px[VS_PROBE], VS_COLOR):
-        st = 'battle'
-    elif gold >= AW_MIN:
-        st = 'walking'
-    elif match(SIG_HUD):
-        st = 'idle'
-    else:
-        st = 'unknown'
-    cmd = full and all(close(px[(x, y)], (r, g, b), 25) for x, y, r, g, b in SIG_CMD)            # 完整戰鬥且在下指令階段
-    auto_off = full and all(close(px[(x, y)], (r, g, b), 20) for x, y, r, g, b in SIG_AUTO_OFF)  # 自動戰鬥鈕是關的
-    return {'state': st, 'gold': gold, 'full': full, 'cmd': cmd, 'auto_off': auto_off}
+    return screen_sigs.classify(dict(zip(pts, cols)))
 
 
 def ps_json(script: str, *args) -> dict:
@@ -580,7 +543,7 @@ def close_row_visible() -> bool | None:
         return None
     if len(cols) != len(pts):
         return None
-    btn_ok = all(close(c, (r, g, b), 22) for c, (_, _, r, g, b) in zip(cols, SIG_CLOSE_ROW))
+    btn_ok = all(close(c, (r, g, b), 22) for c, (_, _, r, g, b, _t) in zip(cols, SIG_CLOSE_ROW))
     return btn_ok and all(max(c) < 95 for c in cols[len(SIG_CLOSE_ROW):])
 
 
@@ -601,7 +564,7 @@ def panel_visible() -> bool:
         cols = [tuple(int(v) for v in c.split(',')) for c in gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()]
     except Exception:
         return False
-    return len(cols) == len(pts) and all(close(c, (r, g, b)) for c, (_, _, r, g, b) in zip(cols, SIG_PANEL))
+    return len(cols) == len(pts) and all(close(c, (r, g, b)) for c, (_, _, r, g, b, _t) in zip(cols, SIG_PANEL))
 
 
 def refresh_characters(full: bool = False) -> bool:
@@ -611,7 +574,7 @@ def refresh_characters(full: bool = False) -> bool:
         event('底部「關閉」列收不掉 → 這次不按刷新角色（避免點到頭像）')
         return False
     sw = SWITCH_FULL if full else SWITCH_BTN
-    sig = '/'.join(f'{x},{y},{r},{g},{b}' for x, y, r, g, b in SIG_PANEL)
+    sig = screen_sigs.sig_str(SIG_PANEL)
     gui('seq', f'click {sw[0]} {sw[1]}; waitpix 1500 {sig} 40; ifok click {REFRESH_BTN[0]} {REFRESH_BTN[1]}; wait 500')
     if panel_visible():
         gui('seq', f'click {PANEL_CLOSE[0]} {PANEL_CLOSE[1]}; wait 500', note='刷新後面板還開著 → 點 ✕ 關')
@@ -709,7 +672,7 @@ def judge_team(labels: dict, size: int) -> tuple[bool, str]:
 def check_team(size: int, tag: str = '') -> tuple[bool | None, str]:
     """開切換面板（763,760）→ 讀 5 張卡片的隊伍標籤 → 關面板（✕ 1064,208；必要時 ESC）。
     回 (True 隊伍符合 / False 不符 / None 面板沒開或讀不到, 說明)。只在主畫面（idle）時呼叫；開面板後驗證 SIG_PANEL，沒開就不讀、不點面板內座標。"""
-    sig = '/'.join(f'{x},{y},{r},{g},{b}' for x, y, r, g, b in SIG_PANEL)
+    sig = screen_sigs.sig_str(SIG_PANEL)
     gui('seq', f'click {SWITCH_BTN[0]} {SWITCH_BTN[1]}; waitpix 1500 {sig} 40; wait 300', note=f'{tag}隊伍檢查：開切換面板')
     res: tuple[bool | None, str] = (None, '切換面板沒打開')
     if read_screen()['state'] == 'panel':

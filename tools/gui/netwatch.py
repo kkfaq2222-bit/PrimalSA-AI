@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import actlog  # noqa: E402
 import errlog  # noqa: E402
 import layout  # noqa: E402
+import screen_sigs  # noqa: E402
 import winenv  # noqa: E402
 from walk import gui, log  # noqa: E402
 
@@ -45,15 +46,14 @@ WATCH_LOCK = CACHE / 'netwatch.lock'
 EXIT_HALT = 10
 EXIT_FATAL = 11
 MAX_FAILS = 3
-TOL = 25
+TOL = screen_sigs.NET_TOL
 
 # ---- 特徵（2880×1659 版面，截圖座標；2026-10-10 實測）----
 CONFIRM = (715, 557)                 # 提示視窗唯一的藍色「確定」
 # 米色「提示」視窗：左右 + 按鈕列兩側是米色（兩顆鈕的對話框兩側會是藍 / 米，所以左右 600 / 830 也要米色）、中間按鈕是藍
-SIG_DIALOG = ('520,570,245,217,179/880,570,245,217,179/600,300,243,213,175/600,557,243,213,175/'
-              '830,557,243,213,175/640,557,61,106,167')
+SIG_DIALOG = screen_sigs.sig_str(screen_sigs.NET_DIALOG)
 # 登入畫面：登錄鈕橘、註冊鈕藍、面板米色
-SIG_LOGIN = '500,570,179,127,63/760,565,93,137,187/440,520,243,217,179'
+SIG_LOGIN = screen_sigs.sig_str(screen_sigs.NET_LOGIN)
 MSG_BOX = (585, 370, 260, 40)        # 提示視窗訊息文字（OCR 輔助確認，白字深邊）
 MSG_KEYS = ('網', '路', '異', '重', '連')
 LOGIN_BOX = (460, 380, 520, 130)     # 登入畫面「帳號 / 密碼」標籤（只讀標籤，不讀欄位內容）
@@ -64,7 +64,7 @@ ACCT_BOX = (700, 900, 400, 425)      # 帳號欄 x0,x1,y0,y1（只數深色像�
 PWD_BOX = (690, 880, 484, 502)       # 密碼欄（星號）
 ALL_LOGIN_BTN = (740, 640)           # 選擇角色面板「一鍵全登」
 # 選擇角色面板：全登鈕橘、面板米色、右上紅 X、角色列棕
-SIG_CHARSEL = '640,640,197,134,70/500,250,241,213,179/1186,190,196,72,48/350,330,169,117,70'
+SIG_CHARSEL = screen_sigs.sig_str(screen_sigs.NET_CHARSEL)
 SWITCH_ALL_BTN = (716, 578)          # 切換角色面板「全部登錄」
 QUICK_TEAM_SEQ = ('click 520 578; wait 500; click 549 320; wait 400; click 549 520; wait 150; click 682 520; wait 150; '
                   'click 815 520; wait 150; click 948 520; wait 300; click 720 665; wait 1500')
