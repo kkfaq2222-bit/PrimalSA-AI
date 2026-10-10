@@ -20,7 +20,8 @@ import time
 from pathlib import Path
 
 import winenv
-from walk import ROOT
+
+ROOT = Path(__file__).resolve().parents[2]      # 不 import walk（walk 會反過來用本模組讀座標，避免循環）
 
 TPL_DIR = ROOT / 'tools' / '.cache' / 'digit-tpl'
 MISMATCH_DIR = ROOT / 'tools' / '.cache' / 'digit-mismatch'
@@ -281,6 +282,27 @@ def stat() -> dict:
         return json.loads(r.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
         return {'ok': False}
+
+
+def live_pos(cap: dict | None = None) -> str | None:
+    """現場截圖只讀座標 → 'map:x,y'；沒樣板 / 版面不支援 / 任何字認不出 / 截圖逾時 → None（呼叫端退回 stat.ps1）。
+    只切 pos（pos 讀不到才試 pos2）兩欄，比 read_fields 省；不補樣板（補學只由 watch.py 做）。"""
+    try:
+        cap = cap if cap is not None else capture()
+    except Exception:           # TimeoutExpired / OSError：讀不到就退回，不丟例外
+        return None
+    if not cap.get('ok'):
+        return None
+    try:
+        m = Matcher(load_tpl(cap['layout']))
+        for k in ('pos', 'pos2'):
+            if k in cap['fields']:
+                p = parse_pos(read_text(m, cap['fields'][k], True))
+                if p:
+                    return p
+    except (KeyError, ValueError, IndexError):
+        pass
+    return None
 
 
 # ---------- 學習 ----------

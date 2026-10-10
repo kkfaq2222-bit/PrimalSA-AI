@@ -69,7 +69,7 @@ uv run --no-project python tools/gui/errlog.py list
 ## 移動：先用 walk.py（不要自己算座標點地面）
 - **鏡頭高度一律拉到最左**（設置 → 畫面設置，見 [ui/setting.md](ui/setting.md)）：walk.py 的每格位移只在這個鏡頭下準，與視窗大小無關；滾輪會改鏡頭高度，**不要在遊戲畫面上滾滾輪**。走路 / 補血一直走錯格時先檢查這個。
 - 要走到某格 → `walk.py <地圖> <x> <y>`；要走進出口 → 加 `--exit <下一張地圖>`；要點 NPC → 腳本裡用 `walk.npc_steps` / `walk.talk_npc`（直接點 NPC 會自己走過去開對話）。
-- walk.py 做的事：先點引子 1215,18（換地圖後第一下左鍵會被吃掉）→ OCR 讀起點 → 有 `knowledge/data/maps.bin` 通行格就找路
+- walk.py 做的事：先點引子 1215,18（換地圖後第一下左鍵會被吃掉）→ 讀起點（`walk.pos()`：現場 digitmatch 字元樣板比對約 0.1 s 為主，認不出 / 沒樣板 / 逾時才退回 stat.ps1 OCR；不讀 watch 的 state.hud，因為 watch 每 3 s 才更新、拿不到點擊之後的新值）→ 有 `knowledge/data/maps.bin` 通行格就找路
   （每段 ≤ 10 格、點擊不落在左側面板等 UI 上、離牆遠一點、點擊次數少的方向優先）→ 一個 `seq` 連點，每段之間 `waitstill` 等鏡頭停，
   某段沒動（`nomove`）就用 `ifok` 跳過後面 → 終點 OCR 驗證 → 沒到就從目前位置重新找路、改慢速逐段走（每段 OCR，沒動就格數減半）。
 - 通行格對不上的圖（例：醫院 1005）會自動改成直線分段讓遊戲自己繞；固定路線可以用 `--path` 寫死 waypoint。

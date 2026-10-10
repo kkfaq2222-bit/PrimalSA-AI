@@ -97,5 +97,37 @@ g3 = d.segment(cap['fields']['hp'])[0][2]
 t = {'3': [[row + '0' * (i + 1) for row in ['1' * 3] * 4] for i in range(d.MAX_VARIANTS)]}
 d.learn_from(cap, cap_b, {'level': exp['level']}, t, None)
 check('每字元變體數不超過 MAX_VARIANTS', all(len(v) <= d.MAX_VARIANTS for v in t.values()), str({k: len(v) for k, v in t.items()}))
+
+# ---- walk.pos()：現場 digitmatch 優先，None 才退回 stat ----
+import tempfile  # noqa: E402
+import walk  # noqa: E402
+real_tpl_dir, real_cap, real_stat = d.TPL_DIR, d.capture, walk.stat
+tmpd = Path(tempfile.mkdtemp(prefix='dmwalk-'))
+d.TPL_DIR = tmpd
+d.tpl_path(cap['layout']).write_text(json.dumps(tpl, ensure_ascii=False), encoding='utf-8')
+calls = {'stat': 0}
+walk.stat = lambda: (calls.__setitem__('stat', calls['stat'] + 1), {'ok': True, 'pos': '1000:5,6'})[1]
+d.capture = lambda image=None: cap
+check('live_pos 讀出座標', d.live_pos() == exp['pos'])
+check('walk.pos 用 digitmatch、不呼叫 stat', walk.pos() == (60050, 24, 24) and calls['stat'] == 0)
+d.tpl_path(cap['layout']).unlink()
+check('沒有樣板 → live_pos None → walk.pos 退回 stat', d.live_pos() is None and walk.pos() == (1000, 5, 6) and calls['stat'] == 1)
+d.tpl_path(cap['layout']).write_text(json.dumps(tpl, ensure_ascii=False), encoding='utf-8')
+d.capture = lambda image=None: {'ok': False, 'error': 'x'}
+check('截圖失敗 → 退回 stat', walk.pos() == (1000, 5, 6) and calls['stat'] == 2)
+def _raise(image=None):
+    import subprocess
+    raise subprocess.TimeoutExpired('ps', 1)
+d.capture = _raise
+check('截圖逾時 → 不丟例外、退回 stat', walk.pos() == (1000, 5, 6) and calls['stat'] == 3)
+c_bad = copy.deepcopy(cap)
+c_bad['fields']['pos'] = ['0' * len(r) for r in cap['fields']['pos']]
+c_bad['fields'].pop('pos2', None)
+d.capture = lambda image=None: c_bad
+check('座標欄空 / 認不出 → 退回 stat', walk.pos() == (1000, 5, 6) and calls['stat'] == 4)
+walk.stat = lambda: {'ok': True, 'pos': ''}
+check('兩邊都讀不到 → None', walk.pos() is None)
+d.TPL_DIR, d.capture, walk.stat = real_tpl_dir, real_cap, real_stat
+import shutil; shutil.rmtree(tmpd, ignore_errors=True)
 print(f'failed={fails}')
 sys.exit(1 if fails else 0)
