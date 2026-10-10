@@ -230,12 +230,13 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
     # 3 = PW_CLIENTONLY | PW_RENDERFULLCONTENT（DirectX 視窗要 RENDERFULLCONTENT 才不會黑畫面）
     $ok = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
-    if (-not $ok) { Write-Error "PrintWindow 失敗"; exit 1 }
+    if (-not $ok) { $full.Dispose(); Write-Error "PrintWindow 失敗"; exit 1 }
     $w = [int]($r.R / $Scale); $hh = [int]($r.B / $Scale)
     $small = New-Object System.Drawing.Bitmap $w, $hh
     $g = [System.Drawing.Graphics]::FromImage($small)
     $g.InterpolationMode = 'HighQualityBicubic'; $g.DrawImage($full, 0, 0, $w, $hh); $g.Dispose()
     $small.Save($A1, [System.Drawing.Imaging.ImageFormat]::Png)
+    $small.Dispose(); $full.Dispose()   # 兩張都是大 Bitmap（~19 MB / ~5 MB），常駐 server 下不能留給 GC
     "saved ${w}x${hh}"
   }
   'click' {
@@ -325,7 +326,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     $full = New-Object System.Drawing.Bitmap $r.R, $r.B
     $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
     $ok = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
-    if (-not $ok) { Write-Error "PrintWindow 失敗"; exit 1 }
+    if (-not $ok) { $full.Dispose(); Write-Error "PrintWindow 失敗"; exit 1 }
     # 點可以是「pixel X Y」或一個字串「pixel "X,Y X,Y ..."」（參數個數有限，多點用後者）
     $pts = if ($A2) { @("$A1,$A2") } else { $A1 -split '[\s/]+' | Where-Object { $_ } }
     $out = foreach ($pt in $pts) {

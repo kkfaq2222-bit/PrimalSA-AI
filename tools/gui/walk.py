@@ -411,6 +411,7 @@ def _xy(s: str) -> tuple[int, int]:
 
 
 def main() -> int:
+    winenv.enable_server()   # 長程序：預設關，PSA_GUI_SERVER=1 才啟用常駐 server
     ap = argparse.ArgumentParser(description='點地面走到某地圖座標（自動找路 / 手動 waypoint）')
     ap.add_argument('target', nargs='*', help='地圖ID X Y')
     ap.add_argument('--path', help='手動 waypoint："地圖:x,y x,y ..."（不含起點）')

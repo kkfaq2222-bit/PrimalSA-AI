@@ -29,6 +29,7 @@ PrimalSA-AI/
     schemadump/        SchemaDump.cs：從 HotUpdate.dll 抽 Tabtoy 欄位對照與列舉（ReflectionOnly，不執行遊戲程式）
     query/psa.py       知識庫查詢工具（搜尋、交叉查詢、跨地圖路線、通行格）
     gui/gui.sh         遊戲畫面操作（截圖、點擊、拖曳、按鍵）；用法與按鈕地圖見 .claude/skills/psa-game-ui/
+                       serve.ps1（常駐 server，winenv.GuiServer 啟動，預設關）、bench.py（唯讀量測 / soak）、test_*（離線測試）
     web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
     .cache/            匯出時的暫存（HotUpdate.dll 等），可刪
 ```

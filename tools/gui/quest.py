@@ -1181,6 +1181,7 @@ def _main() -> int:
 
 def main() -> int:
     """包一層：不論怎麼結束（含例外 / Ctrl-C）都刪自己的戰鬥鎖檔"""
+    winenv.enable_server()   # 長程序：用常駐 server 讀畫面（預設關，PSA_GUI_SERVER=1 才啟用）
     try:
         return _main()
     finally:

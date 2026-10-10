@@ -18,6 +18,7 @@ import time
 
 import layout
 import netwatch
+import winenv
 from walk import LAYOUT, PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
 
 # 練級傳送分頁的目的地：名稱 → (截圖座標 x, y, 抵達地圖 ID)；見 .claude/skills/psa-game-ui/ui/transfer.md
@@ -260,6 +261,7 @@ def low(s: dict, hp: int, mp: int) -> bool | None:
 
 
 def main() -> int:
+    winenv.enable_server()   # 長程序：預設關，PSA_GUI_SERVER=1 才啟用常駐 server
     ap = argparse.ArgumentParser(description='回村補血再回練功點')
     ap.add_argument('--spot', default='波拉島', choices=SPOTS)
     ap.add_argument('--no-return', action='store_true', help='補完血停在醫院，不傳回練功點、不開原地遇敵（解任務被打飛後用；不能和 --watch 併用）')
