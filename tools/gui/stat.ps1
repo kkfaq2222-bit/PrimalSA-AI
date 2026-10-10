@@ -16,7 +16,29 @@ public class WS {
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint f);
   public struct RECT { public int L,T,R,B; }
   // 二值化：light=true 取亮白字（HUD 數字），false 取深色字（地圖名牌）；字 → 黑、其他 → 白
+  // 2026-10-10 改 LockBits 逐列處理（同 ocr.ps1）；非 Format32bppArgb 走舊 GetPixel 版保底，輸出與舊版逐位元組相同。
   public static void Binarize(System.Drawing.Bitmap b, bool light) {
+    if (b.PixelFormat != System.Drawing.Imaging.PixelFormat.Format32bppArgb) { BinSlow(b, light); return; }
+    int w = b.Width, h = b.Height;
+    System.Drawing.Imaging.BitmapData d = b.LockBits(new System.Drawing.Rectangle(0, 0, w, h),
+      System.Drawing.Imaging.ImageLockMode.ReadWrite, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+    try {
+      byte[] row = new byte[w * 4];
+      for (int y = 0; y < h; y++) {
+        IntPtr p = IntPtr.Add(d.Scan0, y * d.Stride);      // stride 為負時也正確
+        Marshal.Copy(p, row, 0, row.Length);
+        for (int x = 0; x < w; x++) {
+          int i = x * 4; int bl = row[i], g = row[i + 1], r = row[i + 2];
+          int mx = Math.Max(r, Math.Max(g, bl)), mn = Math.Min(r, Math.Min(g, bl));
+          bool ink = light ? (mn > 190 && mx - mn < 40) : (mx < 110);
+          byte v = ink ? (byte)0 : (byte)255;
+          row[i] = v; row[i + 1] = v; row[i + 2] = v; row[i + 3] = 255;
+        }
+        Marshal.Copy(row, 0, p, row.Length);
+      }
+    } finally { b.UnlockBits(d); }
+  }
+  static void BinSlow(System.Drawing.Bitmap b, bool light) {
     for (int y = 0; y < b.Height; y++) for (int x = 0; x < b.Width; x++) {
       var c = b.GetPixel(x, y); int mx = Math.Max(c.R, Math.Max(c.G, c.B)), mn = Math.Min(c.R, Math.Min(c.G, c.B));
       bool ink = light ? (mn > 190 && mx - mn < 40) : (mx < 110);

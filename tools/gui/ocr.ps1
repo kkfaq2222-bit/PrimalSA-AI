@@ -16,16 +16,36 @@ public class WO {
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint f);
   public struct RECT { public int L,T,R,B; }
   // 亮字二值化：min(R,G,B) > light 視為字（白色數字加深色描邊，例如寵物格等級）→ 轉成黑字白底
-  public static void BinarizeLight(System.Drawing.Bitmap b, int light) {
-    for (int y = 0; y < b.Height; y++) for (int x = 0; x < b.Width; x++) {
-      var c = b.GetPixel(x, y); int mn = Math.Min(c.R, Math.Min(c.G, c.B));
-      b.SetPixel(x, y, mn > light ? System.Drawing.Color.Black : System.Drawing.Color.White);
-    }
+  // 2026-10-10 改 LockBits 逐列處理（GetPixel/SetPixel 一塊 780×540 約 215 ms → 約 28 ms）；
+  // 只處理 Format32bppArgb（crop 新建的 Bitmap 預設就是），其他格式走舊的 GetPixel 版當保底。輸出每像素 B,G,R,A=255 與舊版逐位元組相同。
+  public static void BinarizeLight(System.Drawing.Bitmap b, int light) { Bin(b, true, light); }
+  public static void Binarize(System.Drawing.Bitmap b, int dark) { Bin(b, false, dark); }
+  // light=true：min(R,G,B) > th 為字；false：max(R,G,B) < th 為字。字 → 黑、其他 → 白
+  static void Bin(System.Drawing.Bitmap b, bool light, int th) {
+    if (b.PixelFormat != System.Drawing.Imaging.PixelFormat.Format32bppArgb) { BinSlow(b, light, th); return; }
+    int w = b.Width, h = b.Height;
+    System.Drawing.Imaging.BitmapData d = b.LockBits(new System.Drawing.Rectangle(0, 0, w, h),
+      System.Drawing.Imaging.ImageLockMode.ReadWrite, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+    try {
+      byte[] row = new byte[w * 4];
+      for (int y = 0; y < h; y++) {
+        IntPtr p = IntPtr.Add(d.Scan0, y * d.Stride);      // stride 為負時也正確
+        Marshal.Copy(p, row, 0, row.Length);
+        for (int x = 0; x < w; x++) {
+          int i = x * 4; int bl = row[i], g = row[i + 1], r = row[i + 2];
+          bool ink = light ? (Math.Min(r, Math.Min(g, bl)) > th) : (Math.Max(r, Math.Max(g, bl)) < th);
+          byte v = ink ? (byte)0 : (byte)255;
+          row[i] = v; row[i + 1] = v; row[i + 2] = v; row[i + 3] = 255;
+        }
+        Marshal.Copy(row, 0, p, row.Length);
+      }
+    } finally { b.UnlockBits(d); }
   }
-  public static void Binarize(System.Drawing.Bitmap b, int dark) {
+  static void BinSlow(System.Drawing.Bitmap b, bool light, int th) {
     for (int y = 0; y < b.Height; y++) for (int x = 0; x < b.Width; x++) {
-      var c = b.GetPixel(x, y); int mx = Math.Max(c.R, Math.Max(c.G, c.B));
-      b.SetPixel(x, y, mx < dark ? System.Drawing.Color.Black : System.Drawing.Color.White);
+      var c = b.GetPixel(x, y);
+      bool ink = light ? (Math.Min(c.R, Math.Min(c.G, c.B)) > th) : (Math.Max(c.R, Math.Max(c.G, c.B)) < th);
+      b.SetPixel(x, y, ink ? System.Drawing.Color.Black : System.Drawing.Color.White);
     }
   }
 }
