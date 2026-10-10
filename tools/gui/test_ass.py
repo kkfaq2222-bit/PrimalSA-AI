@@ -7,6 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ass  # noqa: E402
+import battleguard  # noqa: E402
+import os
+import tempfile
+battleguard.LOCK_FILE = Path(tempfile.mkdtemp()) / 'battle.lock'      # 測試用鎖檔位置
 
 
 class Game:
@@ -230,5 +234,93 @@ setup(g)
 check('CLI pet first 防禦 normal 攻擊', ass.main(['pet', 'dkb0', 'first', '防禦', 'normal', '攻擊']) == 0 and g.pet['first'] == '防禦' and g.pet['first_on'])
 check('CLI pet first off', ass.main(['pet', 'DKB0', 'first', 'off']) == 0 and not g.pet['first_on'])
 check('CLI pet 參數錯 → 1', ass.main(['pet', 'DKB0', 'first', '亂寫']) == 1 and ass.main(['pet', 'DKB0']) == 1)
+
+print('(15) 戰鬥保護：戰鬥畫面中 set → 不開面板、不點任何東西；戰鬥結束（連續 2 次非戰鬥）後才做')
+BATTLE_REFS = {(x, y): (r, g, b) for x, y, r, g, b in battleguard.SIG_BATTLE}
+
+
+class BGame(Game):
+    """戰鬥畫面到 battle_until（虛擬秒）為止；戰鬥中外掛鈕看不到（HUD 被戰鬥畫面蓋掉）"""
+
+    def __init__(self, battle_until=None, vs_only=False, **kw):
+        super().__init__(**kw)
+        self.battle_until, self.vs_only, self.click_log = battle_until, vs_only, []
+
+    def in_battle(self):
+        return self.battle_until is not None and self.t < self.battle_until
+
+    def color(self, x, y):
+        if self.in_battle() and not self.panel:
+            if self.vs_only:
+                return battleguard.VS_COLOR if (x, y) == battleguard.VS_PROBE else (1, 2, 3)
+            if (x, y) in BATTLE_REFS:
+                return BATTLE_REFS[(x, y)]
+            if (x, y) == ass.HUD_PROBE[:2]:
+                return (50, 50, 50)
+        return super().color(x, y)
+
+    def click(self, x, y):
+        self.click_log.append((round(self.t, 1), x, y))
+        if self.in_battle():
+            self.ground_clicks += 1                       # 戰鬥中任何點擊都是違規
+        super().click(x, y)
+
+
+g = BGame(battle_until=20.0, checks={'自動戰鬥': True})
+setup(g)
+rc, st, msg = ass.set_states('DKB0', {'自動逃跑': True})
+first = g.click_log[0][0] if g.click_log else None
+check('rc 0、設定成功', rc == 0 and st['自動逃跑'], msg)
+check('戰鬥結束前沒有任何點擊（第一次點擊 >= 20 秒）', first is not None and first >= 20.0 and g.ground_clicks == 0, f'first={first}')
+print('(16) 戰鬥一直不結束 → 退出碼 8，等了約 90 秒、沒開面板、沒點任何東西')
+g = BGame(battle_until=10 ** 9)
+setup(g)
+rc, st, msg = ass.set_states('DKB0', {'自動逃跑': True})
+check('rc 8、無點擊', rc == ass.EXIT_IN_BATTLE and g.clicks == [] and not g.checks['DKB0']['自動逃跑'], msg)
+check('等待上限約 90 秒', 88 <= g.t <= 96, f't={g.t:.0f}')
+print('(17) --no-wait：戰鬥中立即退出碼 8（CLI / API 都是）')
+g = BGame(battle_until=10 ** 9)
+setup(g)
+ass.layout.current = lambda: '2880x1659'
+rc = ass.main(['set', 'DKB0', '自動逃跑', 'on', '--no-wait'])
+check('CLI set --no-wait → 8、沒點、沒等', rc == 8 and g.clicks == [] and g.t < 1, f'rc={rc} t={g.t}')
+rc = ass.main(['get', 'DKB0', '--no-wait'])
+check('CLI get --no-wait 也受保護 → 8', rc == 8 and g.clicks == [])
+rc = ass.main(['pet', 'DKB0', 'first', '防禦', '--no-wait'])
+check('CLI pet --no-wait → 8', rc == 8 and g.clicks == [])
+rc, _, _ = ass.set_pet('DKB0', {'first': '防禦'}, no_wait=True)
+check('API set_pet(no_wait) → 8', rc == 8 and g.clicks == [])
+print('(18) 只有 VS 牌（快速戰鬥）也算戰鬥')
+g = BGame(battle_until=10 ** 9, vs_only=True)
+setup(g)
+rc, _, msg = ass.get_states('DKB0', no_wait=True)
+check('VS 牌 → 8', rc == 8 and g.clicks == [], msg)
+print('(19) quest.py 鎖檔：pid 活著 → 視為戰鬥中（畫面是主畫面也一樣）；刪鎖後才動作')
+g = Game(checks={'自動戰鬥': True})
+setup(g)
+battleguard.acquire('test')
+rc, _, msg = ass.set_states('DKB0', {'自動逃跑': True}, no_wait=True)
+check('有鎖 --no-wait → 8、無點擊', rc == 8 and g.clicks == [] and '鎖檔' in msg, msg)
+orig_sleep = g.sleep
+
+
+def release_at_10(d):
+    orig_sleep(d)
+    if g.t >= 10:
+        battleguard.LOCK_FILE.unlink(missing_ok=True)
+
+
+ass.sleep = release_at_10
+rc, st, _ = ass.set_states('DKB0', {'自動逃跑': True})
+check('等到鎖檔消失（約 10 秒）後執行成功', rc == 0 and st['自動逃跑'] and 10 <= g.t < 20, f'rc={rc} t={g.t}')
+battleguard.LOCK_FILE.write_text('{"pid": 99999999, "start": %f}' % __import__('time').time())
+g = Game()
+setup(g)
+rc, _, _ = ass.get_states('DKB0', no_wait=True)
+check('死 pid 的鎖不擋', rc == 0)
+print('(20) 面板已開著時不算戰鬥（戰鬥中外掛面板開不起來）')
+g = BGame(battle_until=10 ** 9, panel=True)
+setup(g)
+check('panel_open → in_battle() 為 None', ass.in_battle() is None)
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

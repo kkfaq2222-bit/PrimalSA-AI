@@ -13,7 +13,12 @@
 流程：開外掛 → 驗證面板真的開了 → 選角色並驗證 → pixel 讀五項 → （set：只點與目標不同的，再讀確認）→ 關面板（X 1318,90）並驗證。
 安全：每次點面板內座標前都先 pixel 驗證面板還開著（面板沒開時點這些座標會穿透到地面讓角色走掉）；
       主畫面看不到外掛鈕（對話 / 載入中）或被擋 → 等待重試，最多 OPEN_TIMEOUT 秒，失敗回報、不亂點。
-退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色 / 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）。
+退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色 / 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）/
+        8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
+戰鬥中保護（2026-10-10 碧青洞窟事故：BOSS 戰開始 1 秒後外掛自動逃跑被打開 → 隊長脫隊）：get / set / pet 一律先判斷是不是戰鬥中
+  （戰鬥畫面像素 = battleguard.screen_in_battle，或 quest.py 寫的鎖檔 tools/.cache/battle.lock 有效〔pid 活著且 30 分鐘內〕），
+  是 → 不開面板、不改任何勾選，等戰鬥結束（連續 2 次讀到非戰鬥才算，最多 BATTLE_WAIT=90 秒）再做；逾時回退出碼 8。
+  --no-wait：戰鬥中不等，直接回退出碼 8（排程 / 腳本不想卡住時用）。面板已經開著時視為不在戰鬥（外掛面板戰鬥中打不開）。
 勾選判讀（2026-10-10 實測）：未勾 = 框心 255,255,255；已勾 = 其他值（30,30,30 / 151 / 223 視打勾筆劃而定）。
 只動點到的角色；不改其他角色，不碰其他項目。外掛面板不能用 ESC 關。
 給其他腳本 import：ass.get_states(role) / ass.set_states(role, {項目: bool}) → (ok, 狀態 dict 或 None, 訊息)。
@@ -26,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+import battleguard  # noqa: E402
 import layout  # noqa: E402
 from walk import gui, log  # noqa: E402
 
@@ -52,6 +58,10 @@ CONFIRM_WAIT = 0.5               # 點勾選後第一次讀回的等待
 CONFIRM_WAIT2 = 0.9              # 還沒變就多等一次（不補點，避免切回去）
 
 EXIT_OK, EXIT_USAGE, EXIT_NO_PANEL, EXIT_NO_ROLE, EXIT_CONFIRM, EXIT_LAYOUT, EXIT_PANEL_LOST, EXIT_NOT_TOP = 0, 1, 2, 3, 4, 5, 6, 7
+EXIT_IN_BATTLE = 8               # 戰鬥中：等不到結束（或 --no-wait）→ 不開面板、不改設定
+BATTLE_WAIT = 90.0               # 戰鬥中最多等幾秒（一般一場 < 60 秒；BOSS 戰約 20~40 秒）
+BATTLE_POLL = 1.5                # 等待時的輪詢秒數
+BATTLE_CLEAR_N = 2               # 連續幾次讀到「非戰鬥」才算戰鬥結束（避開轉場一瞬間）
 
 sleep = time.sleep               # 測試時可替換
 clock = time.time
@@ -83,6 +93,36 @@ def panel_open() -> bool:
 def hud_visible() -> bool:
     cols = _px([HUD_PROBE[:2]])
     return bool(cols) and _close(cols[0], HUD_PROBE[2:], 40)
+
+
+def in_battle() -> str | None:
+    """現在是不是戰鬥中：鎖檔有效 → 'lock'；戰鬥畫面像素 → 'screen'；否則 None。外掛面板已開著 = 不在戰鬥（戰鬥中開不了面板）"""
+    if battleguard.locked():
+        return 'lock'
+    if panel_open():
+        return None
+    return 'screen' if battleguard.screen_in_battle(gui) else None
+
+
+def wait_not_battle(no_wait: bool = False, timeout: float = None) -> tuple[bool, str]:
+    """戰鬥保護：戰鬥中 → 不動作，等到連續 BATTLE_CLEAR_N 次非戰鬥（最多 timeout 秒）。回 (可以動作, 訊息)。no_wait=True 戰鬥中直接 False"""
+    timeout = BATTLE_WAIT if timeout is None else timeout
+    why = in_battle()
+    if not why:
+        return True, ''
+    if no_wait:
+        return False, f'戰鬥中（{"quest.py 鎖檔" if why == "lock" else "戰鬥畫面"}），--no-wait → 沒開面板、沒改任何設定'
+    log(f'ass：戰鬥中（{"鎖檔" if why == "lock" else "畫面"}），等戰鬥結束再動作（最多 {timeout:.0f} 秒）')
+    end, clear = clock() + timeout, 0
+    while clock() < end:
+        sleep(BATTLE_POLL)
+        if in_battle():
+            clear = 0
+            continue
+        clear += 1
+        if clear >= BATTLE_CLEAR_N:
+            return True, ''
+    return False, f'戰鬥中等了 {timeout:.0f} 秒仍未結束 → 沒開面板、沒改任何設定'
 
 
 def open_panel(timeout: float = None) -> bool:
@@ -150,8 +190,11 @@ def norm_role(name: str) -> str | None:
     return n if n in ROLES else None
 
 
-def _session(role: str, changes: dict | None, items=None):
-    """開面板 → 選角色 → 讀 →（有 changes 就設定並確認）→ 關面板。回 (退出碼, 狀態 dict 或 None, 訊息)"""
+def _session(role: str, changes: dict | None, items=None, no_wait: bool = False):
+    """（戰鬥保護）開面板 → 選角色 → 讀 →（有 changes 就設定並確認）→ 關面板。回 (退出碼, 狀態 dict 或 None, 訊息)"""
+    ok_, why = wait_not_battle(no_wait)
+    if not ok_:
+        return EXIT_IN_BATTLE, None, why
     if not open_panel():
         return EXIT_NO_PANEL, None, f'外掛面板 {OPEN_TIMEOUT:.0f} 秒內打不開（戰鬥 / 對話 / 載入中擋住？）；沒點任何面板內座標'
     rc, states, msg = EXIT_OK, None, ''
@@ -224,8 +267,11 @@ def read_pet() -> dict | None:
     return {'first_on': cols[0] != UNCHECKED, 'first': read_pet_value('first'), 'normal': read_pet_value('normal')}
 
 
-def _pet_session(role: str, want: dict | None):
+def _pet_session(role: str, want: dict | None, no_wait: bool = False):
     """want: {'first_on': bool?, 'first': 值?, 'normal': 值?}。回 (退出碼, 狀態 dict 或 None, 訊息)"""
+    ok_, why = wait_not_battle(no_wait)
+    if not ok_:
+        return EXIT_IN_BATTLE, None, why
     if not open_panel():
         return EXIT_NO_PANEL, None, f'外掛面板 {OPEN_TIMEOUT:.0f} 秒內打不開；沒點任何面板內座標'
     st = None
@@ -282,27 +328,27 @@ def _pet_session(role: str, want: dict | None):
             print('警告：外掛面板沒關成功（請 shot 看畫面，手動點 X 1318,90）', flush=True)
 
 
-def get_pet(role: str):
-    return _pet_session(role, None)
+def get_pet(role: str, no_wait: bool = False):
+    return _pet_session(role, None, no_wait)
 
 
-def set_pet(role: str, want: dict):
-    return _pet_session(role, want)
+def set_pet(role: str, want: dict, no_wait: bool = False):
+    return _pet_session(role, want, no_wait)
 
 
-def get_states(role: str):
-    return _session(role, None)
+def get_states(role: str, no_wait: bool = False):
+    return _session(role, None, None, no_wait)
 
 
-def set_states(role: str, changes: dict):
-    return _session(role, changes)
+def set_states(role: str, changes: dict, no_wait: bool = False):
+    return _session(role, changes, None, no_wait)
 
 
 def fmt(states: dict, items=None) -> str:
     return '  '.join(f'{i}={"開" if states[i] else "關"}' for i in (items or ITEMS) if i in states)
 
 
-def _main_pet(role: str, rest: list) -> int:
+def _main_pet(role: str, rest: list, no_wait: bool = False) -> int:
     want = {}
     if rest != ['get']:
         if not rest:
@@ -326,7 +372,7 @@ def _main_pet(role: str, rest: list) -> int:
     if layout.current() != '2880x1659':
         print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
         return EXIT_LAYOUT
-    rc, st, msg = _pet_session(role, want or None)
+    rc, st, msg = _pet_session(role, want or None, no_wait)
     if st:
         print(f'{role} 戰寵：首次動作={"勾" if st["first_on"] else "不勾"}/{st["first"] or "?"}  一般動作={st["normal"] or "?"}')
     if rc:
@@ -339,13 +385,14 @@ def main(argv=None) -> int:
     ap.add_argument('cmd', choices=['get', 'set', 'pet'])
     ap.add_argument('role', help='DKB0 / DKB02~05')
     ap.add_argument('rest', nargs='*', help='get：項目…；set：項目 on|off 成對')
+    ap.add_argument('--no-wait', action='store_true', help='戰鬥中不等戰鬥結束，直接退出碼 %d（預設等最多 %d 秒）' % (EXIT_IN_BATTLE, BATTLE_WAIT))
     a = ap.parse_args(argv)
     role = norm_role(a.role)
     if not role:
         print(f'角色要是 {" / ".join(ROLES)}')
         return EXIT_USAGE
     if a.cmd == 'pet':
-        return _main_pet(role, a.rest)
+        return _main_pet(role, a.rest, a.no_wait)
     changes, items = {}, []
     if a.cmd == 'get':
         for n in a.rest:
@@ -368,7 +415,7 @@ def main(argv=None) -> int:
     if layout.current() != '2880x1659':
         print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
         return EXIT_LAYOUT
-    rc, states, msg = _session(role, changes if a.cmd == 'set' else None)
+    rc, states, msg = _session(role, changes if a.cmd == 'set' else None, None, a.no_wait)
     if states:
         print(f'{role}：{fmt(states, items or None)}')
     if rc:

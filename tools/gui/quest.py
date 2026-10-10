@@ -18,13 +18,19 @@
            要先把 DKB0 的原地遇敵 / 自動逃跑 / 快速戰鬥 / 自動戰鬥都關（完整戰鬥畫面才有逃跑鈕）；不檢查外掛設定
   --skip-ass-check  --solo / --fight 不讀外掛設定（呼叫端已確認；不建議）
   --stop-after-dialog  對話步（組隊後單步）：按完對話框、閒置滿 2.5 秒（連續 2 次以上）就結束退出碼 0（有獲得物品視窗的步驟改用 --stop-after-rewards 1）
-  --fight  戰鬥步（假設已站在 NPC 旁，**不點追蹤、不巡路**）：--npc X,Y（NPC 地圖座標）或 --npc auto（--task 的任務步驟找戰鬥步 NPC）→ 依自己座標算畫面位置點 NPC（--at X,Y 可手動給自己座標）
+  --fight  戰鬥步（假設已站在 NPC 旁，**不點追蹤、不巡路**）：--npc X,Y（NPC 地圖座標）或 --npc auto（--task 目前步驟的 NPC；見 --step）→ 依自己座標算畫面位置點 NPC（--at X,Y 可手動給自己座標）
            → 對話框按左鈕 → 開打。戰鬥分類：開始時距離最後一次點 NPC / 按對話框 <= QUEST_BATTLE_WINDOW(15) 秒 = BOSS 戰（確保自動戰鬥開，打完閒置滿 IDLE_CONFIRM_SECS 秒（且連續 2 次）印「BOSS 戰結束」退出碼 0，不繼續巡路）；
            否則 = 小怪：自動逃跑已關（點 NPC 前先用 ass.py 讀 DKB0，自動逃跑是開的 → 不點 NPC，退出碼 28）→ 和 BOSS 一樣按自動戰鬥打完，不手動逃（--manual-escape 才改回舊的關自動 + 逃跑）。已手動點過 NPC（--no-click）時不讀外掛。
            點 NPC 後 12 秒沒對話框也沒戰鬥 → 退出碼 22（沒點到 NPC）；對話後 15 秒沒開打 → 23；被打飛 21。
            範例：quest.py --fight --task 英雄島前傳 --npc auto --max-seconds 300
   --disband-after  這步完成（搭配 --stop-after-dialog / --stop-after-rewards）後立刻解散隊伍；分頁沒切到組隊 / 選單沒彈出 / 解散後隊長紅標還在 → 不亂點，退出碼 26；已是單人（組隊分頁沒隊長紅標）→ 不點任何東西，退出碼 0
   --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，閒置滿 2.5 秒（連續 2 次以上）就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
+  --step N  --fight 用：明確指定任務第 N 步的 NPC（= --npc auto 但不 OCR 追蹤條目；需 --task）。--npc auto 不給 --step 時，改讀追蹤條目「標題正下方那行說明」
+           （OCR）對照 Task 表 explandTn 找目前步驟的 endNpc；讀不到 / 對不到（或兩步相似且 NPC 不同）→ 退出碼 31，不點任何東西，絕不退回「第一個戰鬥步」
+  --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過）：--fight 點 NPC 前、預設模式（要點追蹤 / 黃問號時）每次點之前（至少隔 TEAM_CHECK_GAP=20 秒）開切換面板 763,760，
+           讀 5 張卡片的隊伍標籤，要「1 隊長 + (N-1) 隊員」且沒有單人 / 離線；不符或讀不到 → 不點、事件 log 寫出誰不在隊、關面板（✕ 1064,208）；--fight 開打前退出碼 30、執行中發現脫隊退出碼 32。
+           --solo / --no-click / --no-track 不檢查。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
+  戰鬥鎖檔  所有模式一進戰鬥就寫 tools/.cache/battle.lock（pid + 開始時間），戰鬥結束 / 程式結束（finally）刪除；ass.py 看到有效鎖檔 = 戰鬥中，不改外掛設定（見 ui/ass.md）
   組隊預設模式（非 --solo / --fight）的完整戰鬥：自動戰鬥鈕是關的 → 按 1380,600；同一場按 4 次仍關（寵物指令視窗等）→ 退出碼 25
   模擬測試：uv run --no-project python tools/gui/test_quest_fight.py
   事件記錄：notes/quest-events.log（每行一筆，附截圖路徑 tools/.cache/quest-log/）；啟動時自動刪 tools/.cache/quest-log/ 內超過 3 天的圖檔（cleanup_old_shots）。
@@ -39,7 +45,7 @@
            2. 沒有 → 在追蹤列表先用標題圖片樣板比對（titlematch，0.7 秒）、沒樣板 / 沒找到才用 OCR（ocr.ps1，成功會存樣板）找 --task 那一格，必要時捲動列表，確認標題相符才點 → 開始（繼續）巡路
   不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）
   追蹤沒反應 點了任務追蹤約 5 秒（TRACK_RETRY_SECS 重點一次、再等一輪）都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
-退出碼：27 --solo 戰鬥 30 秒未結束（自動逃跑沒生效？）、28 --fight 點 NPC 前自動逃跑是開的、29 --solo 外掛設定不符 / 讀不到、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、0 正常結束（任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：30 隊伍不符（--fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、27 --solo 戰鬥 30 秒未結束（自動逃跑沒生效？）、28 --fight 點 NPC 前自動逃跑是開的、29 --solo 外掛設定不符 / 讀不到、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、0 正常結束（任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
 import argparse
@@ -50,6 +56,7 @@ import sys
 import time
 from pathlib import Path
 
+import battleguard
 import clef
 import layout
 import netwatch
@@ -69,6 +76,9 @@ EXIT_DISBAND_FAIL = 26               # --disband-after：解散沒做成（分�
 EXIT_ESCAPE_TIMEOUT = 27             # --solo：一場戰鬥超過 SOLO_BATTLE_MAX 秒還沒結束（外掛自動逃跑可能沒生效）
 EXIT_ESCAPE_ON = 28                  # --fight：點 NPC 前發現 DKB0 外掛「自動逃跑」是開的（會把 BOSS 戰逃掉）→ 沒點 NPC
 EXIT_ASS_SETUP = 29                  # --solo：DKB0 外掛 自動逃跑 / 自動戰鬥沒開，或讀不到外掛設定（面板打不開）
+EXIT_TEAM_MISMATCH = 30              # --fight / 預設模式點 NPC 前：切換面板的隊伍標籤不是「1 隊長 + (N-1) 隊員」（有人脫隊 / 單人）→ 沒點 NPC
+EXIT_STEP_UNKNOWN = 31               # --npc auto：讀不到追蹤條目的目前步驟文字，或對不到任務表的步驟（不退回第一個戰鬥步）
+EXIT_TEAM_LOST = 32                  # 預設模式 / --fight 執行中：點追蹤 / 點 NPC 前的隊伍檢查發現有人脫隊（停下，不繼續點）
 SOLO_BATTLE_MAX = 30.0               # --solo 一場戰鬥最多等幾秒（外掛自動逃跑 + 自動戰鬥；超過 = 逃不掉）
 SOLO_ROLE = 'DKB0'                   # 外掛設定要檢查 / 切換的角色（隊長）
 AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰鬥鈕
@@ -105,13 +115,12 @@ SIG_DIALOG = [(1360, 300, 107, 70, 44), (1100, 350, 107, 70, 44), (948, 445, 229
 SIG_REWARD = [(720, 572, 62, 106, 158), (680, 560, 82, 125, 178), (560, 620, 233, 203, 161), (720, 640, 104, 72, 46)]
 SIG_PANEL = [(1064, 208, 197, 69, 41), (880, 590, 55, 67, 13)]    # 切換角色面板：右上紅 ✕ + 刷新鈕深綠
 SIG_HUD = [(1300, 745, 254, 0, 0)]                                  # 外掛鈕 ASS 紅字（對話框開著時整個 UI 隱藏）
-VS_PROBE = (706, 295)                                               # 頭上 VS 牌綠框（heal.py SIG_NO_BATTLE 反過來）
-VS_COLOR = (122, 227, 0)
+VS_PROBE = battleguard.VS_PROBE                                     # 頭上 VS 牌綠框（heal.py SIG_NO_BATTLE 反過來；與 ass.py 共用，定義在 battleguard.py）
+VS_COLOR = battleguard.VS_COLOR
 # 完整戰鬥畫面（2026-10-10 實測，下指令 / 播放中兩種都量過）：上方中央棕框標籤（播放中 → 米色字；下指令 → 「N回合」+ 下方「剩餘時間 90」倒數），
 # 標籤文字會變，所以只取「外框」9 點（兩種畫面像素相同）；主畫面 / 對話 / 獲得物品 / 地圖載入在這些點都不同。9 點同時符合（容差 25）才算。
 # 完整戰鬥時 HUD 的 ASS 紅字還在，所以要排在 idle 之前
-SIG_BATTLE = [(650, 25, 99, 77, 57), (780, 38, 252, 234, 200), (645, 38, 99, 57, 31), (790, 38, 250, 227, 194), (645, 12, 244, 225, 182),
-              (790, 12, 255, 230, 192), (660, 45, 200, 172, 139), (770, 45, 236, 209, 174), (643, 25, 242, 217, 181)]
+SIG_BATTLE = battleguard.SIG_BATTLE
 # 「Auto Walking」金黃字：畫面中央 550～1000 × 500～540 取樣，金黃點（r>225, 150<g<205, b<50）≥ 10 個
 AW_POINTS = [(x, y) for y in range(500, 541, 8) for x in range(552, 1000, 12)]
 AW_MIN = 10
@@ -545,6 +554,74 @@ def refresh_characters() -> None:
         gui('key', '{ESC}')
 
 
+# ---- 切換角色面板的隊伍標籤（2026-10-10 實測；面板只列線上角色）----
+# 每張卡片左側有「當前 / 線上」標籤 + 深棕小框，框內是隊伍字樣：「隊長」紅字 ≈(217,33,33)、「隊員」黃字、「單人」（沒量過，顏色不明）。
+# 框內取樣 15×8 點（x 間隔 2、y 間隔 2），紅點 >= TEAM_MIN_PX → 隊長；黃點 >= TEAM_MIN_PX → 隊員；都不是 → 'other'（單人 / 離線 / 卡片不存在）。
+# 左欄卡片（DKB0 / DKB03 / DKB05）框左上 ≈ (452, 卡片 y)；右欄（DKB02 / DKB04）= 左欄 +310。2026-10-10 實機：隊長 DKB0 紅點 30、隊員黃點 42~44。
+TEAM_CARDS = {'DKB0': (452, 275), 'DKB02': (762, 275), 'DKB03': (452, 360), 'DKB04': (762, 360), 'DKB05': (452, 445)}
+TEAM_SAMPLE = [(dx, dy) for dy in range(8, 23, 2) for dx in range(6, 35, 2)]
+TEAM_MIN_PX = 8
+TEAM_CHECK_GAP = 20.0                # 預設模式：兩次隊伍檢查最短間隔（秒；--fight 點 NPC 前一定檢查）
+PANEL_CLOSE = (1064, 208)            # 切換角色面板右上 ✕
+
+
+def classify_team_label(cols: list) -> str:
+    """一張卡片隊伍標籤框內的取樣色 → 'leader' / 'member' / 'other'"""
+    red = sum(1 for r, g, b in cols if r > 170 and g < 100 and b < 100)
+    yel = sum(1 for r, g, b in cols if r > 170 and g > 140 and b < 110)
+    if red >= TEAM_MIN_PX and red > yel:
+        return 'leader'
+    if yel >= TEAM_MIN_PX:
+        return 'member'
+    return 'other'
+
+
+def read_team_labels() -> dict | None:
+    """切換面板已開著時，一次 pixel 讀 5 張卡片 → {角色: 'leader'|'member'|'other'}；讀不到回 None"""
+    pts = [(ax + dx, ay + dy) for ax, ay in TEAM_CARDS.values() for dx, dy in TEAM_SAMPLE]
+    try:
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
+        cols = [tuple(int(v) for v in c.split(',')) for c in out]
+    except Exception:
+        return None
+    if len(cols) != len(pts):
+        return None
+    n = len(TEAM_SAMPLE)
+    return {r: classify_team_label(cols[i * n:(i + 1) * n]) for i, r in enumerate(TEAM_CARDS)}
+
+
+def judge_team(labels: dict, size: int) -> tuple[bool, str]:
+    """純函式：labels 是否為「1 隊長 + (size-1) 隊員」。回 (符合, 說明；不符時列出誰不在隊)"""
+    lead = [r for r, v in labels.items() if v == 'leader']
+    mem = [r for r, v in labels.items() if v == 'member']
+    out = [r for r, v in labels.items() if v == 'other']
+    desc = f'隊長 {lead or "無"}、隊員 {mem or "無"}、不在隊 / 單人 / 離線 {out or "無"}'
+    ok = len(lead) == 1 and len(mem) == size - 1 and not out
+    return ok, desc
+
+
+def check_team(size: int, tag: str = '') -> tuple[bool | None, str]:
+    """開切換面板（763,760）→ 讀 5 張卡片的隊伍標籤 → 關面板（✕ 1064,208；必要時 ESC）。
+    回 (True 隊伍符合 / False 不符 / None 面板沒開或讀不到, 說明)。只在主畫面（idle）時呼叫；開面板後驗證 SIG_PANEL，沒開就不讀、不點面板內座標。"""
+    sig = '/'.join(f'{x},{y},{r},{g},{b}' for x, y, r, g, b in SIG_PANEL)
+    gui('seq', f'click {SWITCH_BTN[0]} {SWITCH_BTN[1]}; waitpix 1500 {sig} 40; wait 300', note=f'{tag}隊伍檢查：開切換面板')
+    res: tuple[bool | None, str] = (None, '切換面板沒打開')
+    if read_screen()['state'] == 'panel':
+        labels = read_team_labels()
+        if labels is None:
+            res = (None, '讀不到隊伍標籤像素')
+        else:
+            ok, desc = judge_team(labels, size)
+            res = (ok, desc)
+    for _ in range(2):                                 # 關面板：先點 ✕，仍開著再 ESC
+        if read_screen()['state'] != 'panel':
+            break
+        gui('seq', f'click {PANEL_CLOSE[0]} {PANEL_CLOSE[1]}; wait 500', note='隊伍檢查：關切換面板（✕）')
+    if read_screen()['state'] == 'panel':
+        gui('key', '{ESC}')
+    return res
+
+
 def read_pos() -> tuple[int, int, int] | None:
     """stat.ps1 OCR 讀右上角「地圖ID:x,y」→ (地圖, x, y)；讀不到回 None"""
     m = re.match(r'(\d+):(\d+),(\d+)', stat().get('pos') or '')
@@ -587,22 +664,85 @@ def check_ass_setup(a) -> int:
     return 0
 
 
+STEP_TEXT_BOX = (80, 270, 245, 175)  # 追蹤列表 OCR 區（標題 + 說明行；深棕字，Dark 170 才讀得到較淺的說明行）
+STEP_MIN_RATIO = 0.8                 # 說明文字與任務表 explandTn 的相似度門檻（OCR 偶爾錯 1 字）
+
+
+def norm_step(t: str) -> str:
+    """步驟說明比對前的正規化：去空白與標點"""
+    return re.sub(r'[\s·・,.:：，。、!！?？「」『』()（）\[\]【】~～\-—]+', '', t or '')
+
+
+def read_step_texts(task: str) -> list[str]:
+    """OCR 追蹤列表，找出標題 = task 那一格，回傳它「正下方那行說明」的各種讀法（Zoom 2/3/4）；標題不在目前這頁 / 讀不到 → []。
+    不捲動、不點任何東西（純讀）。實測（碧青洞窟）：標題 y≈309、說明行 y≈341（差約 32px）。"""
+    x, y, w, h = STEP_TEXT_BOX
+    r = ps_json('ocr.ps1', x, y, w, h, '-Zooms', '2,3,4', '-Dark', 170)
+    lines = sorted(r.get('lines', []), key=lambda o: o['y'])
+    titles = [ln for ln in lines if len(ln['text']) >= 2 and match_title(task, ln['text'])]
+    if not titles:
+        return []
+    ty = min(t['y'] for t in titles)
+    return [ln['text'] for ln in lines if ty + 18 <= ln['y'] <= ty + 50 and len(ln['text']) >= 2]
+
+
+def match_step(ts: list, texts: list[str]) -> tuple[dict | None, str]:
+    """純函式：追蹤條目說明文字 texts（OCR 各種讀法）對任務表各步的 explandTn / explandCn。
+    取相似度最高且 >= STEP_MIN_RATIO 的步驟；有另一個「不同 NPC」的步驟相似度差 < 0.05 → 視為對不準，回 None。回 (步驟列或 None, 說明)"""
+    best: dict[int, float] = {}
+    for tx in texts:
+        a = norm_step(tx)
+        if not a:
+            continue
+        for k, t in enumerate(ts):
+            for fld in ('explandTn', 'explandCn'):
+                b = norm_step(t.get(fld))
+                if b:
+                    ratio = 1.0 if a == b else difflib.SequenceMatcher(None, a, b).ratio()
+                    best[k] = max(best.get(k, 0.0), ratio)
+    if not best:
+        return None, '追蹤條目說明文字讀不到'
+    rank = sorted(best.items(), key=lambda kv: -kv[1])
+    k0, r0 = rank[0]
+    if r0 < STEP_MIN_RATIO:
+        return None, f'說明文字 {texts} 對不到任務表任何一步（最像 第 {ts[k0].get("step")} 步，相似度 {r0:.2f} < {STEP_MIN_RATIO}）'
+    for k, r in rank[1:]:
+        if r0 - r < 0.05 and ts[k].get('endNpc') != ts[k0].get('endNpc'):
+            return None, f'說明文字 {texts} 同時像第 {ts[k0].get("step")} 步與第 {ts[k].get("step")} 步（NPC 不同），無法判定；請改用 --step N'
+    return ts[k0], f'說明文字 {texts} → 第 {ts[k0].get("step")} 步（相似度 {r0:.2f}）'
+
+
 def resolve_npc(a) -> tuple[int, int] | None:
-    """--fight 的 NPC 地圖座標：--npc X,Y，或 --npc auto（--task 的任務步驟中第一個戰鬥步的 endNpc）；失敗印原因回 None"""
+    """--fight 的 NPC 地圖座標：--npc X,Y，或 --npc auto = 「目前步驟」的 endNpc（--task 任務；--step N 明確指定，不給就 OCR 追蹤條目下方的說明行
+    對照 Task 表 explandTn）。讀不到 / 對不到 → 不退回第一個戰鬥步（2026-10-10 抓錯 8 樓守護獸的事故），a.resolve_rc = EXIT_STEP_UNKNOWN，回 None"""
+    a.resolve_rc = 4
     if a.npc.lower() == 'auto':
         if not a.task:
-            log('--npc auto 需要 --task（用任務步驟找戰鬥步的 NPC）')
+            log('--npc auto 需要 --task（用任務步驟找目前步驟的 NPC）')
             return None
         g, ts, _ = walk.psa.task_steps(a.task)
-        for t in ts:
-            if walk.psa.classify_step(t)[0] == 'battle':
-                n = walk.psa.by_id('Npc').get(t.get('endNpc'))
-                if n:
-                    log(f'--npc auto：第 {t.get("step")} 步 {walk.psa.nm(n)} @ 地圖 {n.get("map")}:{n.get("x")},{n.get("y")}')
-                    a.npc_map = n.get('map')
-                    return (n['x'], n['y'])
-        log(f'任務「{a.task}」找不到戰鬥步的 NPC，請改用 --npc X,Y')
-        return None
+        if not ts:
+            log(f'任務表找不到「{a.task}」')
+            a.resolve_rc = EXIT_STEP_UNKNOWN
+            return None
+        if a.step:
+            row = next((t for t in ts if t.get('step') == a.step), None)
+            why = f'--step {a.step}'
+        else:
+            row, why = match_step(ts, read_step_texts(a.task))
+        if row is None:
+            event(f'--npc auto 取不到目前步驟：{why} → 不點 NPC，退出碼 {EXIT_STEP_UNKNOWN}（請 shot 看追蹤條目，改用 --step N 或 --npc X,Y）')
+            a.resolve_rc = EXIT_STEP_UNKNOWN
+            return None
+        n = walk.psa.by_id('Npc').get(row.get('endNpc'))
+        if not n:
+            event(f'--npc auto：第 {row.get("step")} 步（{why}）沒有 endNpc → 退出碼 {EXIT_STEP_UNKNOWN}')
+            a.resolve_rc = EXIT_STEP_UNKNOWN
+            return None
+        kind = walk.psa.classify_step(row)[0]
+        event(f'--npc auto：目前步驟 = 第 {row.get("step")} 步（{why}；{kind}）→ {walk.psa.nm(n)} @ 地圖 {n.get("map")}:{n.get("x")},{n.get("y")}')
+        a.npc_map = n.get('map')
+        return (n['x'], n['y'])
     m = re.fullmatch(r'(\d+)[,:](\d+)', a.npc.strip())
     if not m:
         log('--fight 要給 --npc X,Y（NPC 地圖座標）/ --npc auto（用 --task 查），或加 --no-click（已自己點過 NPC）')
@@ -639,7 +779,7 @@ def click_npc(npc: tuple[int, int], a) -> bool:
     return True
 
 
-def main() -> int:
+def _main() -> int:
     ap = argparse.ArgumentParser(description='解任務監測：對話按確認、戰鬥按刷新角色、巡路停了重點任務追蹤')
     ap.add_argument('--once', action='store_true', help='只判斷一次、做一個動作就結束')
     ap.add_argument('--every', type=float, default=None, help='輪詢間隔秒數（預設 1.0；連續 N 次的規則已換算成秒，見 IDLE_CONFIRM_SECS 等）')
@@ -649,7 +789,9 @@ def main() -> int:
     ap.add_argument('--manual-escape', action='store_true', help='舊版手動逃跑（外掛自動逃跑失效時的備案）：--solo / --fight 小怪戰按戰鬥畫面逃跑鈕；不檢查外掛設定')
     ap.add_argument('--skip-ass-check', action='store_true', help='--solo / --fight 不讀外掛設定（呼叫端已確認）')
     ap.add_argument('--fight', action='store_true', help='戰鬥步（要先站在 NPC 附近；不巡路）：點 NPC → 對話左鈕 → 開打；只有點 NPC / 按對話框後 %d 秒內開始的才是 BOSS 戰（開自動戰鬥、打完退出碼 0）；其他戰鬥是小怪（關自動戰鬥、按逃跑）；沒反應退出碼 22、對話後沒開打 23、被打飛 21' % QUEST_BATTLE_WINDOW)
-    ap.add_argument('--npc', default='', help='--fight 用：NPC 的地圖座標 X,Y，或 auto（用 --task 的任務步驟找第一個戰鬥步的 NPC，同 psa.py steps）；不給 = 必須加 --no-click')
+    ap.add_argument('--npc', default='', help='--fight 用：NPC 的地圖座標 X,Y，或 auto（讀追蹤條目目前步驟說明對 --task 的任務表找 NPC；讀不到退出碼 31，可改 --step N）；不給 = 必須加 --no-click')
+    ap.add_argument('--step', type=int, default=0, help='--fight 用：明確指定任務第 N 步（Task.step）的 endNpc 當 NPC（等於 --npc auto 但不 OCR 追蹤條目；需要 --task）')
+    ap.add_argument('--team-size', type=int, default=None, help='隊伍人數檢查（預設 5）：--fight 點 NPC 前、預設模式每次點追蹤 / 黃問號前，開切換面板確認 1 隊長 + (N-1) 隊員，不符 → 不點（--fight 退出碼 %d、執行中脫隊 %d）；0 或 1 = 跳過；--solo / --no-click / --no-track 不檢查' % (EXIT_TEAM_MISMATCH, EXIT_TEAM_LOST))
     ap.add_argument('--at', default='', help='--fight 用：自己目前的座標 X,Y（不給就 OCR 讀右上角）')
     ap.add_argument('--no-click', action='store_true', help='--fight 用：不點 NPC（已手動點過 / 對話已開），從現在起算開打時間窗')
     ap.add_argument('--max-seconds', type=int, default=900, help='最長執行秒數（預設 900）')
@@ -660,6 +802,8 @@ def main() -> int:
     ap.add_argument('--no-refresh', action='store_true', help='戰鬥不按刷新角色')
     ap.add_argument('--stop-after-rewards', type=int, default=0, help='領到第 N 次獲得物品視窗後停（0 = 不停）')
     a = ap.parse_args()
+    if a.step and not a.npc:
+        a.npc = 'auto'
     if layout.current() != '2880x1659':
         log('quest.py 只量過 2880×1659 版面，先跑 gui.sh max；見 ui/layout-1920x1017.md')
         return 4
@@ -677,7 +821,7 @@ def main() -> int:
         if not a.no_click:
             npc_xy = resolve_npc(a)
             if npc_xy is None:
-                return 4
+                return a.resolve_rc
     guard_ko = a.solo or a.fight         # 只有這兩種風格才會被打飛後要停手
     if not a.no_track and not a.task:
         log('沒給 --task：不知道要點哪個任務追蹤（點錯任務是之前的老問題）。請加 --task 任務名，或用 --no-track（只處理對話 / 戰鬥）')
@@ -731,7 +875,34 @@ def main() -> int:
     auto_presses = 0             # 組隊預設模式：本場戰鬥按自動戰鬥鈕的次數
     if guard_ko:
         event(f'模式：{"單人逃跑 --solo" if a.solo else "戰鬥步 --fight"}；起點 {last_pos}')
+    team_size = 5 if a.team_size is None else a.team_size
+    team_on = team_size > 1 and not a.solo and (bool(npc_xy) if a.fight else not a.no_track)     # --solo 本來就是單人跑；--no-click / --no-track 不會點 NPC / 追蹤
+    last_team_check = 0.0
+
+    def team_gate(tag: str, code: int) -> int:
+        """點 NPC / 追蹤前的隊伍檢查（脫隊偵測的保底做法：聊天日誌「離開了隊伍」讀不可靠，所以每次要點之前確認隊伍還在）。
+        符合（或不檢查 / 剛檢查過）回 0；隊伍不符或讀不到 → 寫事件 log 回 code（呼叫端直接 return）"""
+        nonlocal last_team_check
+        if not team_on or time.time() - last_team_check < TEAM_CHECK_GAP:
+            return 0
+        ok_, desc = check_team(team_size, tag)
+        last_team_check = time.time()
+        if ok_:
+            log(f'隊伍檢查通過：{desc}')
+            return 0
+        shot = snap('team-mismatch')
+        if ok_ is None:
+            event(f'{tag}隊伍檢查失敗：{desc} → 無法確認隊伍完整，不點，退出碼 {code}', shot)
+        else:
+            event(f'{tag}隊伍不符（要 1 隊長 + {team_size - 1} 隊員）：{desc} → 有人不在隊，不點，退出碼 {code}', shot)
+        print('隊伍不完整，沒有點 NPC / 追蹤', flush=True)
+        return code
+
     if a.fight:
+        if npc_xy and read_screen()['state'] == 'idle':
+            rc = team_gate('--fight 點 NPC 前：', EXIT_TEAM_MISMATCH)
+            if rc:
+                return rc
         if npc_xy:
             if not click_npc(npc_xy, a):
                 return 4
@@ -743,10 +914,13 @@ def main() -> int:
         s = read_screen()
         st = s['state']
         if st in ('idle', 'walking', 'dialog', 'reward'):
+            if in_battle:
+                battleguard.release()          # 戰鬥結束 → 刪鎖檔，ass.py 可以動了
             in_battle = False
         in_battle_new = st == 'battle' and not in_battle
         if in_battle_new:
             in_battle = True
+            battleguard.acquire(f'quest.py {"--solo" if a.solo else "--fight" if a.fight else "預設"}')   # 戰鬥中鎖檔：ass.py 看到就不改外掛設定
             battle_t0 = time.time()
             quest_battle = is_quest_battle(last_action, time.time())
             boss = quest_battle
@@ -915,6 +1089,8 @@ def main() -> int:
                 pass
             elif rewards > checked_rewards and not a.no_track and a.task:
                 # 領過獎勵後第一次回到主畫面：立刻掃整個追蹤列表。目標任務不在列表 = 任務完成（不空轉）；還在 = 下一步，順便點它
+                if (rc := team_gate('領獎後點追蹤前：', EXIT_TEAM_LOST)):
+                    return rc
                 checked_rewards = rewards
                 time.sleep(1.0)                              # 等獲得物品視窗收掉、列表刷新
                 res = track_task(a.task)
@@ -930,6 +1106,8 @@ def main() -> int:
                     return 0
             elif not a.no_track:
                 # 檢測方針：1. 場景有黃色問號 → 優先點它；2. 沒有 → 追蹤列表核對任務名再點
+                if not wait_track and (rc := team_gate('點追蹤 / 黃問號前：', EXIT_TEAM_LOST)):
+                    return rc
                 mk = None if a.no_marker else find_marker()
                 log('找黃色問號：' + (f'{mk["x"]},{mk["y"]} n={mk["n"]}' if mk else '沒有'))
                 if mk and marker_fail < len(MARK_NPC_DYS):
@@ -999,6 +1177,14 @@ def main() -> int:
             event(f'時間到，結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}）')
             return 0
         time.sleep(a.every)
+
+
+def main() -> int:
+    """包一層：不論怎麼結束（含例外 / Ctrl-C）都刪自己的戰鬥鎖檔"""
+    try:
+        return _main()
+    finally:
+        battleguard.release()
 
 
 if __name__ == '__main__':

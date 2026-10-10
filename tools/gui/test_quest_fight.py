@@ -6,6 +6,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import quest  # noqa: E402
+import battleguard  # noqa: E402
+import tempfile as _tf
+battleguard.LOCK_FILE = Path(_tf.mkdtemp()) / 'battle.lock'      # 測試用鎖檔位置，不碰真正的 tools/.cache/battle.lock
+REAL_CHECK_TEAM = quest.check_team                               # run() 會把 quest.check_team 換成假的；真函式留著測像素邏輯
 
 IDLE = {'state': 'idle', 'gold': 0, 'full': False, 'cmd': False, 'auto_off': False}
 DIALOG = dict(IDLE, state='dialog')
@@ -52,6 +56,14 @@ class Sim:
         return dict(IDLE)
 
 
+TEAM = {'ret': (True, 'fake 隊伍完整'), 'calls': []}
+
+
+def fake_team(size, tag=''):
+    TEAM['calls'].append((size, tag))
+    return TEAM['ret']
+
+
 ASS = {'rc': 0, 'st': {'原地遇敵': False, '自動逃跑': False, '快速戰鬥': False, '自動戰鬥': True, '夥伴助戰': False}, 'calls': 0}
 
 
@@ -65,6 +77,7 @@ def run(argv, sim):
     quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: (5510, 50, 17)
     quest.walk.gui = sim.gui
     quest.ass.get_states = fake_ass
+    quest.check_team = fake_team
     quest.snap = lambda tag: 'sim.png'
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
     quest.layout.current = lambda: '2880x1659'
@@ -208,6 +221,7 @@ def run2(argv, sim, clef_ret=None):
     quest.snap = lambda tag: 'sim.png'
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
     quest.layout.current = lambda: '2880x1659'
+    quest.check_team = fake_team
     quest.clef.available = lambda: clef_ret is not None
     if clef_ret is not None:
         quest.clef_shot_bytes = lambda: b'x'
@@ -373,6 +387,202 @@ print('(k4) Clef 載入 / 戰鬥判斷：最多連續 CLEF_WAIT_SECS 秒不算�
 s = Script([UNK])
 rc = run2(['--no-track', '--max-seconds', '300'], s, clef_ret={'scene': '戰鬥中', 'p': 0.9, 'model': 'clef-flash', 'verify_p': 0.0, 'alarm': False})
 ok &= check('exit 2，約 50 秒後', rc == 2 and quest.CLEF_WAIT_SECS <= s.t - 1000 <= quest.CLEF_WAIT_SECS + 8, f'rc={rc} t={s.t - 1000}')
+
+
+# ---- 事故後新增：隊伍檢查 / 戰鬥鎖檔 / --npc auto 取目前步驟 ----
+import argparse
+import os
+print('(m) 隊伍標籤像素判斷（隊長紅、隊員黃、底深棕；2026-10-10 實機：隊長紅點 30、隊員黃點 42~44）')
+RED, YEL, BG = (217, 33, 33), (240, 200, 60), (78, 66, 59)
+n_s = len(quest.TEAM_SAMPLE)
+ok &= check('紅點 >= 8 → leader', quest.classify_team_label([RED] * 12 + [BG] * (n_s - 12)) == 'leader')
+ok &= check('黃點 >= 8 → member', quest.classify_team_label([YEL] * 12 + [BG] * (n_s - 12)) == 'member')
+ok &= check('只有底色 / 白字 → other', quest.classify_team_label([BG] * n_s) == 'other' and quest.classify_team_label([(240, 240, 240)] * 12 + [BG] * (n_s - 12)) == 'other')
+ok &= check('紅點太少（<8）→ other', quest.classify_team_label([RED] * 3 + [BG] * (n_s - 3)) == 'other')
+ALL5 = {'DKB0': 'leader', 'DKB02': 'member', 'DKB03': 'member', 'DKB04': 'member', 'DKB05': 'member'}
+ok &= check('judge 5 人隊 OK', quest.judge_team(ALL5, 5)[0])
+four = dict(ALL5, DKB04='other')
+j = quest.judge_team(four, 5)
+ok &= check('judge 4 人（DKB04 單人）不符且說明點名 DKB04', (not j[0]) and 'DKB04' in j[1].split('不在隊')[1], j[1])
+ok &= check('judge 兩個隊長 / 無隊長 不符', not quest.judge_team(dict(ALL5, DKB02='leader'), 5)[0] and not quest.judge_team(dict(ALL5, DKB0='member'), 5)[0])
+ok &= check('--team-size 4 時 4 人隊（另 1 人不在線）仍要 0 個 other', not quest.judge_team(four, 4)[0])
+
+
+class PanelGame:
+    """假遊戲：點切換 763,760 開面板；點 ✕ 1064,208 關；pixel 回隊伍標籤顏色（其餘點回 SIG_PANEL 色 / 0）"""
+
+    def __init__(self, kinds, opens=True):
+        self.kinds, self.opens, self.panel, self.clicks = kinds, opens, False, []
+
+    def gui(self, *args, note=''):
+        if args[0] == 'seq':
+            self.clicks.append(args[1])
+            if args[1].startswith('click 763 760') and self.opens:
+                self.panel = True
+            if args[1].startswith('click 1064 208'):
+                self.panel = False
+            return ''
+        if args[0] == 'key':
+            self.clicks.append('key ' + args[1])
+            self.panel = False
+            return ''
+        if args[0] == 'pixel':
+            return team_px(self.kinds)(args)
+        return ''
+
+    def screen(self):
+        return dict(IDLE, state='panel' if self.panel else 'idle')
+
+
+def team_px(kinds):
+    col = {'leader': RED, 'member': YEL, 'other': BG}
+    return lambda args: ' '.join(' '.join(['%d,%d,%d' % col[kinds[r]]] * n_s) for r in quest.TEAM_CARDS)
+
+
+print('(m2) check_team（真函式 + 假面板）：5 人 OK / 4 人不符 / 面板沒開；每次都關面板、沒開就不讀')
+for nm, kinds, opens, want in [('5 人', ALL5, True, True), ('4 人', four, True, False), ('面板打不開', ALL5, False, None)]:
+    pg = PanelGame(kinds, opens)
+    quest.gui, quest.read_screen = pg.gui, pg.screen
+    res = REAL_CHECK_TEAM(5, '測試：')
+    ok &= check(f'{nm} → {want}', res[0] is want and not pg.panel, str(res))
+    if opens:
+        ok &= check(f'{nm}：用 ✕ 1064,208 關面板', any(c.startswith('click 1064 208') for c in pg.clicks), str(pg.clicks))
+
+print('(n) --fight 4 人隊 → 不點 NPC，退出碼 30；5 人 → 照常點')
+ASS['st']['自動逃跑'] = False
+TEAM['ret'], TEAM['calls'] = (False, "隊長 ['DKB0']、隊員 ['DKB02', 'DKB03', 'DKB05']、不在隊 / 單人 / 離線 ['DKB04']"), []
+s = Sim(battle_at=3.0)
+rc = run(['--fight', '--npc', '53,17', '--max-seconds', '60'], s)
+ok &= check('exit 30、沒任何點擊、檢查人數 5', rc == quest.EXIT_TEAM_MISMATCH and not s.clicks and TEAM['calls'] == [(5, '--fight 點 NPC 前：')], f'rc={rc} clicks={s.clicks} calls={TEAM["calls"]}')
+TEAM['ret'], TEAM['calls'] = (None, '切換面板沒打開'), []
+s = Sim(battle_at=3.0)
+rc = run(['--fight', '--npc', '53,17', '--max-seconds', '60'], s)
+ok &= check('讀不到隊伍 → 也不點 NPC（30）', rc == 30 and not s.clicks)
+TEAM['ret'], TEAM['calls'] = (True, 'ok'), []
+s = Sim(battle_at=3.0, boss_ends=8.0)
+rc = run(['--fight', '--npc', '53,17', '--team-size', '4', '--max-seconds', '60'], s)
+ok &= check('--team-size 4 傳給檢查；通過 → 點 NPC、BOSS 戰結束 0', rc == 0 and TEAM['calls'][0][0] == 4 and bool(s.clicks) and s.clicks[0][1].startswith('click 1215 18'), f'rc={rc} {TEAM["calls"]}')
+TEAM['ret'], TEAM['calls'] = (False, 'x'), []
+s = Sim(battle_at=3.0, boss_ends=8.0)
+rc = run(['--fight', '--npc', '53,17', '--team-size', '0', '--max-seconds', '60'], s)
+ok &= check('--team-size 0 跳過檢查', rc == 0 and not TEAM['calls'])
+s = Sim(battle_at=3.0, boss_ends=8.0)
+rc = run(['--fight', '--no-click', '--max-seconds', '60'], s)
+ok &= check('--no-click 不檢查隊伍', rc == 0 and not TEAM['calls'])
+TEAM['ret'] = (True, 'ok')
+
+print('(n2) 預設模式（要點追蹤）：開跑前檢查；脫隊 → 退出碼 32，沒點追蹤 / 黃問號；--solo / --no-track 不檢查')
+TEAM['calls'] = []
+s = Script([IDLE, IDLE])
+TEAM['ret'] = (False, "不在隊 ['DKB03']")
+rc = run2(['--task', 'x', '--max-seconds', '60'], s)
+ok &= check('exit 32 且沒有點擊（find_marker / track_task 沒被呼叫）', rc == quest.EXIT_TEAM_LOST and not s.clicks and len(TEAM['calls']) == 1, f'rc={rc} {s.clicks}')
+for extra in (['--no-track'], ['--solo', '--no-track', '--skip-ass-check']):
+    TEAM['calls'] = []
+    s = Script([IDLE, IDLE, IDLE, IDLE])
+    rc = run2(extra + ['--max-seconds', '4'], s)
+    ok &= check(f'{" ".join(extra)} 不檢查隊伍', not TEAM['calls'] and rc == 0, f'rc={rc}')
+print('(n3) 預設模式：兩次檢查間隔 >= TEAM_CHECK_GAP（通過後不每秒都開面板）')
+TEAM['ret'], TEAM['calls'] = (True, 'ok'), []
+tracked_n = []
+s = Script([IDLE] * 3)
+quest.find_marker = lambda: None
+quest.track_task = lambda *a, **k: (tracked_n.append(1), None)[1]       # None = 畫面變了，交回主迴圈（不計 task_miss）
+rc = None
+quest.time.time, quest.time.sleep = s.time, s.sleep
+quest.read_screen, quest.gui, quest.read_pos = s.screen, s.gui, lambda: None
+quest.walk.gui = s.gui
+quest.snap = lambda tag: 'sim.png'
+quest.event = lambda m, shot=None: None
+quest.layout.current = lambda: '2880x1659'
+quest.clef.available = lambda: False
+quest.netwatch.guard = lambda *_: {'status': 'ok'}
+sys.argv = ['quest.py', '--task', 'x', '--max-seconds', '8']
+rc = quest.main()
+ok &= check('8 秒內只檢查 1 次、追蹤點了多次', len(TEAM['calls']) == 1 and len(tracked_n) >= 3, f'checks={len(TEAM["calls"])} tracks={len(tracked_n)}')
+
+print('(o) 戰鬥鎖檔：戰鬥中存在（含 pid）、戰鬥結束 / 程式結束後刪除')
+seen = []
+
+
+class LockSim(Sim):
+    def screen(self):
+        r = super().screen()
+        seen.append((r['state'], battleguard.locked() is not None))
+        return r
+
+
+s = LockSim(battle_at=3.0, auto_on=False, boss_ends=8.0)
+ASS['st']['自動逃跑'] = False
+rc = run(['--fight', '--no-click', '--max-seconds', '60'], s)
+bat = [x for st_, x in seen if st_ == 'battle']
+ok &= check('戰鬥畫面第 2 次讀起鎖檔都有效（第 1 次讀到戰鬥時才剛寫鎖）', len(bat) >= 2 and all(bat[1:]), str(bat))
+ok &= check('戰鬥結束後鎖檔已刪', not battleguard.LOCK_FILE.exists())
+idle_after = [x for st_, x in seen[seen.index(next(e for e in seen if e[0] == 'battle')):] if st_ == 'idle']
+ok &= check('戰鬥後第一次看到閒置時鎖已刪', idle_after and not idle_after[-1], str(idle_after[:2]))
+battleguard.acquire('x')
+d = battleguard.locked()
+ok &= check('locked() 回 pid = 自己', d and d['pid'] == os.getpid())
+battleguard.LOCK_FILE.write_text('{"pid": 99999999, "start": %f}' % __import__('time').time())
+ok &= check('死 pid 的鎖 → 視為無鎖並清掉', battleguard.locked() is None and not battleguard.LOCK_FILE.exists())
+battleguard.LOCK_FILE.write_text('{"pid": %d, "start": 1}' % os.getpid())
+ok &= check('超過 30 分鐘的鎖 → 無效', battleguard.locked(now=1e9) is None)
+s = Sim(battle_at=3.0, boss_ends=1000.0)
+try:
+    run(['--fight', '--no-click', '--max-seconds', '30'], s)
+except Exception:
+    pass
+ok &= check('--max-seconds 到時（戰鬥中）程式結束 → 鎖檔刪除', not battleguard.LOCK_FILE.exists())
+
+print('(p) --npc auto 取「目前步驟」：追蹤說明文字對 Task 表（任務 碧青洞窟 2002）')
+
+
+def ns(**kw):
+    d = dict(npc='auto', task='碧青洞窟', step=0, at='', npc_map=None)
+    d.update(kw)
+    return argparse.Namespace(**d)
+
+
+def with_ocr(lines):
+    quest.ps_json = lambda script, *args: {'ok': True, 'lines': [{'text': t, 'y': y, 'x': 200} for t, y in lines]}
+
+
+quest.event = lambda m, shot=None: None
+with_ocr([('碧青洞窟', 309), ('找菲伊拿群青的水', 341), ('漆黑洞窟(一轉)', 426)])
+a_ = ns()
+ok &= check('說明「找菲伊拿群青的水」→ 步 6 菲伊 31302:27,31', quest.resolve_npc(a_) == (27, 31) and a_.npc_map == 31302)
+with_ocr([('碧青洞窟', 309), ('獲取深藍色的石頭', 341)])
+a_ = ns()
+ok &= check('說明「獲取深藍色的石頭」→ 步 5（30305:57,48），不是第一個戰鬥步（8 樓）', quest.resolve_npc(a_) == (57, 48) and a_.npc_map == 30305)
+with_ocr([('碧青洞窟', 309), ('獲取深籃色的石頭', 341), ('獲取深藍色的石頭', 341)])
+ok &= check('OCR 錯 1 字也能對到（相似度 >= 0.8）', quest.resolve_npc(ns()) == (57, 48))
+with_ocr([('碧青洞窟', 309), ('通過碧青9樓的挑戰', 341)])
+ok &= check('步 2 / 7 同文字同 NPC（21208:30,16）→ 可判定', quest.resolve_npc(ns()) == (30, 16))
+for nm, lines in [('說明文字對不到', [('碧青洞窟', 309), ('完全不相干的文字', 341)]),
+                  ('讀不到說明行', [('碧青洞窟', 309)]),
+                  ('標題不在這一頁', [('漆黑洞窟(一轉)', 309), ('找菲伊拿群青的水', 341)]),
+                  ('兩步同文字但 NPC 不同（步 9 / 10）', [('碧青洞窟', 309), ('尋找水蒼洞窟賢者', 341)]),
+                  ('OCR 整個空', [])]:
+    with_ocr(lines)
+    a_ = ns()
+    r = quest.resolve_npc(a_)
+    ok &= check(f'{nm} → None + 退出碼 31', r is None and a_.resolve_rc == quest.EXIT_STEP_UNKNOWN, f'r={r} rc={a_.resolve_rc}')
+with_ocr([])
+a_ = ns(step=9)
+ok &= check('--step 9 不用 OCR → 賢者看門人 21308:20,10', quest.resolve_npc(a_) == (20, 10))
+ok &= check('--step 99 不存在 → 31', quest.resolve_npc(ns(step=99)) is None)
+a_ = ns(task='')
+ok &= check('沒給 --task → None（退出碼 4）', quest.resolve_npc(a_) is None and a_.resolve_rc == 4)
+a_ = ns(task='不存在的任務名xyz')
+ok &= check('任務表找不到 → 31', quest.resolve_npc(a_) is None and a_.resolve_rc == 31)
+print('(p2) main：--fight --npc auto 讀不到步驟 → 退出碼 31，沒任何點擊')
+with_ocr([('碧青洞窟', 309), ('亂七八糟', 341)])
+s = Sim(battle_at=3.0)
+rc = run(['--fight', '--npc', 'auto', '--task', '碧青洞窟', '--max-seconds', '30'], s)
+ok &= check('exit 31 且沒點擊', rc == quest.EXIT_STEP_UNKNOWN and not s.clicks, f'rc={rc}')
+s = Sim(battle_at=3.0)
+rc = run(['--fight', '--step', '5', '--at', '57,47', '--task', '碧青洞窟', '--max-seconds', '30'], s)
+ok &= check('--step 5（隱含 --npc auto）→ 通過隊伍檢查後點 NPC', rc == 0 and bool(s.clicks), f'rc={rc}')
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)
