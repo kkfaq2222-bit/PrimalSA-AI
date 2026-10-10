@@ -29,6 +29,20 @@ GUI_DIR = ROOT / 'tools' / 'gui'
 PS_PREFIX = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass']
 
 
+def resolve_client(m: str | None = None) -> str:
+    """PSA_EXE_MATCH 的值換成客戶端資料夾名：可填角色 1 的名字（tools/.cache/clients.json 對照，PowerShell 端
+    psaclient.ps1 用同一份）；沒對照就原樣回傳；沒設回 ''。log 檔名等用它，換名字不會讓檔名跟著變。"""
+    m = os.environ.get('PSA_EXE_MATCH', '') if m is None else m
+    try:
+        f = Path(__file__).resolve().parents[1] / '.cache' / 'clients.json'
+        v = json.loads(f.read_text(encoding='utf-8')).get(m)
+        if v:
+            return str(v)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return m
+
+
 def platform_kind(plat: str | None = None, proc_version: str | None = None, env: dict | None = None) -> str:
     """'windows'（原生 Python / Git Bash / MSYS / Cygwin）、'wsl'、'linux'。參數供測試時模擬。"""
     plat = sys.platform if plat is None else plat

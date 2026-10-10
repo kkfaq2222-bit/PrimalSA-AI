@@ -133,8 +133,8 @@ if (($Cmd -eq 'pixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:
 }
 if ($h -eq [IntPtr]::Zero) {
   $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
-  # 同時開多個客戶端時，用環境變數 PSA_EXE_MATCH（路徑片段，例：PrimalSA222）指定要操作哪一個
-  if ($env:PSA_EXE_MATCH) { $proc = @($proc | Where-Object { $_.Path -like "*$($env:PSA_EXE_MATCH)*" }) | Select-Object -First 1 }
+  # 同時開多個客戶端時，用環境變數 PSA_EXE_MATCH（角色 1 的名字（clients.json 對照）或客戶端資料夾名，例：角色1名字 / PrimalSA222）指定要操作哪一個
+  if ($env:PSA_EXE_MATCH) { . (Join-Path $PSScriptRoot 'psaclient.ps1'); $proc = Select-PsaProc $proc }
   if (-not $proc) { $global:__psa_hwnd = $null; $global:__psa_pid = $null; Write-Error "PrimalSA 沒有在執行"; exit 1 }
   $h = $proc.MainWindowHandle
   if ($h -ne [IntPtr]::Zero) { $global:__psa_hwnd = [int64]$h; $global:__psa_pid = [int]@($proc)[0].Id }

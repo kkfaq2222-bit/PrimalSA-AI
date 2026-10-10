@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""levelwatch / progress 離線測試（不碰遊戲）。
+驗證：等級讀取（隊長與寵物取較大、漏讀位數）、第一次確認（兩個等級都讀到且差 ≤ 2）、練功點門檻（REAL_STAGES）、
+進度紀錄追加。用法：uv run --no-project python tools/gui/test_levelwatch.py"""
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import levelwatch as lw  # noqa: E402
+import progress  # noqa: E402
+
+fails = 0
+
+
+def check(name, got, want):
+    global fails
+    ok = got == want
+    fails += 0 if ok else 1
+    print(('PASS ' if ok else 'FAIL ') + name + ('' if ok else f'  got={got!r} want={want!r}'))
+
+
+# parse_level：隊長漏讀位數（112 讀成 2）時取寵物等級較大者
+check('parse 隊長漏位數取寵物', lw.parse_level({'level': '0轉2級', 'petLevel': '0轉112級'}), (0, 112))
+check('parse 兩者一致', lw.parse_level({'level': '0轉112級', 'petLevel': '0轉112級'}), (0, 112))
+check('parse 只讀到隊長', lw.parse_level({'level': '0轉45級'}), (0, 45))
+check('parse 都讀不到', lw.parse_level({'level': None, 'petLevel': ''}), None)
+check('parse 轉生數', lw.parse_level({'level': '2轉30級', 'petLevel': '2轉30級'}), (2, 30))
+
+# first_read_ok：兩個等級都要讀到、同轉生數、差 ≤ 2
+check('first 兩者一致', lw.first_read_ok({'level': '0轉112級', 'petLevel': '0轉112級'}), True)
+check('first 差 2 可', lw.first_read_ok({'level': '0轉112級', 'petLevel': '0轉110級'}), True)
+check('first 差 3 不可', lw.first_read_ok({'level': '0轉112級', 'petLevel': '0轉109級'}), False)
+check('first 漏位數不可（2 vs 112）', lw.first_read_ok({'level': '0轉2級', 'petLevel': '0轉112級'}), False)
+check('first 只讀到一個不可', lw.first_read_ok({'level': '0轉112級'}), False)
+check('first 轉生數不同不可', lw.first_read_ok({'level': '1轉30級', 'petLevel': '0轉30級'}), False)
+
+# target_for：真門檻（REAL_STAGES）
+R = lw.REAL_STAGES
+for lv, want in [(1, '柯奧龜洞'), (9, '柯奧龜洞'), (10, '阿布龜洞'), (19, '阿布龜洞'), (20, '海主人隧道'),
+                 (44, '海主人隧道'), (45, '五兄弟洞窟'), (60, '柯奧4F龜洞'), (79, '柯奧4F龜洞'),
+                 (80, '波拉島'), (119, '波拉島'), (120, '地雷區'), (134, '地雷區')]:
+    check(f'target {lv} 級', lw.target_for(lv, R), want)
+check('target 0 級沒有', lw.target_for(0, R), None)
+# 兩份門檻表都要由高到低（target_for 取第一個符合的）
+for nm, tb in (('STAGES', lw.STAGES), ('REAL_STAGES', lw.REAL_STAGES)):
+    needs = [n for n, _ in tb]
+    check(f'{nm} 由高到低', needs, sorted(needs, reverse=True))
+
+# progress：追加、header 只寫一次、client 欄位、run 紀錄
+tmp = Path(tempfile.mkdtemp()) / 'sub' / 'progress.md'
+check('progress.add', progress.add('玄黃洞窟 第 4 步', client='gameClient', path=tmp), True)
+check('progress.add_run', progress.add_run('quest.py', ['--task', '玄黃洞窟'], 0, path=tmp), True)
+check('progress.add_run 例外', progress.add_run('quest.py', ['--solo'], None, path=tmp), True)
+lines = tmp.read_text(encoding='utf-8').splitlines()
+check('header 只一次', sum(1 for ln in lines if ln.startswith('# 進度紀錄')), 1)
+body = [ln for ln in lines if ln.startswith('20')]
+check('3 筆', len(body), 3)
+check('含 client', '[gameClient] 玄黃洞窟 第 4 步' in body[0], True)
+check('含退出碼', body[1].endswith('→ 退出碼 0'), True)
+check('例外中斷', body[2].endswith('→ 異常中斷'), True)
+check('tail 取最後 2 行', len(progress.tail(2, path=tmp)), 2)
+check('寫不進去回 False 不丟例外', progress.add('x', path=Path('Z:/不存在的磁碟/p.md')), False)
+
+print(f'\n失敗 {fails}')
+sys.exit(1 if fails else 0)

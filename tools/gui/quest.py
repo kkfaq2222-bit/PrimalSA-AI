@@ -63,6 +63,7 @@ import battleguard
 import screen_sigs
 import layout
 import netwatch
+import progress
 import winenv
 import walk
 from walk import ROOT, gui, log, PRIMER, stat
@@ -1378,9 +1379,12 @@ def _main() -> int:
 def main() -> int:
     """包一層：不論怎麼結束（含例外 / Ctrl-C）都刪自己的戰鬥鎖檔"""
     winenv.enable_server()   # 長程序：用常駐 server 讀畫面（WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）
+    rc = None
     try:
-        return _main()
+        rc = _main()
+        return rc
     finally:
+        progress.add_run('quest.py', sys.argv[1:], rc)   # 刪對話後仍能從 notes/progress.md 看出做到哪
         battleguard.release()
         winenv.shutdown_server()   # 明確關常駐 server（送 quit + 關 stdin），不只靠 atexit
 

@@ -17,6 +17,7 @@ AI 只透過「截圖 → 看圖 → 點擊 / 按鍵 → 再截圖確認」操�
 - **使用者怎麼動都不影響自動操作**：點擊那 0.15 秒用低階滑鼠鉤子吞掉使用者實體滑鼠的移動 / 按下（放開放行），游標一定停在目標上；鍵盤訊息直接送遊戲視窗，使用者打字、切視窗都不干擾。不用等使用者閒置。
   - 鉤子執行緒各自保存自己的 hook（自己裝自己拆）、最多活 2 秒自動解除；click / dclick / drag 的 BgBegin…BgEnd 在 try/finally 內，出錯也會還原游標並停 Guard；Stop Join 逾時寫 actions.log。離線測試：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\gui\test_guard.ps1`。
 - 背景點擊沒反應時改用 `fg click ...`（舊的前景模式：把遊戲拉到前景並留著，**用過 `fg` / `max` 一定要跑 `end`** 還原）。
+**多客戶端指定**：環境變數 `PSA_EXE_MATCH` 可以填「角色 1 的名字」或「客戶端資料夾名」（例：`角色1名字` = gameClient、角色2名字 = PrimalSA222）。名字對照放 `tools/.cache/clients.json`（不進 git，格式 `{"角色1名字": "gameClient"}`）；資料夾名完全相等優先，沒有才退回子字串，子字串同時比到多個客戶端（例：`PrimalSA`）會**拒絕操作**並印提示。實作：`tools/gui/psaclient.ps1`（PowerShell 端）、`winenv.resolve_client()`（Python 端）。
 按鈕位置與每個畫面的內容見同資料夾 [ui/README.md](ui/README.md)（索引，依功能拆檔）。
 
 ## 工具

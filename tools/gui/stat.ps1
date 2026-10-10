@@ -50,8 +50,8 @@ public class WS {
 function Out-Json($o) { $o | ConvertTo-Json -Compress; exit 0 }
 [WS]::SetProcessDPIAware() | Out-Null
 $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
-# 同時開多個客戶端時，用環境變數 PSA_EXE_MATCH（路徑片段，例：PrimalSA222）指定要操作哪一個
-if ($env:PSA_EXE_MATCH) { $proc = @($proc | Where-Object { $_.Path -like "*$($env:PSA_EXE_MATCH)*" }) | Select-Object -First 1 }
+# 同時開多個客戶端時，用環境變數 PSA_EXE_MATCH（角色 1 的名字（clients.json 對照）或客戶端資料夾名，例：角色1名字 / PrimalSA222）指定要操作哪一個
+if ($env:PSA_EXE_MATCH) { . (Join-Path $PSScriptRoot 'psaclient.ps1'); $proc = Select-PsaProc $proc }
 if (-not $proc) { Out-Json @{ ok = $false; error = '遊戲沒有在執行' } }
 $h = $proc.MainWindowHandle
 # 最小化時 Unity 不繪製，這裡不去還原（不打擾使用者），直接回報

@@ -126,6 +126,8 @@ public class Mirror : Form {
 }
 "@
 [Mirror]::DpiAware()
+# PSA_EXE_MATCH 可填角色 1 的名字：換成客戶端資料夾名（C# 端與視窗標題 / mutex 都用換過的值）
+if ($env:PSA_EXE_MATCH) { . (Join-Path $PSScriptRoot 'psaclient.ps1'); $env:PSA_EXE_MATCH = Resolve-PsaClient $env:PSA_EXE_MATCH }
 # 單一執行個體：已開著就把那個視窗帶到前面
 $created = $false
 $suffix = if ($env:PSA_EXE_MATCH) { '-' + $env:PSA_EXE_MATCH } else { '' }

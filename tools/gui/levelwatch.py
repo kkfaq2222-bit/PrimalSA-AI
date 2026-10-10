@@ -28,6 +28,8 @@ from pathlib import Path
 import healthcheck
 import heal
 import layout
+import progress
+import winenv
 from walk import log, stat
 
 # (等級門檻, 練功點名稱) 由高到低；只認 0 轉（轉生後門檻未實測）
@@ -115,7 +117,7 @@ def main() -> int:
         return 2
     done = a.at          # 已經換過去的練功點
     # 經驗紀錄：每次確認讀數後存一行（時間, 視窗, 等級, 地圖, 備註），之後用 Exp 表算每分鐘經驗；notes/ 不進 git
-    log_path = Path(__file__).resolve().parents[2] / 'notes' / f'exp-log-{os.environ.get("PSA_EXE_MATCH") or "game"}.csv'
+    log_path = Path(__file__).resolve().parents[2] / 'notes' / f'exp-log-{winenv.resolve_client() or "game"}.csv'
     log_path.parent.mkdir(exist_ok=True)
     if not log_path.exists():
         log_path.write_text('time,level,pos,note\n', encoding='utf-8')
@@ -200,6 +202,7 @@ def main() -> int:
                 return 1
             if level >= END_LEVEL:
                 log(f'隊長已達 {level} 級，結束監測。注意：只看了隊長，5 個角色都要 {END_LEVEL} 級才算完成，請再開「切換」面板確認其他 4 人')
+                progress.add(f'levelwatch 隊長已達 {level} 級，結束監測（5 個角色要逐一確認）')
                 return 0
             if done is None and spot:
                 # 重啟時人已經在該練功點的地圖上就不用再傳送
@@ -231,7 +234,7 @@ def main() -> int:
                 log(f'血 / 魔太低（HP {s2.get("hpPct")}%，MP {s2.get("mpPct")}%），回村補血後回 {done}')
                 try:
                     t_heal = time.time()
-                    with (log_path.parent / f'heal-log-{os.environ.get("PSA_EXE_MATCH") or "game"}.csv').open('a', encoding='utf-8') as hf:
+                    with (log_path.parent / f'heal-log-{winenv.resolve_client() or "game"}.csv').open('a', encoding='utf-8') as hf:
                         hf.write(f'{time.strftime("%Y-%m-%d %H:%M:%S")},{level},{done},HP{s2.get("hpPct")}%/MP{s2.get("mpPct")}%\n')
                     heal.heal_trip(done)
                 except RuntimeError as e:
