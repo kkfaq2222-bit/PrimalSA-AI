@@ -137,7 +137,13 @@ g = install(Game(panel=True))
 g.sync()
 uikit.SWITCH.close_xy  # noqa: B018
 check('已開著 open_panel 不再點', uikit.open_panel(uikit.SWITCH) is True and g.clicks == [])
-check('TEAMPANEL 特徵未量 → open 拒絕且不點', uikit.open_panel(uikit.TEAMPANEL) is False and g.clicks == [])
+check('TEAMPANEL 有特徵、✕ 在 1250,77', bool(uikit.TEAMPANEL.sig) and uikit.TEAMPANEL.close_xy == (1250, 77))
+check('切換面板開著時 TEAMPANEL 不會誤判開著', uikit.is_open(uikit.TEAMPANEL) is False)
+try:
+    uikit.safe_click(720, 670, uikit.TEAMPANEL)
+    check('TEAMPANEL 解散鈕 720,670 在禁區', False)
+except uikit.ForbiddenClick:
+    check('TEAMPANEL 解散鈕 720,670 在禁區', True)
 
 # ---- preflight ----
 import battleguard  # noqa: E402

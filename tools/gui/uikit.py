@@ -130,7 +130,13 @@ SWITCH = Panel('SWITCH', (763, 760), screen_sigs.SIG_PANEL, (1064, 208),
 PET = Panel('PET', (318, 80), [(1310, 108, 197, 71, 49, screen_sigs.TOL)], (1310, 108),
             forbidden={'trash': rect(708, 565), 'recycle': rect(372, 610), 'loyal_minus': rect(1140, 234), 'loyal_plus': rect(1265, 234),
                        'lock': rect(708, 630), 'depot_expand': rect(1195, 705)})
-TEAMPANEL = Panel('TEAMPANEL', (850, 760), None, None)                       # 特徵待量（P-I4）：sig=None → open_panel 拒絕
+# 組隊面板（850,760）：P-I4 實測（2026-10-11，5 人隊）。✕ 在 1250,77（與切換面板 1064,208 不同）；
+# 特徵 = ✕ 紅圓 + 標題條兩點 + 米底 + 「解散隊伍」鈕紅橘（有隊伍才有；無隊伍時是藍色「創建隊伍」，所以單人時特徵會不符 → 沒做過單人量測，只在有隊伍時可靠）。
+# 解散鈕 720,670 列入禁區：解散一律走 quest.disband_team（左側分頁，逐步像素驗證），不從這個面板點。
+TEAMPANEL = Panel('TEAMPANEL', (850, 760),
+                  [(1250, 77, 197, 72, 48, screen_sigs.TOL), (720, 75, 147, 89, 57, screen_sigs.TOL), (600, 60, 149, 92, 60, screen_sigs.TOL),
+                   (1300, 400, 255, 229, 191, screen_sigs.TOL), (720, 670, 187, 73, 43, screen_sigs.TOL)],
+                  (1250, 77), forbidden={'disband': rect(720, 670, 60)})
 ASS = Panel('ASS', None, None, None)                                          # 見 _ass_panel()
 
 
