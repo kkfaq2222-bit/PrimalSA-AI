@@ -832,6 +832,11 @@ def judge_boss_result(pos0, pos1, step0, step1, hp_pct, team_ok) -> tuple[int, s
     return EXIT_BOSS_UNKNOWN, f'判斷不了輸贏（{miss} 讀不到；沒給 --task 或 OCR 失敗）{hp_note}'
 
 
+def stalled(rounds: int, same_marker: bool, limit: int = STALL_MAX) -> bool:
+    """純函式：對話無進展 = 同一個黃問號已經「點 → 對話」了 limit 輪，期間沒有領獎 / 戰鬥 / 巡路 / 換圖（卡坦事故：722,318 循環 21 次）"""
+    return same_marker and rounds >= limit
+
+
 def read_step_no(task: str, cur_map_fn=None):
     """OCR 追蹤列表判斷目前任務步驟編號：Task.step / GONE（標題不在第一頁區塊，但 OCR 有讀到別的字）/ None（讀不到、對不準）"""
     if not task:
@@ -993,6 +998,12 @@ def _main() -> int:
     team_on = team_size > 1 and not a.solo and (bool(npc_xy) if a.fight else True)     # --solo 本來就是單人跑；--fight --no-click 不點 NPC。預設模式即使 --no-track 也會按對話框 → 一樣要驗隊伍
     last_team_check = 0.0
     pre_checked = not team_on    # 第一次點任何東西 / 按對話框之前是否已驗過隊伍（不受 TEAM_CHECK_GAP 限制）
+    stall_rounds = 0             # 對話無進展：每次從非對話進入對話 +1（領獎 / 戰鬥 / Auto Walking / 換地圖 / 換黃問號歸零）
+    stall_marker = None          # 最後一次點的黃問號 (x, y)；None = 沒點過（沒點問號就不判無進展）
+    stall_map = None             # 上次進對話時的地圖
+    stall_leave_t = 0.0          # 最後一次離開對話狀態的時間
+    stall_marker_new = False     # 離開對話後有點過黃問號（多頁對話中間閒置不計輪）
+    stall_prev = ''              # 上一個迴圈的狀態
     boss_pre = {}                # --fight：點 NPC 前的座標 / 步驟（verify_boss_result 比對）
     dialog_esc = 0               # 啟動時對話框已開：為了開切換面板先 ESC 關掉的次數
 
@@ -1088,6 +1099,26 @@ def _main() -> int:
         idle_ok = idle_confirmed(idle_streak, idle_t0, time.time())
         if st in ('dialog', 'reward', 'battle'):
             marker_fail = 0
+        if st in ('reward', 'battle', 'walking'):
+            stall_rounds, stall_marker = 0, None
+        if st != 'dialog' and stall_prev == 'dialog':
+            stall_leave_t = time.time()
+        if st == 'dialog' and stall_prev != 'dialog':
+            # 從非對話進入對話：中間隔了閒置（>= IDLE_CONFIRM_SECS）或點過黃問號才算新的一輪（多頁對話頁與頁之間偶爾閃過一格不算）
+            if stall_marker_new or time.time() - stall_leave_t >= IDLE_CONFIRM_SECS:
+                stall_rounds += 1
+            stall_marker_new = False
+            cur_dlg = read_pos()
+            if cur_dlg:
+                if stall_map and cur_dlg[0] != stall_map:
+                    stall_rounds, stall_marker = 0, None
+                stall_map = cur_dlg[0]
+            if stalled(stall_rounds, stall_marker is not None):
+                shot = snap('no-progress')
+                event(f'對話無進展：同一黃問號 {stall_marker} 已「點 → 對話」{stall_rounds} 輪，沒領獎 / 沒戰鬥 / 沒巡路 / 沒換圖 → 不按對話框，退出碼 {EXIT_NO_PROGRESS}（人工看對話內容 / 任務條件）', shot)
+                print('對話無進展，已停手', flush=True)
+                return EXIT_NO_PROGRESS
+        stall_prev = st
         if st in ('walking', 'dialog', 'reward', 'battle'):
             if tracked:
                 tracked, track_fail = False, 0
@@ -1253,6 +1284,9 @@ def _main() -> int:
                 if mk and marker_fail < len(MARK_NPC_DYS):
                     dy = MARK_NPC_DYS[marker_fail]
                     tx, ty = mk['x'], mk['y'] + dy
+                    if stall_marker is not None and max(abs(mk['x'] - stall_marker[0]), abs(mk['y'] - stall_marker[1])) > STALL_MARKER_PX:
+                        stall_rounds = 0                     # 換了一個黃問號 → 重新累計
+                    stall_marker, stall_marker_new = (mk['x'], mk['y']), True
                     gui('seq', f'{PRIMER}; click {tx} {ty}', note=f'點 NPC 頭上黃色標記下方（標記 {mk["x"]},{mk["y"]} n={mk["n"]}）')
                     last_action = time.time()
                     event(f'閒置：場景有黃色標記 {mk["x"]},{mk["y"]}（{mk["w"]}x{mk["h"]} n={mk["n"]}）→ 點 {tx},{ty}')

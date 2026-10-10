@@ -194,20 +194,21 @@ class Script:
         return ''
 
 
-def run2(argv, sim, team=False, real_verify=False):
+def run2(argv, sim, team=False, real_verify=False, marker=None, pos=None, track=None):
     quest.verify_boss_result = REAL_VERIFY if real_verify else (lambda *a, **k: 0)
     if not team and '--team-size' not in argv and '--solo' not in argv:
         argv = argv + ['--team-size', '0']      # 舊案例不測隊伍；要測隊伍檢查的案例傳 team=True
     quest.time.time, quest.time.sleep = sim.time, sim.sleep
     quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: None
+    quest.read_pos = pos or (lambda: None)
     quest.walk.gui = sim.gui
     quest.snap = lambda tag: 'sim.png'
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
     quest.layout.current = lambda: '2880x1659'
     quest.check_team = fake_team
     quest.netwatch.guard = lambda *_: {'status': 'ok'}
-    quest.find_marker = lambda: (_ for _ in ()).throw(AssertionError('不該找黃問號'))
-    quest.track_task = lambda *a, **k: (_ for _ in ()).throw(AssertionError('不該點追蹤'))
+    quest.find_marker = marker or (lambda: (_ for _ in ()).throw(AssertionError('不該找黃問號')))
+    quest.track_task = track or (lambda *a, **k: (_ for _ in ()).throw(AssertionError('不該點追蹤')))
     sys.argv = ['quest.py'] + argv
     return quest.main()
 
@@ -792,6 +793,50 @@ s = Sim(battle_at=3.0)
 STEP_FN = lambda: 5
 rc = run(['--fight', '--npc', '50,18', '--at', '50,17', '--task', '碧青洞窟', '--max-seconds', '60'], s, real_verify=True)
 ok &= check('--npc X,Y + --task：點前補讀步驟 5、打完仍 5、同圖 → 35', rc == quest.EXIT_BOSS_LOST, f'rc={rc}')
+
+
+print('(B) 對話無進展：卡坦事故（同一黃問號 722,318 循環）')
+ok &= check('stalled 純函式：輪數 >= STALL_MAX 且同標記才停', quest.STALL_MAX == 4 and not quest.stalled(3, True) and quest.stalled(4, True) and not quest.stalled(10, False))
+MK = lambda: {'x': 722, 'y': 318, 'w': 12, 'h': 14, 'n': 90}
+CYCLE = [IDLE, DIALOG, DIALOG]        # 主迴圈 idle → 點黃問號 → 反應迴圈看到對話 → 主迴圈對話（按左鈕）→ 下一輪 idle
+TAIL = [IDLE] * 3
+NOTRACK = lambda *a, **k: False          # 黃問號用完 / 領獎後掃追蹤列表：找不到（不影響判斷）
+
+
+def lclicks(s):
+    return len(has(s, 'click 948 461'))
+
+
+def mclicks(s):
+    return len([c for c in s.clicks if 'click 722' in c[1]])
+
+
+s = Script(CYCLE * 30)
+rc = run2(['--task', '卡坦的願望', '--max-seconds', '300'], s, marker=MK, track=NOTRACK)
+ok &= check('第 4 輪對話停手：退出碼 33，只按了 3 次左鈕（第 4 次不按）、點黃問號 4 次', rc == quest.EXIT_NO_PROGRESS and lclicks(s) == 3 and mclicks(s) == 4, f'rc={rc} 左鈕={lclicks(s)} 問號={mclicks(s)}')
+mks = iter([{'x': 722 + 40 * (i % 2), 'y': 318, 'w': 12, 'h': 14, 'n': 90} for i in range(200)])
+s = Script(CYCLE * 12 + TAIL)
+rc = run2(['--task', '卡坦的願望', '--max-seconds', '120'], s, marker=lambda: next(mks), track=NOTRACK)
+ok &= check('黃問號座標每輪換（差 > 10px）→ 輪數歸零，不誤停', rc != quest.EXIT_NO_PROGRESS and lclicks(s) == 12, f'rc={rc} 左鈕={lclicks(s)}')
+s = Script(CYCLE * 2 + [IDLE, DIALOG, DIALOG, REWARD, IDLE, IDLE, IDLE] + CYCLE * 3 + TAIL)
+rc = run2(['--task', '卡坦的願望', '--max-seconds', '60'], s, marker=MK, track=NOTRACK)
+ok &= check('中間領獎 → 歸零：前 3 輪 + 領獎 + 3 輪 = 不停（沒有 33）', rc != quest.EXIT_NO_PROGRESS, f'rc={rc} 左鈕={lclicks(s)}')
+s = Script(CYCLE * 3 + [WALK, IDLE] + CYCLE * 3 + TAIL)
+rc = run2(['--task', '卡坦的願望', '--max-seconds', '60'], s, marker=MK, track=NOTRACK)
+ok &= check('中間 Auto Walking → 歸零', rc != quest.EXIT_NO_PROGRESS and lclicks(s) == 6, f'rc={rc} 左鈕={lclicks(s)}')
+s = Script(CYCLE * 3 + [FULL_ON, FULL_ON, IDLE, IDLE] + CYCLE * 3 + TAIL)
+rc = run2(['--task', '卡坦的願望', '--max-seconds', '60'], s, marker=MK, track=NOTRACK)
+ok &= check('中間戰鬥 → 歸零', rc != quest.EXIT_NO_PROGRESS and lclicks(s) == 6, f'rc={rc} 左鈕={lclicks(s)}')
+maps = iter([(m, 1, 1) for m in range(1, 100) for _ in range(3)])
+s = Script(CYCLE * 7 + TAIL)
+rc = run2(['--task', '卡坦的願望', '--max-seconds', '60'], s, marker=MK, pos=lambda: next(maps), track=NOTRACK)
+ok &= check('每次進對話都換了地圖 → 歸零，不停', rc != quest.EXIT_NO_PROGRESS and lclicks(s) == 7, f'rc={rc} 左鈕={lclicks(s)}')
+s = Script([DIALOG] * 8 + TAIL)
+rc = run2(['--task', '卡坦的願望', '--no-track', '--max-seconds', '40'], s)
+ok &= check('多頁對話（連續 8 頁，中間沒閒置）→ 不誤停，每頁都按左鈕', rc == 0 and lclicks(s) == 8, f'rc={rc} 左鈕={lclicks(s)}')
+s = Script([DIALOG, IDLE] * 7 + TAIL)
+rc = run2(['--task', '卡坦的願望', '--no-track', '--max-seconds', '40'], s)
+ok &= check('多頁對話頁與頁之間閃過 1 格閒置（沒點問號、閒置 < 2.5 秒）→ 不誤停', rc == 0 and lclicks(s) == 7, f'rc={rc} 左鈕={lclicks(s)}')
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)
