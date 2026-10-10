@@ -44,6 +44,8 @@ public class FM {
 function Out-Json($o) { $o | ConvertTo-Json -Compress -Depth 4; exit 0 }
 [FM]::SetProcessDPIAware() | Out-Null
 $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
+# 同時開多個客戶端時，用環境變數 PSA_EXE_MATCH（路徑片段，例：PrimalSA222）指定要操作哪一個
+if ($env:PSA_EXE_MATCH) { $proc = @($proc | Where-Object { $_.Path -like "*$($env:PSA_EXE_MATCH)*" }) | Select-Object -First 1 }
 if (-not $proc) { Out-Json @{ ok = $false; error = '遊戲沒有在執行' } }
 $h = $proc.MainWindowHandle
 if ([FM]::IsIconic($h)) { Out-Json @{ ok = $false; error = '遊戲視窗最小化' } }

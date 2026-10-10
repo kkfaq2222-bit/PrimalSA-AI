@@ -44,6 +44,16 @@ def parse_level(s: dict) -> tuple[int, int] | None:
     return a or b
 
 
+def first_read_ok(s: dict) -> bool:
+    """啟動後第一次確認等級用：隊長等級與寵物等級都要讀到、同轉生數、等級差 ≤ 2。
+    只升不降的保護要有「已確認的等級」才擋得住；第一次若兩次都漏讀同樣位數（112 讀成 2）就會傳錯地圖。"""
+    def one(v):
+        m = re.match(r'(\d+)轉(\d+)級', str(v or ''))
+        return (int(m.group(1)), int(m.group(2))) if m else None
+    a, b = one(s.get('level')), one(s.get('petLevel'))
+    return bool(a and b and a[0] == b[0] and abs(a[1] - b[1]) <= 2)
+
+
 def target_for(level: int, stages=None) -> str | None:
     return next((name for need, name in (stages or STAGES) if level >= need), None)
 
@@ -107,6 +117,12 @@ def main() -> int:
             # 另外要連續兩次讀到同一個數字才採信
             if good_level is not None and level < good_level:
                 log(f'讀到 {level} 級，比已確認的 {good_level} 級低，視為 OCR 誤讀，略過')
+                time.sleep(a.every)
+                continue
+            if good_level is None and not first_read_ok(s):
+                # 第一次確認：隊長與寵物等級要讀到且一致才採信，否則只觀察不傳送（見 first_read_ok）
+                log(f'啟動後第一次確認：隊長 {s.get("level")} / 寵物 {s.get("petLevel")} 不一致或讀不全，先觀察不傳送')
+                pending = None
                 time.sleep(a.every)
                 continue
             if level != pending:
