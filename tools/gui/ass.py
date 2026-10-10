@@ -2,13 +2,13 @@
 """外掛 ASS 左欄戰鬥設定的讀 / 設工具（只用標準庫，經 walk.gui → winenv → gui.ps1；背景操作）。
 
 用法（專案根目錄；WSL / Windows 原生指令相同）：
-  uv run --no-project python tools/gui/ass.py get DKB0                    # 印四項狀態（開 / 關）
-  uv run --no-project python tools/gui/ass.py get DKB0 原地遇敵 自動戰鬥     # 只印指定項目
-  uv run --no-project python tools/gui/ass.py set DKB0 原地遇敵 on 自動戰鬥 on 快速戰鬥 off
-  uv run --no-project python tools/gui/ass.py pet DKB0 get                # 戰寵 首次動作（勾選 + 值）/ 一般動作（值）
-  uv run --no-project python tools/gui/ass.py pet DKB0 first 防禦          # 首次動作 = 防禦 並勾選
-  uv run --no-project python tools/gui/ass.py pet DKB0 first off normal 攻擊   # 首次動作取消勾選（值不動）、一般動作 = 攻擊
-角色：DKB0 / DKB02 / DKB03 / DKB04 / DKB05（不分大小寫）。
+  uv run --no-project python tools/gui/ass.py get DKBO                    # 印四項狀態（開 / 關）
+  uv run --no-project python tools/gui/ass.py get DKBO 原地遇敵 自動戰鬥     # 只印指定項目
+  uv run --no-project python tools/gui/ass.py set DKBO 原地遇敵 on 自動戰鬥 on 快速戰鬥 off
+  uv run --no-project python tools/gui/ass.py pet DKBO get                # 戰寵 首次動作（勾選 + 值）/ 一般動作（值）
+  uv run --no-project python tools/gui/ass.py pet DKBO first 防禦          # 首次動作 = 防禦 並勾選
+  uv run --no-project python tools/gui/ass.py pet DKBO first off normal 攻擊   # 首次動作取消勾選（值不動）、一般動作 = 攻擊
+角色：DKBO / DKBO2 / DKBO3 / DKBO4 / DKBO5（真名字母 O；DKB0… 同義；不分大小寫）。
 項目：原地遇敵(encounter) / 快速戰鬥(fast) / 自動戰鬥(auto) / 夥伴助戰(partner)。
 （2026-10-10 起不再支援外掛「自動逃跑」：使用者要求外掛自動逃跑一律不用、不看那個勾選框；逃跑改由 quest.py 手動按戰鬥畫面逃跑鈕。）
 流程：開外掛 → 驗證面板真的開了 → 選角色並驗證 → pixel 讀四項 → （set：只點與目標不同的，再讀確認）→ 關面板（X 1318,90）並驗證。
@@ -40,7 +40,7 @@ ASS_BTN = (1300, 760)            # 主畫面「外掛」
 CLOSE_BTN = (1318, 90)           # 面板右上 X（不能 ESC）
 HUD_PROBE = (1300, 745, 254, 0, 0)   # 主畫面外掛鈕紅字（同 quest.SIG_HUD；對話框開著時整個 UI 隱藏）
 
-ROLES = {'DKB0': (137, 151), 'DKB02': (298, 151), 'DKB03': (461, 151), 'DKB04': (137, 204), 'DKB05': (298, 204)}
+ROLES = {'DKBO': (137, 151), 'DKBO2': (298, 151), 'DKBO3': (461, 151), 'DKBO4': (137, 204), 'DKBO5': (298, 204)}   # 真名字母 O；DKB0 同義（norm_role 容錯）
 # 左欄戰鬥設定勾選框（框心）；每個角色各自設定
 ITEMS = {'原地遇敵': (146, 343), '快速戰鬥': (484, 343), '自動戰鬥': (146, 400), '夥伴助戰': (315, 400)}
 ALIASES = {'encounter': '原地遇敵', 'fast': '快速戰鬥', 'quick': '快速戰鬥',
@@ -187,8 +187,8 @@ def norm_item(name: str) -> str | None:
 
 
 def norm_role(name: str) -> str | None:
-    n = name.strip().upper()
-    return n if n in ROLES else None
+    n = name.strip().upper().replace('O', '0')       # O / 0 視為相同
+    return next((r for r in ROLES if r.replace('O', '0') == n), None)
 
 
 def _session(role: str, changes: dict | None, items=None, no_wait: bool = False):
@@ -388,7 +388,7 @@ def _main_pet(role: str, rest: list, no_wait: bool = False) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='外掛 ASS 左欄戰鬥設定讀 / 設')
     ap.add_argument('cmd', choices=['get', 'set', 'pet'])
-    ap.add_argument('role', help='DKB0 / DKB02~05')
+    ap.add_argument('role', help='DKBO / DKBO2~5（DKB0… 同義）')
     ap.add_argument('rest', nargs='*', help='get：項目…；set：項目 on|off 成對')
     ap.add_argument('--no-wait', action='store_true', help='戰鬥中不等戰鬥結束，直接退出碼 %d（預設等最多 %d 秒）' % (EXIT_IN_BATTLE, BATTLE_WAIT))
     a = ap.parse_args(argv)

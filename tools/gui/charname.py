@@ -82,9 +82,11 @@ class NameTracker:
         o_ok = self.ocr_name is not None
         if not s_ok and not o_ok:
             return None
+        if s_ok:
+            side = dict(side, name=self.cmap.get(canon(side['name']), side['name']))   # 旁路舊檔寫 DKB0 → 顯示白名單真名 DKBO
         if s_ok and o_ok:
             if canon(side['name']) == canon(self.ocr_name):
-                v, ts, src, conflict = side['name'], max(side['ts'], self.ocr_ts), 'both', False
+                v, ts, src, conflict = self.ocr_name, max(side['ts'], self.ocr_ts), 'both', False
             elif self.ocr_ts >= side['ts']:
                 v, ts, src, conflict = self.ocr_name, self.ocr_ts, 'ocr', True
             else:

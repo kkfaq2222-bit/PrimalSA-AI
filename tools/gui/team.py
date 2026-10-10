@@ -3,7 +3,7 @@
 
 用法（專案根目錄；WSL / Windows 原生指令相同）：
   uv run --no-project python tools/gui/team.py status [--json] [--no-ocr]   # 唯讀：開切換面板 → 每人 當前 / 線上、隊長 / 隊員 / 其他
-  uv run --no-project python tools/gui/team.py check [--size 5] [--leader DKB0] [--no-ocr]   # 0 = 1 隊長 + (size-1) 隊員
+  uv run --no-project python tools/gui/team.py check [--size 5] [--leader DKBO] [--no-ocr]   # 0 = 1 隊長 + (size-1) 隊員
   uv run --no-project python tools/gui/team.py disband                      # 解散隊伍（當前角色必須是隊長）
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；team 自己 40～47）：
@@ -17,14 +17,15 @@
 （44 = form 專用，P4 才用到。）
 
 判斷依據（P-I1 / P-I4 實測，2026-10-11；座標 = 截圖座標）：
-- 卡片存在：卡片米色 (249,231,203) vs 空位棕 (169,127,84)，看卡片左緣 (416 / 726, y)。順序固定 DKB0, DKB02, DKB03, DKB04, DKB05
+- 卡片存在：卡片米色 (249,231,203) vs 空位棕 (169,127,84)，看卡片左緣 (416 / 726, y)。順序固定 DKBO, DKBO2, DKBO3, DKBO4, DKBO5（真名是字母 O；DKB0 同義）
   （左欄 y 300 / 385 / 470、右欄 +310；有人離線時卡片會往前補位 → 卡片數 < 5 就不能靠順序，只能靠 OCR 名字）。
 - 當前 / 線上：卡片左側狀態框 (x+6, y)、(x+30, y)：藍（B>150、G<200、R<60）= 當前、綠（G>160、B<60）= 線上；用門檻不比精確值。
 - 隊伍標籤：框左上角（左欄 452,y-25、右欄 762,y-25）內 x+4..+34、y+4..+34 全像素掃描計數：紅 (255,0,7)「隊長」/ 黃 (255,210,0)「隊員」；
   同框的綠「正常」(41,255,0) 不計。單點取色不可靠（字很細）。「單人」字色沒量過，所以「既不紅也不黃」一律當 other（單人 / 其他）。
   （quest.read_team_labels 是 15x8 間隔 2 的稀疏取樣，實測 P-I1 說單點不可靠，這裡改密掃，不改 quest.py。）
-- 名字：以卡片順序為主；OCR（-Zooms 2,3,4,5,6 合併）只當交叉確認：norm_char 命中，或尾碼 02～05 符合即可。
-  OCR 讀不出不算矛盾、讀到別人的名字才算矛盾；單獨讀到 DKB0（可能是 DKB05 被截斷）不當矛盾證據。
+- 名字（2026-10-11 起）：先用 namematch.py 整名圖樣板比對（IoU，保守，None = 不確定）；命中就採用（卡片 < 5 也行）。
+  None 的卡片才退回下面的舊邏輯：以卡片順序為主；OCR（-Zooms 2,3,4,5,6 合併）只當交叉確認：norm_char 命中，或尾碼 02～05 符合即可。
+  OCR 讀不出不算矛盾、讀到別人的名字才算矛盾；單獨讀到 DKBO（可能是 DKBO5 被截斷）不當矛盾證據。
 """
 import argparse
 import json
@@ -37,6 +38,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import charstate  # noqa: E402
+import namematch  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'team'
@@ -82,25 +84,26 @@ def classify_label(cols) -> str:
 
 
 def name_hits(texts) -> tuple:
-    """OCR 各行文字 → (強證據名字集合, 是否讀到單獨的 DKB0)。
-    強證據 = norm_char 命中 DKB02～05（含 OCR 常見錯字還原），或尾碼 0[2-5]（D02 / 03 / B04 / 05）。
-    單獨的 DKB0（norm_char 命中 DKB0）可能是 DKB05 被截斷，另外回傳，不當矛盾證據。"""
+    """OCR 各行文字 → (強證據名字集合, 是否讀到單獨的 DKBO)。
+    強證據 = norm_char 命中 DKBO2～5（含 OCR 常見錯字還原），或尾碼 0[2-5]（D02 / 03 / B04 / 05；O / 0 視為相同）。
+    單獨的 DKBO（norm_char 命中 DKBO）可能是 DKBO5 被截斷，另外回傳，不當矛盾證據。"""
     strong, bare = set(), False
     known = charstate.chars()
     for t in texts:
         t = str(t or '')
         hit = charstate.norm_char(t)
         if hit:
-            if hit == 'DKB0':
+            if hit == charstate.LEAD:
                 bare = True
             else:
                 strong.add(hit)
             continue
         m = re.search(r'0([2-5])\s*$', t.replace('O', '0').replace('o', '0').strip())
         if m:
-            cand = 'DKB0' + m.group(1)
-            if cand in known:
-                strong.add(cand)
+            cand = charstate.LEAD + m.group(1)
+            hit = next((k for k in known if charstate.same(k, cand)), None)
+            if hit:
+                strong.add(hit)
     return strong, bare
 
 
@@ -111,18 +114,18 @@ def cross_check(expect, texts) -> str:
         return 'ok' if len(strong) == 1 else 'unknown'      # 同卡讀出多個不同名字 = OCR 雜訊，不採信
     if strong:
         return 'conflict'
-    if bare and expect == 'DKB0':
+    if bare and charstate.same(expect, charstate.LEAD):
         return 'ok'
     return 'unknown'
 
 
 def resolve_name(slot: int, texts):
-    """卡片數 < 5 時順序不可靠：只靠 OCR。唯一強證據 → 該名字；slot 0 讀到單獨 DKB0 → DKB0；其餘 None"""
+    """卡片數 < 5 時順序不可靠：只靠 OCR。唯一強證據 → 該名字；slot 0 讀到單獨 DKBO → DKBO；其餘 None"""
     strong, bare = name_hits(texts)
     if len(strong) == 1:
         return next(iter(strong))
     if not strong and bare and slot == 0:
-        return 'DKB0'
+        return charstate.LEAD
     return None
 
 
@@ -134,14 +137,15 @@ class Card:
     name: str | None = None          # 順序（5 張時）或 OCR 解出；None = 不知道
     ocr: list = field(default_factory=list)
     check: str = 'unread'            # ok / unknown / conflict / unread（沒做 OCR）
+    via: str = ''                    # 名字來源：tpl（namematch）/ 空 = 順序或 OCR
 
     def d(self) -> dict:
-        return {'slot': self.slot, 'name': self.name, 'status': self.status, 'label': self.label, 'ocr': self.ocr, 'ocr_check': self.check}
+        return {'slot': self.slot, 'name': self.name, 'status': self.status, 'label': self.label, 'ocr': self.ocr, 'ocr_check': self.check, 'via': self.via}
 
 
-def build_cards(px_cols: list, ocr_texts: dict | None = None) -> list:
+def build_cards(px_cols: list, ocr_texts: dict | None = None, matched: dict | None = None) -> list:
     """px_cols = read_pixels 回的整串顏色（順序：每 slot 先 card、s1、s2、再 LABEL 掃描）→ 存在的 Card 清單（照面板順序）。
-    ocr_texts = {slot: [文字…]}；None = 沒做 OCR。卡片位置不連續（空位在中間）視為異常 → 只回前面連續的那段"""
+    ocr_texts = {slot: [文字…]}；None = 沒做 OCR。matched = namematch 的 {slot: 名字或 None}（優先於順序 / OCR；None 才退回舊邏輯）。卡片位置不連續（空位在中間）視為異常 → 只回前面連續的那段"""
     per = 3 + len(LABEL_SCAN) ** 2
     cards = []
     order = charstate.chars()
@@ -152,9 +156,16 @@ def build_cards(px_cols: list, ocr_texts: dict | None = None) -> list:
         c = Card(i, status=classify_status(seg[1], seg[2]), label=classify_label(seg[3:]))
         cards.append(c)
     full = len(cards) == len(order)
+    matched = matched or {}
     for c in cards:
         if ocr_texts is not None:
             c.ocr = list(ocr_texts.get(c.slot, []))
+        hit = matched.get(c.slot)
+        if hit:
+            c.name, c.via = hit, 'tpl'
+            # 5 張時順序可靠：樣板與順序不同 = 矛盾（judge 回 43）
+            c.check = 'conflict' if full and hit != order[c.slot] else 'ok'
+            continue
         if full:
             c.name = order[c.slot]
             if ocr_texts is not None:
@@ -188,7 +199,7 @@ def judge(cards: list, size: int, leader=None) -> tuple:
     bad = [c for c in cards if c.check == 'conflict']
     if bad:
         return EXIT_OCR_CONFLICT, f'{desc}：OCR 名字與卡片順序矛盾 ' + '、'.join(f'slot{c.slot}={c.name} 但 OCR {c.ocr}' for c in bad)
-    if leader and s['leader'] != leader:
+    if leader and not charstate.same(s['leader'], leader):
         return EXIT_OCR_CONFLICT, f'{desc}：隊長是 {s["leader"] or "?（名字無法確認）"}，不是 {leader}'
     return 0, f'{desc}：隊伍完整（隊長 {s["leader"] or "?"}、當前 {s["current"] or "?"}）'
 
@@ -205,10 +216,12 @@ def read_pixels() -> list | None:
     return cols
 
 
-def ocr_names(n_cards: int) -> dict:
-    """逐張卡片名字 OCR（-Zooms 2,3,4,5,6 合併；預設 Dark 150，-Light 讀不到）→ {slot: [行…]}"""
+def ocr_names(n_cards: int, only=None) -> dict:
+    """逐張卡片名字 OCR（-Zooms 2,3,4,5,6 合併；預設 Dark 150，-Light 讀不到）→ {slot: [行…]}；only = 只讀這些 slot"""
     out = {}
     for i in range(n_cards):
+        if only is not None and i not in only:
+            continue
         x0, y = SLOTS[i]
         out[i] = uikit.ocr((x0 + NAME_BOX_DX, y + NAME_BOX_DY, NAME_BOX_W, NAME_BOX_H), '-Zooms', OCR_ZOOMS)
     return out
@@ -234,16 +247,25 @@ def read_state(ocr: bool = True) -> dict:
         if not uikit.is_open(uikit.SWITCH):
             res['err'] = '讀圖中面板消失'
             return res
+        n = len(build_cards(cols))
+        matched = {}
+        if ocr:                                   # --no-ocr = 完全不讀名字（維持舊行為：快、只靠順序）
+            t3 = time.time()
+            matched = namematch.read_names()
+            res['ms']['tpl'] = int((time.time() - t3) * 1000)
         texts = None
         if ocr:
-            n = len(build_cards(cols))
-            t2 = time.time()
-            texts = ocr_names(n)
-            res['ms']['ocr'] = int((time.time() - t2) * 1000)
-            if not uikit.is_open(uikit.SWITCH):
-                res['err'] = 'OCR 中面板消失'
-                return res
-        cards = build_cards(cols, texts)
+            need = [i for i in range(n) if not matched.get(i)]
+            if need:                              # 樣板沒命中的卡才 OCR
+                t2 = time.time()
+                texts = ocr_names(n, only=need)
+                res['ms']['ocr'] = int((time.time() - t2) * 1000)
+            else:
+                texts = {}
+        if not uikit.is_open(uikit.SWITCH):
+            res['err'] = '讀名字中面板消失'
+            return res
+        cards = build_cards(cols, texts, matched)
         res.update(ok=True, cards=cards, summary=summarize(cards))
         return res
     finally:
@@ -255,6 +277,8 @@ def _line(c: Card) -> str:
     st = {'current': '當前', 'online': '線上', 'unknown': '？'}[c.status]
     lb = {'leader': '隊長', 'member': '隊員', 'other': '單人/其他'}[c.label]
     ck = {'ok': 'OCR 一致', 'unknown': 'OCR 讀不出', 'conflict': 'OCR 矛盾', 'unread': ''}[c.check]
+    if c.via == 'tpl':
+        ck = {'ok': '樣板命中', 'conflict': '樣板與順序矛盾'}.get(c.check, '樣板')
     return f'slot{c.slot} {c.name or "?":6} {st} {lb:6} {ck} {c.ocr or ""}'.rstrip()
 
 
@@ -284,6 +308,7 @@ def check(size: int = 5, leader=None, ocr: bool = True) -> int:
         return rc
     if leader:
         leader = charstate.norm_char(leader)
+        leader = charstate.display(leader) if leader else None
         if not leader:
             print('team：--leader 不在白名單', file=sys.stderr)
             return uikit.EXIT_USAGE

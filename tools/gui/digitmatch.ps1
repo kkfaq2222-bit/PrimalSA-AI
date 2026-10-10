@@ -1,8 +1,9 @@
 ﻿# HUD 數字樣板比對的截圖端：背景 PrintWindow → 依版面裁出各欄位 → 原解析度二值化 → 輸出 0/1 字串列（不做 OCR；比對在 digitmatch.py）
 # 用法：digitmatch.ps1 [-Image 檔.png]  → 一行 JSON：{"ok":true,"layout":"2880x1659","ms":N,"fields":{"lv":"0010..,0110..,...",...}}（每欄一個字串，列以逗號分隔）
+#   -Boxes "x,y,w,h,mode;…"：改裁自訂框（客戶區像素；mode 1 = 亮字、0 = 深字、2 = 咖啡色字），只輸出 fields.b0,b1,…（namematch.py 切換面板卡片名字用，不輸出 HUD 欄位 / 血條）。
 #   -Image：用截圖檔測試（尺寸須是支援的版面）。唯讀：只截圖，不點擊、不送鍵。
 # 另外輸出 hpPct / mpPct（血條 / 魔條比例，-1 = 掃不出來）。版面座標與 stat.ps1 的 $Layouts 一致（x, y, 寬, 高；客戶區像素）。字色：HUD 數字 = 亮白字（light）；座標行 = 深色字（dark）。
-param([string]$Image)
+param([string]$Image, [string]$Boxes)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Drawing
 if (-not ("DM" -as [type])) { Add-Type -TypeDefinition @"
@@ -14,7 +15,9 @@ public class DM {
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint f);
   public struct RECT { public int L,T,R,B; }
   // 把 bmp 的 (x0,y0,w,h) 區域二值化成 h 個長度 w 的 '0'/'1' 字串（1 = 字）；一次 LockBits，整張只讀一次
-  public static string[] Crop(byte[] buf, int stride, int bw, int bh, int x0, int y0, int w, int h, bool light) {
+  public static string[] Crop(byte[] buf, int stride, int bw, int bh, int x0, int y0, int w, int h, bool light) { return CropMode(buf, stride, bw, bh, x0, y0, w, h, light ? 1 : 0); }
+  // mode：1 = 亮白字、0 = 深色字（mx<110）、2 = 咖啡色字（切換面板卡片名字 ≈ (125,64,28)；米底 (249,231,200)）
+  public static string[] CropMode(byte[] buf, int stride, int bw, int bh, int x0, int y0, int w, int h, int mode) {
     string[] rows = new string[h];
     char[] line = new char[w];
     for (int y = 0; y < h; y++) {
@@ -23,7 +26,7 @@ public class DM {
         if (px >= 0 && py >= 0 && px < bw && py < bh) {
           int i = py * stride + px * 4; int b = buf[i], g = buf[i + 1], r = buf[i + 2];
           int mx = Math.Max(r, Math.Max(g, b)), mn = Math.Min(r, Math.Min(g, b));
-          bool ink = light ? (mn > 190 && mx - mn < 40) : (mx < 110);
+          bool ink = mode == 1 ? (mn > 190 && mx - mn < 40) : mode == 2 ? (r < 170 && g < 130 && b < 100) : (mx < 110);
           if (ink) c = '1';
         }
         line[x] = c;
@@ -79,6 +82,13 @@ $Bars = @{ '2880x1659' = @(344, 532, 112, 180); '1920x1017' = @(214, 332, 72, 11
 $Layouts = @{
   '2880x1659' = [ordered]@{ lv = 150,186,180,46,1; hp = 340,92,200,44,1; mp = 340,166,200,38,1; plv = 560,158,160,46,1; php = 750,92,200,44,1; pos = 2220,150,360,46,0; pos2 = 2250,178,300,34,0 }
   '1920x1017' = [ordered]@{ lv = 110,122,84,29,1; hp = 211,60,124,26,1; mp = 230,104,86,21,1; plv = 354,101,98,30,1; php = 466,60,124,26,1; pos = 1530,98,190,30,0; pos2 = 1545,113,185,22,0 }
+}
+if ($Boxes) {   # 自訂框模式：不管版面，座標由呼叫端給
+  $stride = 0; $buf = [DM]::Bytes($full, [ref]$stride); $full.Dispose()
+  $f = [ordered]@{}; $i = 0
+  foreach ($b in ($Boxes -split ';')) { $a = $b.Split(','); if ($a.Count -lt 5) { continue }
+    $f["b$i"] = ([DM]::CropMode($buf, $stride, $W, $Hh, [int]$a[0], [int]$a[1], [int]$a[2], [int]$a[3], [int]$a[4]) -join ","); $i++ }
+  Out-Json ([ordered]@{ ok = $true; layout = "${W}x${Hh}"; ms = [int]$sw.ElapsedMilliseconds; fields = $f })
 }
 $key = "${W}x${Hh}"; $L = $Layouts[$key]
 if (-not $L) { Out-Json @{ ok = $false; error = "視窗大小 $key，只支援 2880x1659 或 1920x1017" } }

@@ -72,13 +72,13 @@ def install(g):
 
 
 # ---- norm_char（與 watch 的 charname 同一套）----
-cases = [('DKB0', 'DKB0'), ('DKBO', 'DKB0'), ('0KB0', 'DKB0'), ('0KBO', 'DKB0'), ('dkb02', 'DKB02'), ('DKB 03', 'DKB03'),
-         ('0KB05', 'DKB05'), ('DKBO5', 'DKB05'), ('DKB06', None), ('', None), (None, None), ('KB05', None), ('DKB0 2 x', None)]
+cases = [('DKBO', 'DKBO'), ('DKBO', 'DKBO'), ('0KB0', 'DKBO'), ('0KBO', 'DKBO'), ('dkb02', 'DKBO2'), ('DKB 03', 'DKBO3'),
+         ('0KB05', 'DKBO5'), ('DKBO5', 'DKBO5'), ('DKBO6', None), ('', None), (None, None), ('KB05', None), ('DKBO 2 x', None)]
 for src, want in cases:
     got = uikit.norm_char(src)
     check(f'norm_char({src!r}) = {want!r}', got == want, f'got {got!r}')
 check('norm_char 與 charname 規則一致（canon）', uikit.norm_char('0KBO') == charstate.norm_char('0KBO'))
-check('norm_char 自訂白名單撞名 → None', uikit.norm_char('DKB0', names=['DKB0', 'DKBO']) is None)
+check('norm_char 自訂白名單撞名 → None', uikit.norm_char('DKBO', names=['DKB0', 'DKBO']) is None)
 
 # ---- snap_pet ----
 names = {'迪基格斯': '迪基格斯', '瑪斯貝卡': '瑪斯貝卡', '金布伊': '金布伊', '火雞': '火雞', '烏力烏力': '烏力烏力', '烏力烏拉': '烏力烏拉', '布魯布魯伊': '布魯布魯伊'}
@@ -201,14 +201,25 @@ tmp = Path(tempfile.mkdtemp()) / 'current-char.json'
 import watchstate  # noqa: E402
 
 watchstate.CURCHAR_FILE = tmp
-check('charstate.write 正規化後寫入', charstate.write('0KBO', src='test', path=tmp) and json.loads(tmp.read_text(encoding='utf-8'))['name'] == 'DKB0')
+check('charstate.write 正規化後寫入', charstate.write('0KBO', src='test', path=tmp) and json.loads(tmp.read_text(encoding='utf-8'))['name'] == 'DKBO')
 d = charstate.read(path=tmp)
-check('charstate.read 欄位 name/ts/src', d and d['name'] == 'DKB0' and d['src'] == 'test' and isinstance(d['ts'], float))
+check('charstate.read 欄位 name/ts/src', d and d['name'] == 'DKBO' and d['src'] == 'test' and isinstance(d['ts'], float))
 check('watchstate.read_current_char 同格式可讀', watchstate.read_current_char(tmp) == d)
 check('charstate.read max_age 過期 → None', charstate.read(max_age=10, path=tmp, now=lambda: d['ts'] + 11) is None and charstate.read(max_age=10, path=tmp, now=lambda: d['ts'] + 5))
-check('不在白名單不寫', charstate.write('DKB09', path=tmp) is False and charstate.read(path=tmp)['name'] == 'DKB0')
+check('不在白名單不寫', charstate.write('DKBO9', path=tmp) is False and charstate.read(path=tmp)['name'] == 'DKBO')
 check('charstate.clear（未知）→ read None；重複 clear 也成功', charstate.clear(tmp) and charstate.read(path=tmp) is None and charstate.clear(tmp))
 check('無暫存檔殘留', not list(tmp.parent.glob('*.tmp')))
+
+# ---- 角色真名 DKBO（字母 O）：DKB0 / DKBO 寫法都要對到真名 ----
+import ass  # noqa: E402
+check('白名單預設是真名 DKBO…', charstate.DEFAULT_CHARS == ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5'] and uikit.CHARS == charstate.DEFAULT_CHARS)
+for src in ('DKB0', 'DKBO', 'dkbo', '0KBO', 'DKB 0'):
+    check(f'norm_char({src!r}) → DKBO', charstate.norm_char(src) == 'DKBO')
+    check(f'display({src!r}) → DKBO', charstate.display(src) == 'DKBO')
+check('display(DKB05) → DKBO5', charstate.display('DKB05') == 'DKBO5')
+check('same(DKB0, DKBO) / same(DKB02, DKBO2)', charstate.same('DKB0', 'DKBO') and charstate.same('DKB02', 'DKBO2') and not charstate.same('DKB02', 'DKBO3'))
+check('ass.norm_role：DKB0 / DKBO / dkb05 → 真名', ass.norm_role('DKB0') == 'DKBO' and ass.norm_role('DKBO') == 'DKBO' and ass.norm_role('dkb05') == 'DKBO5' and ass.norm_role('DKB06') is None)
+check('charstate.write(DKB02) 寫入真名 DKBO2', charstate.write('DKB02', path=tmp) and charstate.read(path=tmp)['name'] == 'DKBO2')
 
 print('失敗', fails)
 sys.exit(1 if fails else 0)

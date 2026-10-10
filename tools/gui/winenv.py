@@ -120,7 +120,7 @@ SERVER_NAMED = {
     'stat': ('Shot', 'ShotWidth'),
     'findmark': ('Crop', 'Out', 'Zoom'),
     'titlematch': ('Mode', 'Dir', 'Image', 'Out', 'Y', 'Thr'),
-    'digitmatch': ('Image',),
+    'digitmatch': ('Image', 'Boxes'),
 }
 INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'max', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
 START_TIMEOUT = 20.0

@@ -10,10 +10,12 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import errlog  # noqa: E402
 import screen_sigs  # noqa: E402
+import namematch  # noqa: E402
 import team  # noqa: E402
 import uikit  # noqa: E402
 
 errlog.LOG = Path(tempfile.mkdtemp()) / 'errlog.jsonl'
+namematch.TPL_DIR = Path(tempfile.mkdtemp())     # 不讀真實樣板（離線測試走舊 OCR 邏輯）
 fails = 0
 
 
@@ -27,9 +29,9 @@ def check(name, cond, extra=''):
 BLUE, GREEN = (29, 175, 195), (8, 187, 36)
 BEIGE, BROWN = (249, 231, 203), (169, 127, 84)
 RED, YEL, NORMAL = (255, 0, 7), (255, 210, 0), (41, 255, 0)
-NAMES = ['DKB0', 'DKB02', 'DKB03', 'DKB04', 'DKB05']
+NAMES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
 # OCR 假資料（P-I1 實測：Zooms 2~6 合併結果）
-OCR_REAL = {'DKB0': ['DKBO'], 'DKB02': ['DKB02', 'D02', '02'], 'DKB03': ['03', '003'], 'DKB04': ['DKB04', 'B04'], 'DKB05': ['05']}
+OCR_REAL = {'DKBO': ['DKBO'], 'DKBO2': ['DKBO2', 'D02', '02'], 'DKBO3': ['03', '003'], 'DKBO4': ['DKBO4', 'B04'], 'DKBO5': ['05']}
 
 
 class Game:
@@ -139,42 +141,42 @@ check('紅 2 點（雜訊）= other', team.classify_label([RED] * 2) == 'other')
 # ---- 名字 OCR ----
 for nm in NAMES:
     check(f'cross_check {nm} 實測 OCR → ok', team.cross_check(nm, OCR_REAL[nm]) == 'ok', str(OCR_REAL[nm]))
-check('cross_check 讀不出 → unknown', team.cross_check('DKB03', []) == 'unknown')
-check('cross_check 讀到別人 → conflict', team.cross_check('DKB03', ['D02']) == 'conflict')
-check('cross_check 同卡多名字 → unknown（雜訊）', team.cross_check('DKB03', ['03', 'D02']) == 'unknown')
-check('cross_check DKB05 只讀到 DKBO（可能截斷）→ unknown 不算矛盾', team.cross_check('DKB05', ['DKBO']) == 'unknown')
-check('cross_check DKB02 讀到 DKB0 單獨 → unknown', team.cross_check('DKB02', ['DKB0']) == 'unknown')
-check('resolve_name 唯一尾碼', team.resolve_name(1, ['D02', '02']) == 'DKB02' and team.resolve_name(0, ['DKBO']) == 'DKB0' and team.resolve_name(2, ['DKBO']) is None)
+check('cross_check 讀不出 → unknown', team.cross_check('DKBO3', []) == 'unknown')
+check('cross_check 讀到別人 → conflict', team.cross_check('DKBO3', ['D02']) == 'conflict')
+check('cross_check 同卡多名字 → unknown（雜訊）', team.cross_check('DKBO3', ['03', 'D02']) == 'unknown')
+check('cross_check DKBO5 只讀到 DKBO（可能截斷）→ unknown 不算矛盾', team.cross_check('DKBO5', ['DKBO']) == 'unknown')
+check('cross_check DKBO2 讀到 DKBO 單獨 → unknown', team.cross_check('DKBO2', ['DKBO']) == 'unknown')
+check('resolve_name 唯一尾碼', team.resolve_name(1, ['D02', '02']) == 'DKBO2' and team.resolve_name(0, ['DKBO']) == 'DKBO' and team.resolve_name(2, ['DKBO']) is None)
 
 # ---- status：5 人隊 ----
 g = install(Game(mk()))
 rc, out = run(team.status)
-check('status 5 人隊 rc 0 + 隊長 DKB0 當前 DKB0', rc == 0 and '隊長 DKB0、當前 DKB0' in out and out.count('OCR 一致') == 5, out.strip().splitlines()[-1])
+check('status 5 人隊 rc 0 + 隊長 DKBO 當前 DKBO', rc == 0 and '隊長 DKBO、當前 DKBO' in out and out.count('OCR 一致') == 5, out.strip().splitlines()[-1])
 check('status 面板內 0 次點擊、面板已關', g.inner_clicks() == [] and not g.panel, str(g.clicks))
 check('status OCR 用 Zooms 2,3,4,5,6', all(o[1] == ('-Zooms', '2,3,4,5,6') for o in g.ocr_boxes) and len(g.ocr_boxes) == 5)
 g = install(Game(mk()))
 rc, out = run(team.status, True, False)
 d = json.loads(out)
-check('status --json --no-ocr：無 OCR 呼叫、欄位正確', rc == 0 and g.ocr_boxes == [] and d['summary']['leader'] == 'DKB0' and [c['name'] for c in d['cards']] == NAMES
+check('status --json --no-ocr：無 OCR 呼叫、欄位正確', rc == 0 and g.ocr_boxes == [] and d['summary']['leader'] == 'DKBO' and [c['name'] for c in d['cards']] == NAMES
       and d['cards'][0]['status'] == 'current' and d['cards'][1]['label'] == 'member')
 g = install(Game(mk(current=4)))
 rc, out = run(team.status, True, False)
-check('當前是 DKB05（隊員）', json.loads(out)['summary']['current'] == 'DKB05')
+check('當前是 DKBO5（隊員）', json.loads(out)['summary']['current'] == 'DKBO5')
 
 # ---- check ----
 g = install(Game(mk()))
 check('check 5 人隊 → 0', run(team.check, 5)[0] == 0 and g.inner_clicks() == [])
-check('check --leader DKB0 → 0', run(team.check, 5, 'DKB0')[0] == 0)
-check('check --leader DKB02 → 43', run(team.check, 5, 'DKB02')[0] == 43)
+check('check --leader DKBO → 0', run(team.check, 5, 'DKBO')[0] == 0)
+check('check --leader DKBO2 → 43', run(team.check, 5, 'DKBO2')[0] == 43)
 check('check --leader 不在白名單 → 1', run(team.check, 5, 'XYZ')[0] == 1)
 check('check size 4（5 人隊多一人）→ 41', run(team.check, 4)[0] == 41)
 g = install(Game(mk(), ocr={}))
 rc, out = run(team.check, 5)
 check('OCR 全讀不出 → 0（不算矛盾）', rc == 0, out.strip().splitlines()[-1])
-g = install(Game(mk(), ocr={**OCR_REAL, 'DKB03': ['D02']}))
+g = install(Game(mk(), ocr={**OCR_REAL, 'DKBO3': ['D02']}))
 check('OCR 讀到別人名字 → 43', run(team.check, 5)[0] == 43)
-g = install(Game(mk(), ocr={**OCR_REAL, 'DKB05': ['DKBO']}))
-check('DKB05 只讀到 DKBO → 0', run(team.check, 5)[0] == 0)
+g = install(Game(mk(), ocr={**OCR_REAL, 'DKBO5': ['DKBO']}))
+check('DKBO5 只讀到 DKBO → 0', run(team.check, 5)[0] == 0)
 g = install(Game(mk(labels=('leader', 'member', 'member', 'member', 'other'))))
 check('4 人隊 + 1 單人，size 5 → 41', run(team.check, 5)[0] == 41)
 check('同上 size 4 → 0', run(team.check, 4)[0] == 0)
@@ -183,13 +185,13 @@ check('全單人 → 47', run(team.check, 5)[0] == 47)
 g = install(Game(mk(labels=('leader', 'member', 'leader', 'member', 'member'))))
 check('兩個隊長 → 41', run(team.check, 5)[0] == 41)
 # 卡片不足
-g = install(Game(mk(('leader', 'member', 'member', 'member'), names=['DKB0', 'DKB02', 'DKB04', 'DKB05'])))
+g = install(Game(mk(('leader', 'member', 'member', 'member'), names=['DKBO', 'DKBO2', 'DKBO4', 'DKBO5'])))
 rc, out = run(team.check, 5)
-check('4 張卡（DKB03 離線）→ 42，名字改由 OCR 對應', rc == 42 and "'DKB0', 'DKB02', 'DKB04', 'DKB05'" in out, out.strip().splitlines()[-1])
-g = install(Game(mk(('leader', 'member', 'member', 'member'), names=['DKB0', 'DKB02', 'DKB04', 'DKB05']), ocr={'DKB0': ['DKBO'], 'DKB02': [], 'DKB04': ['B04'], 'DKB05': ['05']}))
+check('4 張卡（DKBO3 離線）→ 42，名字改由 OCR 對應', rc == 42 and "'DKBO', 'DKBO2', 'DKBO4', 'DKBO5'" in out, out.strip().splitlines()[-1])
+g = install(Game(mk(('leader', 'member', 'member', 'member'), names=['DKBO', 'DKBO2', 'DKBO4', 'DKBO5']), ocr={'DKBO': ['DKBO'], 'DKBO2': [], 'DKBO4': ['B04'], 'DKBO5': ['05']}))
 rc, out = run(team.status, True)
 d = json.loads(out)
-check('卡片 < 5 讀不出名字 → name None（不亂猜順序）', [c['name'] for c in d['cards']] == ['DKB0', None, 'DKB04', 'DKB05'])
+check('卡片 < 5 讀不出名字 → name None（不亂猜順序）', [c['name'] for c in d['cards']] == ['DKBO', None, 'DKBO4', 'DKBO5'])
 check('4 張卡 size 4 → 0', run(team.check, 4)[0] == 0)
 
 # ---- 面板問題 → 40，不點面板內座標 ----

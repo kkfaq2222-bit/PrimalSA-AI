@@ -8,7 +8,7 @@
   uv run --no-project python tools/gui/watch.py --status     印鎖與 state 摘要
   uv run --no-project python tools/gui/watch.py --stop       要求常駐 watch 結束（寫 watch.stop 與 psa-hud.json watch=false）
   uv run --no-project python tools/gui/watch.py --ack        清掉 quest 轉述的驗證警報（人工確認過畫面後）
-  uv run --no-project python tools/gui/watch.py --set-char DKB0   寫旁路檔 current-char.json（切換角色的工具點完卡片後呼叫；watch 以它為主）
+  uv run --no-project python tools/gui/watch.py --set-char DKBO   寫旁路檔 current-char.json（切換角色的工具點完卡片後呼叫；watch 以它為主）
   uv run --no-project python tools/gui/watch.py --learn-pet 迪基格斯  把目前 HUD 的寵物頭像存成這個名字（只讀；沒學過的寵物顯示「?」）
   uv run --no-project python tools/gui/watch.py --unlock     刪鎖（別平台 / 已死擁有者的殘鎖；同平台擁有者還活著要加 --force）
   uv run --no-project python tools/gui/watch.py --once       讀一次畫面、印 state（不寫檔、不上鎖）
@@ -39,6 +39,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import battleguard  # noqa: E402
 import charname  # noqa: E402
+import charstate  # noqa: E402
 import digitmatch  # noqa: E402
 import errlog  # noqa: E402
 import screen_sigs  # noqa: E402
@@ -905,7 +906,7 @@ def cmd_ack() -> int:
 
 def cmd_set_char(name: str) -> int:
     """--set-char：手動 / 切換角色的工具寫旁路檔（當前角色 = name）。有白名單時名字要在白名單內（正規化後比對）"""
-    chars = watchstate.load_config().get('chars')
+    chars = charstate.chars() if watchstate.load_config().get('chars') else None   # 白名單經 display：舊設定的 DKB0 也轉成真名 DKBO
     if chars:
         hit = charname.match_texts([name], charname.canon_map(chars))
         if not hit:

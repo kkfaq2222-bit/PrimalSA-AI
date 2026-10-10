@@ -5,6 +5,7 @@
 ## 1. 專案目標
 讓 AI 遊玩《精靈王石器》（PrimalSA，Unity 製作的石器時代類回合制網路遊戲，韓版客戶端 `yhkrn`）。
 遊戲客戶端放在 `GameClient/`；從客戶端整理出的遊戲知識放在 `knowledge/`，AI 玩遊戲時用來檢索。
+角色真名 DKBO、DKBO2～5（字母 O）；文件中的 DKB0～DKB05（數字 0）同義，程式比對 O / 0 視為相同（`tools/gui/charname.canon`、`charstate.same / display`），輸出 / 顯示用真名。
 
 ## 2. 目錄結構
 ```
@@ -33,7 +34,7 @@ PrimalSA-AI/
     web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
     .cache/            匯出時的暫存（HotUpdate.dll 等），可刪
 ```
-網站：Cloudflare Pages 專案 `psa-wiki`（https://psa-wiki.pages.dev/），只上傳 site/；原始碼在 GitHub 私有 repo https://github.com/dk880842/PrimalSA-AI（2026-10-09～10-10 曾公開，2026-10-10 改回私有；曾有 1 個 fork）。仍照公開標準：不要 commit 帳號機密、角色私人資訊、`notes/` 遊玩紀錄；`GameClient/` 不進 repo。`.gitignore` 排除 `GameClient/`、`tools/.cache/`、`site/`、`notes/`。
+網站：Cloudflare Pages 專案 `psa-wiki`（https://psa-wiki.pages.dev/），只上傳 site/；原始碼在 GitHub repo https://github.com/dk880842/PrimalSA-AI（2026-10-09～10-10 曾公開、曾有 1 個 fork，2026-10-10 改回私有，2026-10-11 再改為公開）。仍照公開標準：不要 commit 帳號機密、角色私人資訊、`notes/` 遊玩紀錄；`GameClient/` 不進 repo。`.gitignore` 排除 `GameClient/`、`tools/.cache/`、`site/`、`notes/`。
 
 ## 3. 鐵則（必須遵守）
 1. **`GameClient/` 是唯讀的**：不得新增、修改、刪除、搬移、重新命名其中任何檔案或資料夾，也不要把任何輸出寫進去。
