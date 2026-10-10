@@ -29,6 +29,8 @@ declare module 'claude-code' {
       errs: ErrEntry[]
       // 最近一次讀取的時間（毫秒）
       at: number
+      // watch 活著時的等級 / HP 行（state.hud 組成）；null = watch 不在，改用 stat
+      hud: string | null
       // 即時狀態行（讀 tools/.cache/state.json 組成；顯示文字變了才更新）
       line: WatchLine
     }

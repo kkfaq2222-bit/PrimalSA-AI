@@ -22,6 +22,8 @@ import watch  # noqa: E402
 import watchstate  # noqa: E402
 import winenv  # noqa: E402
 
+watch.OCR_ON = False      # 既有測試只看 pixel / info；HUD 數值（stat.ps1）的測試在檔尾自己開
+
 fails = 0
 
 
@@ -68,6 +70,7 @@ class Fake:
         self.pixel = None            # (rc, stdout, stderr) 或 callable
         self.cost = {'info': 0.02, 'pixel': 0.09}   # 假時鐘前進秒數
         self.on_call = None
+        self.stat = (0, '{"ok": false}\n', '')   # stat.ps1 的 (rc, stdout, stderr)
 
     def __call__(self, script, *args, timeout=None):
         self.calls.append((script, args, timeout))
@@ -76,7 +79,7 @@ class Fake:
         cmd = args[0] if args else ''
         if self.clk:
             self.clk.t += self.cost.get(cmd, 0.05)
-        r = self.info if cmd == 'info' else self.pixel
+        r = self.info if cmd == 'info' else (self.stat if script == 'stat.ps1' else self.pixel)
         r = r() if callable(r) else r
         if isinstance(r, Exception):
             raise r
@@ -506,6 +509,109 @@ if sys.platform != 'win32' and hasattr(signal, 'SIGTERM'):
     check('SIGTERM 後沒有殘留暫存檔', not list(d.glob('*.tmp')))
 else:
     print('SKIP SIGTERM 實測（非 POSIX；Windows 原生未測）')
+
+# ---------------------------------------------------------------- 第 3 階段：HUD 數值（stat.ps1 合併）
+STAT_OK = {'ok': True, 'level': '0轉77級', 'hp': 208, 'mp': 45, 'hpPct': 80, 'mpPct': 100, 'petLevel': '0轉77級', 'petHp': 434,
+           'map': '奇努伊的海底通路', 'pos': '31401:91,29', 'raw': ['一0轉77級', '208', '45', '0轉77級', '434', '31401:91,29']}
+STAT_EMPTY = {'ok': True, 'level': '', 'hp': None, 'mp': None, 'hpPct': None, 'mpPct': None, 'petLevel': '', 'petHp': None, 'map': '', 'pos': '', 'raw': ['', '', '', '', '', '']}
+
+
+def run_cycles(w, clk, n, step=0.5):
+    for _ in range(n):
+        w.cycle()
+        clk.t += step
+
+
+watch.OCR_ON = True
+w, clk, fk = make('hud')
+fk.stat = (0, json.dumps(STAT_OK, ensure_ascii=False) + '\n', '')
+run_cycles(w, clk, 8)
+n_stat = sum(1 for c in fk.calls if c[0] == 'stat.ps1')
+check('stat.ps1 約每 3 s 一次（8 輪 ≈ 4~5 s → 2 次）', n_stat == 2, str(n_stat))
+check('stat 呼叫帶 timeout 8 s', all(c[2] == watch.PS_TIMEOUT for c in fk.calls if c[0] == 'stat.ps1'))
+st = watchstate.read()
+h = st['hud']
+check('hud 欄位：level / hp / hpPct / mp / mpPct / pet / map / pos',
+      h['level']['v'] == '0轉77級' and h['hp']['v'] == 208 and h['hpPct']['v'] == 80 and h['mp']['v'] == 45 and h['mpPct']['v'] == 100
+      and h['pet']['level']['v'] == '0轉77級' and h['pet']['hp']['v'] == 434 and h['map']['v'] == '奇努伊的海底通路' and h['map']['id'] == 31401
+      and h['pos']['v'] == [91, 29], json.dumps(h, ensure_ascii=False)[:200])
+check('hud.ok = True、stale = False、每欄位帶 ts', h['ok'] is True and h['stale'] is False and all('ts' in h[k] for k in ('level', 'hp', 'pos')))
+check('hud.raw 保留', h['raw'][1] == '208')
+check('watcher.ocr_ms / ocr_every 有寫', 'ocr_ms' in st['watcher'] and st['watcher']['ocr_every'] == 3.0)
+# 蓋住：ok:false → 保留舊值並標 stale
+fk.stat = (0, json.dumps({'ok': False, 'error': '遊戲視窗最小化'}) + '\n', '')
+clk.t += 3.1
+w.cycle()
+h = watchstate.read()['hud']
+check('stat ok:false → 保留舊值、stale = True、ok = False', h['hp']['v'] == 208 and h['stale'] is True and h['ok'] is False, str(h.get('stale')))
+# ok:true 但全空 → 同樣保留舊值（N6）
+fk.stat = (0, json.dumps(STAT_EMPTY) + '\n', '')
+clk.t += 3.1
+w.cycle()
+h = watchstate.read()['hud']
+check('stat ok:true 全空（登入 / 選角）→ 保留舊值、不寫空值、stale', h['hp']['v'] == 208 and h['level']['v'] == '0轉77級' and h['stale'] is True)
+# 部分欄位讀到：只更新有值的欄位，其餘保留舊值與舊 ts
+t_old = h['mp']['ts']
+fk.stat = (0, json.dumps({**STAT_EMPTY, 'hp': 150, 'hpPct': 60}) + '\n', '')
+clk.t += 3.1
+w.cycle()
+h = watchstate.read()['hud']
+check('部分欄位：hp 更新、mp 保留舊值與舊 ts', h['hp']['v'] == 150 and h['mp']['v'] == 45 and h['mp']['ts'] == t_old and h['hp']['ts'] > t_old and h['stale'] is False)
+# stat 壞輸出 / 逾時 → 保留舊值
+fk.stat = (0, 'garbage\n', '')
+clk.t += 3.1
+w.cycle()
+check('stat 輸出不是 JSON → 保留舊值、stale', watchstate.read()['hud']['hp']['v'] == 150 and watchstate.read()['hud']['stale'] is True)
+fk.stat = subprocess.TimeoutExpired('stat', 8)
+clk.t += 3.1
+w.cycle()
+check('stat 逾時 → 保留舊值、stale、主迴圈照走', watchstate.read()['hud']['hp']['v'] == 150 and watchstate.read()['hud']['stale'] is True)
+# 超過 12 s 沒成功 → stale（即使最近一次沒失敗紀錄）
+fk.stat = (0, json.dumps(STAT_OK) + '\n', '')
+clk.t += 3.1
+w.cycle()
+check('恢復後 stale = False', watchstate.read()['hud']['stale'] is False)
+w.ocr_on = False
+clk.t += 20
+w.cycle()
+check('超過 12 s 沒更新 → stale = True（值保留）', watchstate.read()['hud']['stale'] is True and watchstate.read()['hud']['hp']['v'] == 208)
+# 對話 / 面板 / 完整戰鬥 / 最小化時不呼叫 stat
+for sname, full_ok in (('dialog', True), ('panel', True), ('reward', True), ('battle', True)):
+    w, clk, fk = make('hudskip_' + sname)
+    fk.stat = (0, json.dumps(STAT_OK) + '\n', '')
+    try:
+        fk.pixel = (0, px_out(sname), '')
+    except StopIteration:
+        continue
+    w.ocr_on = True
+    run_cycles(w, clk, 4)
+    cur = w.cur
+    is_full_battle = cur == 'battle' and w.cls.get('full')
+    n = sum(1 for c in fk.calls if c[0] == 'stat.ps1')
+    check(f'畫面 {sname}（判成 {cur}{"/full" if is_full_battle else ""}）：{"不" if (cur not in watch.OCR_STATES or is_full_battle) else ""}呼叫 stat', (n == 0) == (cur not in watch.OCR_STATES or is_full_battle), str(n))
+w, clk, fk = make('hudmin')
+fk.info = (3, 'minimized\n', '')
+fk.stat = (0, json.dumps(STAT_OK) + '\n', '')
+w.ocr_on = True
+run_cycles(w, clk, 3)
+check('最小化 → 不呼叫 stat.ps1', not any(c[0] == 'stat.ps1' for c in fk.calls))
+# 零輸入：加了 stat 之後仍只有 pixel / info / stat
+w, clk, fk = make('hudwl')
+fk.stat = (0, json.dumps(STAT_OK) + '\n', '')
+w.ocr_on = True
+run_cycles(w, clk, 10)
+check('加入 stat 後：gui 只送 pixel / info、腳本只有 gui.ps1 / stat.ps1',
+      {c[1][0] for c in fk.calls if c[0] == 'gui.ps1'} <= {'pixel', 'info'} and {c[0] for c in fk.calls} == {'gui.ps1', 'stat.ps1'})
+# 內容不變不重寫：只有 hud ts / age_s 變不算變更
+w, clk, fk = make('hudkey')
+fk.stat = (0, json.dumps(STAT_OK) + '\n', '')
+w.ocr_on = True
+run_cycles(w, clk, 2)
+k1 = watchstate.content_key(w.build())
+clk.t += 0.2
+w.hud['hp']['ts'] += 5; w.hud_ts += 5
+check('hud 只有時間戳變 → content_key 不變', watchstate.content_key(w.build()) == k1)
+watch.OCR_ON = False
 
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')

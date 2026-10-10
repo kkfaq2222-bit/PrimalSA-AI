@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   Supervisor, backoffMs, decideExit, errEntries, errLine, format, logPathFromCwd, parseState, stallThresholdMs, statPathFromCwd,
-  viewModel, watchPathFromCwd,
+  viewModel, watchAlive, watchPathFromCwd, hudText,
 } from './register'
 import type { SupDeps, ViewIn } from './register'
 
@@ -257,4 +257,31 @@ test('Supervisor：off 呼叫 --stop 並寫設定、不再重開；on 重新啟�
   expect(h.log.spawns).toBe(1)                                    // off 之後不重開
   await h.sup.setOn(); await settle()
   expect([h.log.cfg, h.log.spawns, h.sup.status]).toEqual([[false, true], 2, 'running'])
+})
+
+// ── 第 3 階段：state.hud → HUD 行；watch 活著時不再需要一次性 stat ──
+const HUD = {
+  ok: true, stale: false, age_s: 0.5,
+  level: { v: '0轉77級', ts: 1 }, hp: { v: 208, ts: 1 }, hpPct: { v: 80, ts: 1 }, mp: { v: 45, ts: 1 }, mpPct: { v: 100, ts: 1 },
+  pet: { level: { v: '0轉77級', ts: 1 }, hp: { v: 434, ts: 1 } }, map: { v: '奇努伊的海底通路', id: 31401, ts: 1 }, pos: { v: [91, 29], ts: 1 },
+}
+
+test('hudText：state.hud 組成與 format 同格式的一行；stale 加（原因 · N 秒前）', () => {
+  const st = { v: 1, hud: HUD, screen: { state: 'idle' } }
+  expect(hudText(st, 0, 0)).toBe('0轉77級  HP 208  MP 45  |  寵 0轉77級 HP 434  |  奇努伊的海底通路 31401:91,29')
+  const stale = { v: 1, hud: { ...HUD, stale: true, ok: false, age_s: 20 }, screen: { state: 'battle', full: true } }
+  expect(hudText(stale, 5000, 0)).toBe('0轉77級  HP 208  MP 45  |  寵 0轉77級 HP 434  |  奇努伊的海底通路 31401:91,29（戰鬥前 · 25s 前）')
+  expect(hudText({ v: 1, hud: { ok: false, stale: true } }, 0, 0)).toBeNull()      // 一個值都沒有
+  expect(hudText({ v: 1 }, 0, 0)).toBeNull()
+  expect(hudText(null, 0, 0)).toBeNull()
+  // 只有血條比例（OCR 讀不到數字）時顯示百分比
+  expect(hudText({ v: 1, hud: { ok: true, level: { v: '0轉1級' }, hpPct: { v: 30 } } }, 0, 0)).toBe('0轉1級  HP 30%  MP ?')
+})
+
+test('watchAlive：(token, seq) 10 s 內有變才算活著；watcher.running=false 不算；沒有 state 不算', () => {
+  const st = { v: 1, watcher: { running: true } }
+  expect(watchAlive(st, 5000, 0)).toBe(true)
+  expect(watchAlive(st, 10001, 0)).toBe(false)
+  expect(watchAlive({ v: 1, watcher: { running: false } }, 100, 0)).toBe(false)
+  expect(watchAlive(null, 0, 0)).toBe(false)
 })

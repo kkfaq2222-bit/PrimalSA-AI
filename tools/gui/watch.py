@@ -14,7 +14,7 @@
 
 退出碼：0 正常（含父程序死）/ 2 參數錯 / 3 同平台已有實例（或鎖被換走）/ 5 收到 --stop / 6 鎖屬於另一平台 / 其他 = 異常。
 
-**零輸入**：只送 gui.ps1 的 pixel / info（一律帶 -NoRestore 1：遊戲最小化時不還原視窗）與 stat.ps1 / ocr.ps1（第 3 階段才用）。
+**零輸入**：只送 gui.ps1 的 pixel / info（一律帶 -NoRestore 1：遊戲最小化時不還原視窗）與 stat.ps1 / ocr.ps1（stat.ps1 每 3 s 一次，讀 HUD 數值）。
 不送任何點擊、按鍵、走路、fg / max / seq / shot / waitpix；test_watch.py 用白名單與 AST 檢查把關。
 watch 不上傳截圖，不做驗證視窗判斷（那是 quest 那一層）；state 不能當點擊依據。
 """
@@ -46,7 +46,11 @@ HEARTBEAT = 1.0                   # 內容沒變也每 1 s 寫一次（seq +1）
 INFO_EVERY = 5.0                  # 每 5 s 用 info 看版面
 IDLE_INTERVAL = 5.0               # 最小化 / 沒開遊戲：5 s 一次
 GUI_TIMEOUT = 3.0                 # pixel / info 單次逾時
-PS_TIMEOUT = 8.0                  # stat / ocr（第 3 階段）
+PS_TIMEOUT = 8.0                  # stat / ocr
+OCR_EVERY = 3.0                   # 每 3 s 跑一次 stat.ps1（HUD 數值）
+HUD_STALE_S = 12.0                # 超過這麼久沒成功讀到 → hud.stale
+OCR_ON = True                     # 測試可關（關了就完全不呼叫 stat.ps1）
+OCR_STATES = ('idle', 'walking', 'battle')   # 只在這些畫面讀 HUD（battle 僅限非完整戰鬥；對話 / 面板 / 未知畫面可能蓋住 HUD，OCR 會讀到雜訊）
 LAYOUT_OK = '2880x1659'
 TRANSITIONS_KEEP = 20
 STABLE_CAP = 5                    # stable_n 上限（不封頂會每輪都「內容有變」）
@@ -211,6 +215,14 @@ class Watcher:
         self.last_px = None
         self._flags_cache = None
         self.call_t0 = self.started
+        # HUD 數值（stat.ps1 OCR 合併）：欄位級 {v, ts}；讀不到 / 被蓋住時保留舊值並標 stale
+        self.ocr_on = OCR_ON
+        self.hud: dict = {}              # 欄位名 -> {'v':..., 'ts':...}
+        self.hud_raw: list = []
+        self.hud_ts = None               # 最近一次成功（有資料）的時間
+        self.hud_fail = True             # 最近一次嘗試是否失敗 / 跳過
+        self.last_ocr = -1e9
+        self.ocr_ms = 0
 
     # ---- 啟動 / 結束 ----
     def lock_info(self) -> dict:
@@ -366,6 +378,7 @@ class Watcher:
         if kind == 'ok':
             self.cycle_ms.append(self.cur_cycle_ms)
         self._update_interval()
+        self._maybe_ocr(kind)
         self.flush()
 
     def _apply(self, kind: str, px) -> None:
@@ -428,6 +441,90 @@ class Watcher:
         else:
             self.interval = INTERVAL
 
+    # ---- HUD 數值（stat.ps1）----
+    def _maybe_ocr(self, kind: str) -> None:
+        """每 OCR_EVERY 秒跑一次 stat.ps1；畫面不是主畫面類（對話 / 面板 / 完整戰鬥 / 沒開遊戲…）就不跑，只標 stale"""
+        if not self.ocr_on:
+            return
+        ok_screen = kind == 'ok' and self.cur in OCR_STATES and not (self.cur == 'battle' and self.cls.get('full'))
+        if not ok_screen:
+            self.hud_fail = True
+            return
+        if self.mono() - self.last_ocr < OCR_EVERY:
+            return
+        self.last_ocr = self.mono()
+        r, how, ms = self._call(_ps, 'stat.ps1')
+        self.ocr_ms = ms
+        self.merge_stat(self._parse_stat(r), self.call_t0)
+
+    @staticmethod
+    def _parse_stat(r):
+        """stat.ps1 的最後一行 JSON → dict；失敗回 None"""
+        if r is None:
+            return None
+        line = ((r.stdout or '').strip().splitlines() or [''])[-1]
+        try:
+            d = json.loads(line)
+        except ValueError:
+            return None
+        return d if isinstance(d, dict) else None
+
+    HUD_SRC = ('level', 'hp', 'hpPct', 'mp', 'mpPct', 'petLevel', 'petHp', 'map', 'pos')
+
+    def merge_stat(self, d, t: float) -> bool:
+        """把一次 stat 結果併進 self.hud；回 True = 有資料。
+        ok=False（最小化 / 沒開）或 ok=True 但全空（登入 / 選角畫面等被蓋住）→ 保留舊值，標 stale，不寫空值。
+        有資料時只更新「這次有值」的欄位（沒讀到的欄位保留舊值與舊 ts）"""
+        if not d or not d.get('ok'):
+            self.hud_fail = True
+            return False
+        got = {k: d.get(k) for k in self.HUD_SRC if d.get(k) not in (None, '')}
+        if not got:
+            self.hud_fail = True
+            return False
+        for k, v in got.items():
+            self.hud[k] = {'v': v, 'ts': t}
+        raw = d.get('raw')
+        if isinstance(raw, list):
+            self.hud_raw = [str(x) for x in raw][:8]
+        self.hud_ts = t
+        self.hud_fail = False
+        return True
+
+    def _hud_section(self, now: float) -> dict:
+        h = self.hud
+        out: dict = {'ts': self.hud_ts, 'age_s': round(max(0.0, now - self.hud_ts), 2) if self.hud_ts else None,
+                     'ok': self.hud_ts is not None and not self.hud_fail,
+                     'stale': self.hud_ts is None or self.hud_fail or now - self.hud_ts > HUD_STALE_S}
+        for k in ('level', 'hp', 'hpPct', 'mp', 'mpPct'):
+            if k in h:
+                out[k] = dict(h[k])
+        pet = {}
+        for src, dst in (('petLevel', 'level'), ('petHp', 'hp')):
+            if src in h:
+                pet[dst] = dict(h[src])
+        if pet:
+            out['pet'] = pet
+        if 'map' in h or 'pos' in h:
+            pos = h.get('pos')
+            if 'map' in h:
+                m = {'v': h['map']['v'], 'ts': h['map']['ts']}
+                if pos:
+                    try:
+                        m['id'] = int(str(pos['v']).split(':')[0])
+                    except ValueError:
+                        pass
+                out['map'] = m
+            if pos:
+                try:
+                    xy = str(pos['v']).split(':')[1].split(',')
+                    out['pos'] = {'v': [int(xy[0]), int(xy[1])], 'ts': pos['ts']}
+                except (IndexError, ValueError):
+                    pass
+        if self.hud_raw:
+            out['raw'] = self.hud_raw
+        return out
+
     # ---- state 組裝 / 寫檔 ----
     def build(self) -> dict:
         now = self.clock()
@@ -440,7 +537,7 @@ class Watcher:
             'v': watchstate.VERSION, 'ts': now, 'seq': self.seq, 'phase': self.phase,
             'watcher': {'running': self.phase != 'stopping', 'token': self.token, 'pid': os.getpid(), 'platform': winenv.platform_kind(),
                         'started': self.started, 'interval': self.interval, 'server': bool(self.server_ok),
-                        'cycle_ms': self.cur_cycle_ms, 'errors': self.errors, 'owner': self.owner,
+                        'cycle_ms': self.cur_cycle_ms, 'ocr_ms': self.ocr_ms, 'ocr_every': OCR_EVERY, 'errors': self.errors, 'owner': self.owner,
                         'hb_p95_s': round(_p95(self.hb_intervals), 2), 'cpu_pct': self.cpu_pct},
             'game': {'ts': self.screen_ts, 'running': bool(self.game_running), 'minimized': self.minimized,
                      'layout': self.layout, 'screen_supported': self.layout == LAYOUT_OK},
@@ -450,7 +547,7 @@ class Watcher:
                        'since': self.since, 'transitions': [list(t[:3]) + [t[3] if t[3] is not None else now] for t in self.transitions],
                        'full': self.cls['full'], 'cmd': self.cls['cmd'], 'auto_off': self.cls['auto_off'], 'gold': self.cls['gold'],
                        'enc_on': None, 'stable_n': self.stable_n, 'src': 'pixel'},
-            'hud': {'ok': False, 'stale': True},        # 第 3 階段（OCR 合併）才有數值
+            'hud': self._hud_section(now),
             'flags': dict(self._flags(mono), verify_suspect=False),   # verify_suspect / alerts 第 5 階段
             'alerts': [],
         }

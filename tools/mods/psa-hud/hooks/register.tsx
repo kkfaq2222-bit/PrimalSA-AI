@@ -84,11 +84,22 @@ export function watchPathFromCwd(cwd: string, pythonPath?: string): string | und
     : `/mnt/${drive.toLowerCase()}/${rest}/tools/gui/watch.py`
 }
 
+// state.hud（第 3 階段）：欄位級 {v, ts}；ok = 最近一次讀到資料；stale = 被蓋住 / 太久沒更新（欄位值保留舊的）
+type WF<T> = { v?: T; ts?: number }
+export type WHud = {
+  ok?: boolean; stale?: boolean; age_s?: number | null
+  level?: WF<string>; hp?: WF<number>; hpPct?: WF<number>; mp?: WF<number>; mpPct?: WF<number>
+  pet?: { level?: WF<string>; hp?: WF<number> }
+  map?: WF<string> & { id?: number }
+  pos?: WF<number[]>
+}
+
 // state.json（只認 v 主版本 1；不認得的鍵一律忽略）
 type WState = {
   v?: number; seq?: number; phase?: string
   watcher?: { token?: string; running?: boolean; interval?: number }
-  screen?: { label?: string; age_s?: number }
+  screen?: { label?: string; age_s?: number; state?: string; full?: boolean }
+  hud?: WHud
   flags?: { verify_suspect?: boolean; netwatch_halt?: boolean }
   alerts?: { msg?: string; line?: string }[]
 }
@@ -319,6 +330,7 @@ export const statArgv = () => ['powershell.exe', '-NoProfile', '-ExecutionPolicy
 const stat = atom({ plugin: 'psa-hud', key: 'stat' } as const, null)
 const acts = atom({ plugin: 'psa-hud', key: 'errs' } as const, [] as ErrEntry[])
 const at = atom({ plugin: 'psa-hud', key: 'at' } as const, 0)
+const hudAtom = atom({ plugin: 'psa-hud', key: 'hud' } as const, null as string | null)
 const line = atom({ plugin: 'psa-hud', key: 'line' } as const, { main: '（沒有狀態）', hints: [] } as WatchLine)
 
 // 數值排成一行文字
@@ -332,6 +344,37 @@ export function format(s: Stat): string {
   if (s.petLevel || s.petHp != null) parts.push(`寵 ${s.petLevel || '?'} HP ${v(s.petHp)}`)
   if (s.map || s.pos) parts.push(`${s.map ?? ''} ${s.pos ?? ''}`.trim())
   return parts.join('  |  ')
+}
+
+// watch 活著 = 讀得到 state，且 (token, seq) 在 STALE_HINT_MS 內有變、watcher 沒說自己 stopping（另一 session / 平台的 watch 也算）
+export function watchAlive(state: WState | null, now: number, seenAt: number): boolean {
+  return !!state && state.watcher?.running !== false && now - seenAt <= STALE_HINT_MS
+}
+
+const COVER_TEXT: Record<string, string> = {
+  battle: '戰鬥前', dialog: '對話前', reward: '領獎前', select: '選單前', panel: '面板前', unknown: '畫面被蓋住前',
+  minimized: '遊戲最小化前', no_game: '遊戲未執行前', error: '讀取失敗前',
+}
+
+// state.hud → pane 第二行（和 format 同格式）；沒有任何數值 → null。stale 時加灰字（原因 · N 秒前）
+export function hudText(state: WState | null, now: number, seenAt: number): string | null {
+  const h = state?.hud
+  if (!h) return null
+  const v = <T,>(f?: WF<T>): T | undefined => f?.v
+  const pos = v(h.pos)
+  const s: Stat = {
+    ok: true, level: v(h.level), hp: v(h.hp) ?? null, hpPct: v(h.hpPct) ?? null, mp: v(h.mp) ?? null, mpPct: v(h.mpPct) ?? null,
+    petLevel: v(h.pet?.level), petHp: v(h.pet?.hp) ?? null, map: v(h.map),
+    pos: pos && h.map?.id != null ? `${h.map.id}:${pos[0]},${pos[1]}` : pos ? `${pos[0]},${pos[1]}` : undefined,
+  }
+  if (!s.level && s.hp == null && s.mp == null && s.hpPct == null && !s.petLevel && !s.map && !s.pos) return null
+  let t = format(s)
+  if (h.stale) {
+    const age = Math.round((h.age_s ?? 0) + Math.max(0, now - seenAt) / 1000)
+    const why = COVER_TEXT[state?.screen?.state ?? ''] ?? '讀取中'
+    t += `（${why} · ${age}s 前）`
+  }
+  return t
 }
 
 async function poll($: EngineInterface): Promise<Stat> {
@@ -348,8 +391,11 @@ async function poll($: EngineInterface): Promise<Stat> {
 // 上一次讀取還沒結束就不再開新的（約 1 秒，計時器 15 秒一次）
 let busy = false
 
+// watch 活著時（tickState 每秒更新）等級 / HP 改讀 state.hud，不再 spawn 一次性 stat.ps1；watch 不在才退回
+let hudAlive = false
+
 async function refresh($: EngineInterface): Promise<Stat | undefined> {
-  if (busy) return undefined
+  if (busy || hudAlive) return undefined
   busy = true
   try {
     const s = await poll($)
@@ -459,6 +505,13 @@ async function tickState($: EngineInterface): Promise<void> {
     const key = state ? `${state.watcher?.token ?? '?'}:${state.seq ?? '?'}` : null
     await sup.observe(key, state?.phase ?? null, state?.watcher?.interval ?? null)
     const vm = viewModel({ state, badVersion, status: sup.status, lastCode: sup.lastCode, now: await $.clock.now(), seenAt: sup.seenAt, hasFile })
+    const now = await $.clock.now()
+    const alive = watchAlive(state, now, sup.seenAt)
+    const wasAlive = hudAlive
+    hudAlive = alive
+    const ht = alive ? (hudText(state, now, sup.seenAt) ?? '（等級 / HP 讀取中…）') : null
+    if ((await read($, hudAtom)) !== ht) await update($, hudAtom, () => ht)
+    if (wasAlive && !alive) void refresh($)       // watch 剛死：馬上用一次性 stat 補上，不等 15 s
     const old = await read($, line)
     if (JSON.stringify(old) !== JSON.stringify(vm)) await update($, line, () => vm)
   } finally {
@@ -508,7 +561,8 @@ export const register: Register = on => {
     }
     await $.ui.open({ id: PANE, title: '精靈王石器' })
     const s = await refresh($)
-    return { text: (s ? format(s) : '上一次讀取還在進行中') + (sup ? `\n${supSummary(sup)}` : '') }
+    const ht = hudAlive ? await read($, hudAtom) : null
+    return { text: (ht ?? (s ? format(s) : '上一次讀取還在進行中')) + (sup ? `\n${supSummary(sup)}` : '') }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -516,13 +570,14 @@ export const register: Register = on => {
     const lines = await read($, acts)
     const wl = await read($, line)
     const st = await read($, stat)
+    const ht = await read($, hudAtom)
     const color = (t: WatchTone) => (t === 'red' ? 'red' : t === 'yellow' ? 'yellow' : undefined)
 
     return (
       <Box flexDirection="column">
         <Text wrap="truncate-end" bold>{wl.main}</Text>
         {wl.hints.map(h => <Text wrap="truncate-end" color={color(h.tone)} dimColor={h.tone === 'gray'}>{h.text}</Text>)}
-        <Text wrap="truncate-end" dimColor={!st}>{st ? format(st) : '（等級 / HP 讀取中…）'}</Text>
+        <Text wrap="truncate-end" dimColor={!st && !ht}>{ht ?? (st ? format(st) : '（等級 / HP 讀取中…）')}</Text>
         <Text dimColor>{'─'.repeat(20)}</Text>
         <Text dimColor>{`錯誤 / 改進紀錄（新→舊，最多 ${LOG_MAX} 筆）`}</Text>
         {lines.length === 0
