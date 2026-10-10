@@ -352,7 +352,7 @@ def event(msg: str, shot: str | None = None) -> None:
 def snap(tag: str) -> str:
     SHOT_DIR.mkdir(parents=True, exist_ok=True)
     p = SHOT_DIR / f'{time.strftime("%H%M%S")}-{tag}.png'
-    gui('shot', str(p))
+    gui('shot', winenv.to_windows(p))
     return str(p.relative_to(ROOT))
 
 
@@ -368,7 +368,7 @@ def clef_shot_bytes() -> bytes | None:
             return None
         SHOT_DIR.mkdir(parents=True, exist_ok=True)
         p = SHOT_DIR / 'clef-tmp.png'
-        gui('shot', str(p))
+        gui('shot', winenv.to_windows(p))
         data = p.read_bytes()
         p.unlink(missing_ok=True)
         return data
