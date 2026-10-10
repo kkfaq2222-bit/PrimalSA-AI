@@ -39,6 +39,8 @@ uv run --no-project python tools/gui/walk.py --path "1000:86,88 84,81 83,73 81,6
 uv run --no-project python tools/gui/walk.py --plan 1000 81 66 [--from 92,99]   # 只印找路結果（每段要點的截圖座標），不動
 uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40 --mp 20 --every 15]   # 回村補血再回練功點（約 21～24 秒）；--watch 看血條比例（%）自動補
 uv run --no-project python tools/gui/petwatch.py [--once] [--interval 30] [--target-level 77]   # 監測 5 人金布伊等級，≥ 門檻換回迪基格斯（內含補血檢查 + 維持原地遇敵，不要和 heal.py --watch 同跑）
+uv run --no-project python tools/gui/healthcheck.py [--only 外掛勾選]   # 異常檢查（只看不改）：外掛 5 個角色的快速戰鬥 / 自動戰鬥有沒有打勾；levelwatch 在經驗速度異常、戰鬥過久時自動跑（--no-check 關掉）。新增檢查項目寫在 healthcheck.py 的 CHECKS
+uv run --no-project python tools/gui/healthcheck.py [--only 外掛勾選]   # 異常檢查（只看不改）：外掛 5 個角色的快速戰鬥 / 自動戰鬥有沒有打勾（約 18 秒）；levelwatch 在經驗速度異常、戰鬥過久時自動跑（--no-check 關掉）；新增檢查項目寫進 healthcheck.py 的 CHECKS
 ```
 
 操作 log：click / dclick / drag / key / max / end（含 seq 裡的）以及 walk.py / heal.py / quest.py 的動作，都會寫一行到 `tools/.cache/actions.log`（只留最新 100 行，不進 git；寫入程式 `tools/gui/actlog.py`），背景記錄用，psa-hud pane 不顯示它（pane 顯示下面的錯誤 / 改進紀錄）。想附註用途：`PSA_NOTE="對話確認" bash tools/gui/gui.sh click 948 461`（Python 呼叫 `walk.gui(..., note="...")`）；shot / pixel / wait* 不記。

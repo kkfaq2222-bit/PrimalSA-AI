@@ -4,6 +4,8 @@
 # - 視窗可自由縮放，畫面保持比例。預設置頂，可在畫面右鍵選單與標題列選單取消（兩邊同步）。
 # - 遊戲最小化時 DWM 沒有畫面可給（Unity 最小化不繪製）→ 顯示提示；遊戲重開會自動重新接上。
 # - 單一執行個體：已經開著就把它帶到前面。位置、大小、置頂存在 tools/.cache/mirror.txt。
+# 同時開多個客戶端：設環境變數 PSA_EXE_MATCH（路徑片段，例：PrimalSA222）就只鏡像那一個，且各自一個鏡像視窗
+#   （單一執行個體、位置存檔 tools/.cache/mirror-<片段>.txt、標題列「精靈王石器 畫面 - <片段>」都各自獨立）。
 # 舊版每幀用 PrintWindow 截圖，2 幀/秒 ≈ 全機 CPU 0.9%；DWM 縮圖不需要。
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -ReferencedAssemblies System.Drawing, System.Windows.Forms @"
@@ -30,10 +32,12 @@ public class Mirror : Form {
   public static void DpiAware() { SetProcessDPIAware(); }
 
   IntPtr game = IntPtr.Zero, thumb = IntPtr.Zero; string msg = "找遊戲視窗…"; string stateFile;
-  Timer timer = new Timer(); MenuItem topItem; int srcW, srcH; bool shown;
+  string match = ""; Timer timer = new Timer(); MenuItem topItem; int srcW, srcH; bool shown;
   public Mirror(string stateFile) {
     this.stateFile = stateFile;
-    Text = "精靈王石器 畫面"; DoubleBuffered = true; BackColor = Color.Black;
+    var mt = Environment.GetEnvironmentVariable("PSA_EXE_MATCH");
+    if (!string.IsNullOrEmpty(mt)) match = mt;
+    Text = "精靈王石器 畫面" + (match != "" ? " - " + match : ""); DoubleBuffered = true; BackColor = Color.Black;
     StartPosition = FormStartPosition.Manual; ClientSize = new Size(720, 415); Location = new Point(40, 40);
     bool top = true;   // 預設置頂；存檔裡有記錄就以存檔為準（右鍵選單可取消）
     try {
@@ -81,7 +85,15 @@ public class Mirror : Form {
     if (!shown) return;
     if (game == IntPtr.Zero || !IsWindow(game)) {
       Drop(); game = IntPtr.Zero;
-      foreach (var p in Process.GetProcessesByName("PrimalSA")) if (p.MainWindowHandle != IntPtr.Zero) game = p.MainWindowHandle;
+      foreach (var p in Process.GetProcessesByName("PrimalSA")) {
+        if (p.MainWindowHandle == IntPtr.Zero) continue;
+        if (match != "") {
+          string path = "";
+          try { path = p.MainModule.FileName; } catch { }
+          if (path.IndexOf(match, StringComparison.OrdinalIgnoreCase) < 0) continue;
+        }
+        game = p.MainWindowHandle;
+      }
       if (game == IntPtr.Zero) { Status("遊戲沒有在執行"); return; }
     }
     if (IsIconic(game)) { Status("遊戲視窗最小化（Unity 最小化不繪製）"); return; }
@@ -116,14 +128,15 @@ public class Mirror : Form {
 [Mirror]::DpiAware()
 # 單一執行個體：已開著就把那個視窗帶到前面
 $created = $false
-$mutex = New-Object System.Threading.Mutex($true, 'PrimalSA-AI-Mirror', [ref]$created)
+$suffix = if ($env:PSA_EXE_MATCH) { '-' + $env:PSA_EXE_MATCH } else { '' }
+$mutex = New-Object System.Threading.Mutex($true, "PrimalSA-AI-Mirror$suffix", [ref]$created)
 if (-not $created) {
   Add-Type -Namespace M -Name U -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);'
-  $other = Get-Process powershell | Where-Object { $_.MainWindowTitle -eq '精靈王石器 畫面' } | Select-Object -First 1
+  $other = Get-Process powershell | Where-Object { $_.MainWindowTitle -eq ('精靈王石器 畫面' + $(if ($env:PSA_EXE_MATCH) { ' - ' + $env:PSA_EXE_MATCH } else { '' })) } | Select-Object -First 1
   if ($other) { [M.U]::ShowWindow($other.MainWindowHandle, 9) | Out-Null; [M.U]::SetForegroundWindow($other.MainWindowHandle) | Out-Null }
   exit 0
 }
-$state = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.cache\mirror.txt'))
+$state = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.cache\mirror$(if ($env:PSA_EXE_MATCH) { '-' + $env:PSA_EXE_MATCH } else { '' }).txt"))
 New-Item -ItemType Directory -Force (Split-Path $state) | Out-Null
 [System.Windows.Forms.Application]::EnableVisualStyles()
 [System.Windows.Forms.Application]::Run((New-Object Mirror $state))

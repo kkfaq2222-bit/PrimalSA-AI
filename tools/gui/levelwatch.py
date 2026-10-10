@@ -11,6 +11,11 @@
 補血：隊長血條 < --hp% 或魔條 < --mp%（連續讀到 2 次）就用 heal.heal_trip 回村補血，再傳回「現在該在的練功點」（--no-heal 關掉）。
 換點流程：關原地遇敵 → 等戰鬥結束（VS 牌消失）→ 傳送 → 開原地遇敵。
 視窗被最小化會自動還原（不搶焦點）。
+異常檢查（healthcheck.py，只看不改）：發現下列情況就檢查外掛 5 個角色的「快速戰鬥 / 自動戰鬥」有沒有打勾（--no-check 關掉）
+  - 經驗速度異常：目前等級已花的時間 > 預期 × --exp-slow（預期 = 該級升級經驗 ÷ 基準每分鐘經驗；
+    基準 = --exp-per-min，沒給就用同一張地圖最近 5 次升級的中位數）
+  - 戰鬥過久：連續 --battle-max 秒每次取樣都在戰鬥中（頭上有 VS 牌）
+  觸發後等戰鬥結束、HUD 回來才檢查；兩次檢查至少隔 --check-every 分鐘。新增檢查項目見 healthcheck.py 開頭。
 出現答題 / 驗證視窗無法偵測；讀不到 HUD（面板蓋住等）超過 5 次就停下來請人看（鐵則 5）。
 """
 import argparse
@@ -20,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 
+import healthcheck
 import heal
 import layout
 from walk import log, stat
@@ -58,6 +64,25 @@ def target_for(level: int, stages=None) -> str | None:
     return next((name for need, name in (stages or STAGES) if level >= need), None)
 
 
+def load_exp_table() -> dict[int, int]:
+    """等級 → 升級所需經驗（knowledge/pets/levels.md）；讀不到回空（關閉經驗速度檢查）"""
+    path = Path(__file__).resolve().parents[2] / 'knowledge' / 'pets' / 'levels.md'
+    table: dict[int, int] = {}
+    try:
+        for line in path.read_text(encoding='utf-8').splitlines():
+            m = re.match(r'\| (\d+) \| (\d+) \|', line)
+            if m:
+                table[int(m.group(1))] = int(m.group(2))
+    except OSError:
+        pass
+    return table
+
+
+def median(xs: list[float]) -> float:
+    xs = sorted(xs)
+    return xs[len(xs) // 2]
+
+
 def move_to(spot: str) -> None:
     sx, sy, spot_map = heal.SPOTS[spot]
     out = heal.gui('seq', heal.encounter_steps(False) + f'; waitpix 20000 {heal.SIG_NO_BATTLE} 40')
@@ -78,6 +103,11 @@ def main() -> int:
     ap.add_argument('--hp', type=int, default=40, help='隊長血條低於這個百分比就回村（預設 40）')
     ap.add_argument('--mp', type=int, default=20, help='隊長魔條低於這個百分比就回村（預設 20）')
     ap.add_argument('--note', default='', help='寫進經驗紀錄的備註，例：2倍智慧果中')
+    ap.add_argument('--no-check', action='store_true', help='不要在異常時自動檢查外掛勾選（healthcheck.py）')
+    ap.add_argument('--check-every', type=int, default=20, help='兩次異常檢查至少隔幾分鐘（預設 20）')
+    ap.add_argument('--exp-slow', type=float, default=1.6, help='升級時間超過預期的幾倍算經驗速度異常（預設 1.6）')
+    ap.add_argument('--exp-per-min', type=float, default=0, help='基準每分鐘經驗；沒給就用同一張地圖最近 5 次升級的中位數')
+    ap.add_argument('--battle-max', type=int, default=120, help='連續幾秒都在戰鬥中算戰鬥過久（預設 120）')
     ap.add_argument('--dry-run', action='store_true', help='只印會做什麼，不傳送')
     a = ap.parse_args()
     if layout.current() not in layout.SUPPORTED:
@@ -93,6 +123,12 @@ def main() -> int:
     pending = None       # 上一次讀到、等第二次確認的等級
     bad = 0
     stages = STAGES if a.label else REAL_STAGES
+    exp_table = load_exp_table()
+    track = {'level': None, 'map': None, 't0': time.time()}   # 目前等級從什麼時候開始、在哪張地圖
+    rates: dict[str, list[float]] = {}                        # 地圖 → 最近幾次升級的每分鐘經驗
+    want_check: str | None = None                             # 觸發了、等戰鬥結束 + HUD 回來再檢查的原因
+    last_check = 0.0
+    busy_since: float | None = None
     log('監測中：' + '、'.join(f'{n} 級→{name}' for n, name in reversed(stages)) + '（Ctrl+C 結束）')
     while True:
         s = stat()
@@ -104,6 +140,14 @@ def main() -> int:
             time.sleep(2)
             s = stat()
             lv = parse_level(s)
+        # 戰鬥過久：每次取樣看頭上 VS 牌（快速戰鬥一場幾秒，取樣到的機率很低；連續取樣都在戰鬥就是異常）
+        in_battle = not heal.gui('seq', f'waitpix 0 {heal.SIG_NO_BATTLE} 40').startswith('ok')
+        if in_battle:
+            busy_since = busy_since or time.time()
+            if time.time() - busy_since >= a.battle_max and not want_check:
+                want_check = f'戰鬥過久（連續 {int(time.time() - busy_since)} 秒在戰鬥中）'
+        else:
+            busy_since = None
         if lv is None:
             bad += 1
             log(f'讀不到等級（{bad}/5）：{s.get("error") or s.get("level")}')
@@ -130,6 +174,22 @@ def main() -> int:
                 time.sleep(3)
                 continue
             good_level = level
+            now = time.time()
+            m_map = re.match(r'(\d+):', str(s.get('pos') or ''))
+            cur_map = m_map.group(1) if m_map else '?'
+            if level != track['level']:
+                # 升了一級（上一級是從頭看到尾、同一張地圖）→ 記下這一級的每分鐘經驗當基準
+                if (track['level'] is not None and level == track['level'] + 1 and track['map'] == cur_map
+                        and exp_table.get(track['level']) and now - track['t0'] >= 60 and track.get('clean')):
+                    rates.setdefault(cur_map, []).append(exp_table[track['level']] / ((now - track['t0']) / 60))
+                    rates[cur_map] = rates[cur_map][-5:]
+                track.update(level=level, map=cur_map, t0=now, clean=track['level'] is not None)
+            else:
+                base = a.exp_per_min or (median(rates[cur_map]) if rates.get(cur_map) else 0)
+                need = exp_table.get(level)
+                elapsed = (now - track['t0']) / 60
+                if base and need and elapsed >= 10 and elapsed > need / base * a.exp_slow and not want_check:
+                    want_check = f'經驗速度異常（{level} 級已 {elapsed:.0f} 分，預期約 {need / base:.0f} 分）'
             with log_path.open('a', encoding='utf-8') as fh:
                 fh.write(f'{time.strftime("%Y-%m-%d %H:%M:%S")},{level},{s.get("pos") or ""},{a.note}\n')
             if a.verbose:
@@ -158,6 +218,12 @@ def main() -> int:
                     except RuntimeError as e:
                         log(f'換點失敗：{e}；停止監測，請人工處理')
                         return 1
+        if want_check and not a.no_check and not a.dry_run and lv is not None and not in_battle                 and time.time() - last_check >= a.check_every * 60:
+            last_check = time.time()
+            reason, want_check = want_check, None
+            log(f'觸發異常檢查：{reason}')
+            healthcheck.run(reason)
+            busy_since = None
         if not a.no_heal and not a.dry_run and done and lv is not None and heal.low(s, a.hp, a.mp):
             time.sleep(3)
             s2 = stat()
