@@ -10,6 +10,7 @@ import battleguard  # noqa: E402
 import tempfile as _tf
 battleguard.LOCK_FILE = Path(_tf.mkdtemp()) / 'battle.lock'      # 測試用鎖檔位置，不碰真正的 tools/.cache/battle.lock
 REAL_READ_SCREEN = quest.read_screen                             # 同上：真的 read_screen（測像素分類）
+REAL_VERIFY = quest.verify_boss_result                           # 舊案例換成「一律 0」的假的（只測戰鬥分類）；A 區塊用真的
 REAL_CHECK_TEAM = quest.check_team                               # run() 會把 quest.check_team 換成假的；真函式留著測像素邏輯
 
 IDLE = {'state': 'idle', 'gold': 0, 'full': False, 'cmd': False, 'auto_off': False}
@@ -62,12 +63,18 @@ TEAM = {'ret': (True, 'fake 隊伍完整'), 'calls': []}
 
 def fake_team(size, tag=''):
     TEAM['calls'].append((size, tag))
+    if tag.startswith('BOSS 戰後') and 'after' in TEAM:
+        return TEAM['after']
     return TEAM['ret']
 
 
-def run(argv, sim):
+POS_FN = lambda: (5510, 50, 17)
+
+
+def run(argv, sim, real_verify=False):
+    quest.verify_boss_result = REAL_VERIFY if real_verify else (lambda *a, **k: 0)
     quest.time.time, quest.time.sleep = sim.time, sim.sleep
-    quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: (5510, 50, 17)
+    quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: POS_FN()
     quest.walk.gui = sim.gui
     quest.check_team = fake_team
     quest.snap = lambda tag: 'sim.png'
@@ -187,7 +194,8 @@ class Script:
         return ''
 
 
-def run2(argv, sim, team=False):
+def run2(argv, sim, team=False, real_verify=False):
+    quest.verify_boss_result = REAL_VERIFY if real_verify else (lambda *a, **k: 0)
     if not team and '--team-size' not in argv and '--solo' not in argv:
         argv = argv + ['--team-size', '0']      # 舊案例不測隊伍；要測隊伍檢查的案例傳 team=True
     quest.time.time, quest.time.sleep = sim.time, sim.sleep
@@ -733,6 +741,57 @@ ok &= check('--fight --no-click（任務時間窗內）快速戰鬥 → 刷新 7
 s = Script([IDLE] * 20 + [QUICK, QUICK, IDLE, IDLE, IDLE])
 rc = run2(['--fight', '--no-click', '--max-seconds', '25'], s)
 ok &= check('--fight --no-click 20 秒後的路上小怪（快速戰鬥）→ 不刷新', not has(s, 'click 763 760') and not has(s, 'click 850 765'), str(s.clicks))
+
+
+print('(A) BOSS 戰判斷輸贏（errlog #25）：judge_boss_result 純函式')
+J = quest.judge_boss_result
+P = (5510, 50, 17)
+ok &= check('#25 實例：同圖 5510、步驟仍是打敗龍王守衛、HP 1/551（0%）、少一人 → 32（隊伍優先）', J(P, P, 6, 6, 0, False)[0] == quest.EXIT_TEAM_LOST)
+c, why = J(P, P, 6, 6, 0, True)
+ok &= check('同上但隊伍完整 → 35，理由帶 HP 佐證', c == quest.EXIT_BOSS_LOST and 'HP 0%' in why, f'{c} {why}')
+ok &= check('同圖同步驟、HP 正常 → 仍 35（HP 只是佐證）', J(P, P, 6, 6, 80, True)[0] == 35)
+ok &= check('地圖換了 → 0', J(P, (5511, 3, 3), 6, 6, 50, True)[0] == 0)
+ok &= check('地圖相同、步驟 6 → 7 → 0', J(P, P, 6, 7, 50, True)[0] == 0)
+ok &= check('任務從列表消失（GONE）→ 0', J(P, P, 6, quest.GONE, 50, True)[0] == 0)
+ok &= check('只給座標沒步驟（沒 --task）、地圖相同 → 36，不回 0', J(P, P, None, None, 50, True)[0] == quest.EXIT_BOSS_UNKNOWN)
+ok &= check('OCR 讀不到打完後步驟、地圖相同 → 36', J(P, P, 6, None, 50, True)[0] == 36)
+ok &= check('打完後讀不到座標、步驟相同 → 36', J(P, None, 6, 6, 50, True)[0] == 36)
+ok &= check('讀不到座標但步驟變了 → 0', J(None, None, 6, 7, 50, True)[0] == 0)
+ok &= check('被打飛回村（1000 儲存點）→ 21，不當成「地圖換了」贏', J((5510, 50, 17), (1000, 93, 99), 6, 6, 50, True)[0] == quest.EXIT_KNOCKED)
+ok &= check('team_ok=None（讀不到）不擋判斷', J(P, (5511, 1, 1), 6, 6, 50, None)[0] == 0)
+ok &= check('退出碼 33~36 互不重複、不與舊碼衝突', len({quest.EXIT_NO_PROGRESS, quest.EXIT_NPC_MAP, quest.EXIT_BOSS_LOST, quest.EXIT_BOSS_UNKNOWN, 20, 21, 22, 23, 24, 25, 26, 30, 31, 32}) == 14)
+
+print('(A2) --fight 整合：BOSS 戰打完閒置後的退出碼')
+quest.event = lambda m, shot=None: print(f'   {m}')
+quest.stat = lambda: {'hp': 1, 'hpPct': 0}
+quest.read_step_no = lambda task, fn=None: STEP_FN()
+STEP_FN = lambda: 5
+BASE = ['--fight', '--step', '5', '--at', '57,47', '--task', '碧青洞窟', '--max-seconds', '60']
+s = Sim(battle_at=3.0)
+rc = run(BASE, s, real_verify=True)
+ok &= check('地圖與步驟都沒變（HP 1）→ 35，不是 0', rc == quest.EXIT_BOSS_LOST, f'rc={rc}')
+STEP_FN = lambda: 6
+s = Sim(battle_at=3.0)
+rc = run(BASE, s, real_verify=True)
+ok &= check('步驟 5 → 6 → 0', rc == 0, f'rc={rc}')
+STEP_FN = lambda: 5
+s = Sim(battle_at=3.0)
+POS_FN = lambda: (5510, 50, 17) if s.t < 1012 else (5511, 9, 9)
+rc = run(BASE, s, real_verify=True)
+ok &= check('打完換地圖 → 0', rc == 0, f'rc={rc}')
+POS_FN = lambda: (5510, 50, 17)
+s = Sim(battle_at=3.0)
+TEAM['after'] = (False, '少一人')
+rc = run(BASE, s, real_verify=True)
+ok &= check('打完隊伍少一人 → 32', rc == quest.EXIT_TEAM_LOST, f'rc={rc}')
+del TEAM['after']
+s = Sim(battle_at=3.0)
+rc = run(['--fight', '--npc', '50,18', '--at', '50,17', '--max-seconds', '60'], s, real_verify=True)
+ok &= check('--npc X,Y 沒 --task（讀不到步驟）→ 36，不回 0', rc == quest.EXIT_BOSS_UNKNOWN, f'rc={rc}')
+s = Sim(battle_at=3.0)
+STEP_FN = lambda: 5
+rc = run(['--fight', '--npc', '50,18', '--at', '50,17', '--task', '碧青洞窟', '--max-seconds', '60'], s, real_verify=True)
+ok &= check('--npc X,Y + --task：點前補讀步驟 5、打完仍 5、同圖 → 35', rc == quest.EXIT_BOSS_LOST, f'rc={rc}')
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

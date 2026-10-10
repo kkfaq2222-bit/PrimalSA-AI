@@ -79,6 +79,12 @@ EXIT_DISBAND_FAIL = 26               # --disband-after：解散沒做成（分�
 EXIT_TEAM_MISMATCH = 30              # --fight / 預設模式點 NPC 前：切換面板的隊伍標籤不是「1 隊長 + (N-1) 隊員」（有人脫隊 / 單人）→ 沒點 NPC
 EXIT_STEP_UNKNOWN = 31               # --npc auto：讀不到追蹤條目的目前步驟文字，或對不到任務表的步驟（不退回第一個戰鬥步）
 EXIT_TEAM_LOST = 32                  # 預設模式 / --fight 執行中：點追蹤 / 點 NPC 前的隊伍檢查發現有人脫隊（停下，不繼續點）
+EXIT_NO_PROGRESS = 33                # 對話無進展：同一黃問號反覆「點 → 對話 → 閒置」STALL_MAX 輪沒領獎 / 戰鬥 / 巡路 / 換圖（卡坦事故）→ 停手
+EXIT_NPC_MAP = 34                    # --fight：自己所在地圖與 NPC 所在地圖不同（--fight 不巡路）→ 沒點 NPC
+EXIT_BOSS_LOST = 35                  # --fight BOSS 戰打完閒置，但地圖與任務步驟都沒變 = 沒打贏（例：#25 龍王守衛 HP 1/551 被團滅）
+EXIT_BOSS_UNKNOWN = 36               # --fight BOSS 戰打完，判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task）→ 不回 0，請人工看畫面
+STALL_MAX = 4                        # 對話無進展幾輪就停
+STALL_MARKER_PX = 10                 # 兩次點的黃問號座標差超過這麼多 px = 不同標記（輪數歸零）
 AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰鬥鈕
 NPC_WAIT = 12.0                      # --fight 點 NPC 後最多等幾秒看有沒有反應（走過去 + 開對話框）
 LOG_FILE = ROOT / 'notes' / 'quest-events.log'
@@ -675,17 +681,24 @@ def norm_step(t: str) -> str:
     return re.sub(r'[\s·・,.:：，。、!！?？「」『』()（）\[\]【】~～\-—]+', '', t or '')
 
 
-def read_step_texts(task: str) -> list[str]:
-    """OCR 追蹤列表，找出標題 = task 那一格，回傳它「正下方那行說明」的各種讀法（Zoom 2/3/4）；標題不在目前這頁 / 讀不到 → []。
+def read_step_ocr(task: str) -> tuple[bool | None, list[str]]:
+    """OCR 追蹤列表第一頁區塊。回 (標題找到嗎, 標題下方說明行的各種讀法)；整塊什麼字都讀不到 → (None, [])（OCR 失敗，不能當「任務消失」）。
     不捲動、不點任何東西（純讀）。實測（碧青洞窟）：標題 y≈309、說明行 y≈341（差約 32px）。"""
     x, y, w, h = STEP_TEXT_BOX
     r = ps_json('ocr.ps1', x, y, w, h, '-Zooms', '2,3,4', '-Dark', 170)
     lines = sorted(r.get('lines', []), key=lambda o: o['y'])
+    if not lines:
+        return None, []
     titles = [ln for ln in lines if len(ln['text']) >= 2 and match_title(task, ln['text'])]
     if not titles:
-        return []
+        return False, []
     ty = min(t['y'] for t in titles)
-    return [ln['text'] for ln in lines if ty + 18 <= ln['y'] <= ty + 50 and len(ln['text']) >= 2]
+    return True, [ln['text'] for ln in lines if ty + 18 <= ln['y'] <= ty + 50 and len(ln['text']) >= 2]
+
+
+def read_step_texts(task: str) -> list[str]:
+    """追蹤列表上 task 那一格「正下方那行說明」的各種讀法（Zoom 2/3/4）；標題不在目前這頁 / 讀不到 → []"""
+    return read_step_ocr(task)[1]
 
 
 def skel_step(t: str) -> str:
@@ -786,12 +799,80 @@ def resolve_npc(a) -> tuple[int, int] | None:
         kind = walk.psa.classify_step(row)[0]
         event(f'--npc auto：目前步驟 = 第 {row.get("step")} 步（{why}；{kind}）→ {walk.psa.nm(n)} @ 地圖 {n.get("map")}:{n.get("x")},{n.get("y")}')
         a.npc_map = n.get('map')
+        a.step_no = row.get('step')           # 點 NPC 前的步驟（BOSS 戰後比對輸贏用）
         return (n['x'], n['y'])
     m = re.fullmatch(r'(\d+)[,:](\d+)', a.npc.strip())
     if not m:
         log('--fight 要給 --npc X,Y（NPC 地圖座標）/ --npc auto（用 --task 查），或加 --no-click（已自己點過 NPC）')
         return None
     return (int(m[1]), int(m[2]))
+
+
+GONE = 'GONE'                        # 步驟比對：任務已不在追蹤列表（= 任務完成）
+HP_LOW_PCT = 3                       # BOSS 戰後血量 < 這個 % 或 hp==1 → 輸掉的佐證（不單獨判輸贏）
+
+
+def judge_boss_result(pos0, pos1, step0, step1, hp_pct, team_ok) -> tuple[int, str]:
+    """純函式：BOSS 戰打完（閒置）後判斷輸贏，回 (退出碼, 理由)。
+    pos0 / pos1 = 點 NPC 前 / 打完後的 (地圖, x, y) 或 None；step0 / step1 = 任務步驟編號、GONE（任務已從追蹤列表消失）或 None（讀不到）；
+    hp_pct = 打完後角色血量 %（None = 讀不到；< HP_LOW_PCT 只當佐證寫進理由）；team_ok = 隊伍檢查（False 少人 / None 讀不到）。
+    順序：隊伍不完整 32 → 被打飛回村 21 → 地圖換了 0 → 步驟變了 / 任務消失 0 → 地圖與步驟都讀到且相同 35 → 其他 36（判斷不了，不回 0）"""
+    hp_note = f'；HP {hp_pct}%（偏低）' if hp_pct is not None and hp_pct < HP_LOW_PCT else ''
+    if team_ok is False:
+        return EXIT_TEAM_LOST, f'打完後隊伍不完整（有人脫隊 / 陣亡被踢）{hp_note}'
+    if pos0 and pos1 and is_knocked(pos0, pos1):
+        return EXIT_KNOCKED, f'被打飛回村 {pos0} → {pos1}'
+    if pos0 and pos1 and pos0[0] != pos1[0]:
+        return 0, f'地圖換了 {pos0[0]} → {pos1[0]}（贏）'
+    if step0 is not None and step1 is not None and step1 != step0:
+        return 0, ('任務已從追蹤列表消失（贏，任務完成）' if step1 == GONE else f'任務步驟 {step0} → {step1}（贏）')
+    if pos0 and pos1 and step0 is not None and step1 is not None:
+        return EXIT_BOSS_LOST, f'地圖 {pos1[0]} 與任務步驟 {step0} 都沒變 → 沒打贏{hp_note}'
+    miss = '、'.join(n for n, v in (('點 NPC 前座標', pos0), ('打完後座標', pos1), ('點 NPC 前步驟', step0), ('打完後步驟', step1)) if v is None)
+    return EXIT_BOSS_UNKNOWN, f'判斷不了輸贏（{miss} 讀不到；沒給 --task 或 OCR 失敗）{hp_note}'
+
+
+def read_step_no(task: str, cur_map_fn=None):
+    """OCR 追蹤列表判斷目前任務步驟編號：Task.step / GONE（標題不在第一頁區塊，但 OCR 有讀到別的字）/ None（讀不到、對不準）"""
+    if not task:
+        return None
+    g, ts, _ = walk.psa.task_steps(task)
+    if not ts:
+        return None
+    found, texts = read_step_ocr(task)
+    if found is None:
+        return None
+    if not found:
+        return GONE
+    row, _why = match_step(ts, texts, cur_map_fn)
+    return row.get('step') if row else None
+
+
+def capture_pre(a) -> dict:
+    """--fight 點 NPC 前記下座標與步驟（BOSS 戰後比對）。--npc auto / --step 已有 a.step_no；--npc X,Y 有 --task 時補讀說明行"""
+    pre = {'pos': read_pos(), 'step': getattr(a, 'step_no', None)}
+    if pre['step'] is None and a.task and not a.no_click:
+        v = read_step_no(a.task, lambda: (pre['pos'] or (None,))[0])
+        pre['step'] = None if v == GONE else v
+    return pre
+
+
+def verify_boss_result(a, pre: dict, team_size: int, team_on: bool) -> int:
+    """--fight BOSS 戰打完閒置後：重驗隊伍 / 座標 / 步驟 / 血量，依 judge_boss_result 回退出碼並寫事件 log"""
+    team_ok = check_team(team_size, 'BOSS 戰後：')[0] if team_on else None
+    pos1 = None
+    for _ in range(3):
+        if (pos1 := read_pos()):
+            break
+        time.sleep(1.0)
+    step1 = read_step_no(a.task, lambda: (pos1 or (None,))[0]) if a.task else None
+    st = stat()
+    hp_pct = st.get('hpPct')
+    if st.get('hp') == 1:
+        hp_pct = 0
+    rc, why = judge_boss_result(pre.get('pos'), pos1, pre.get('step'), step1, hp_pct, team_ok)
+    event(f'BOSS 戰結果判斷：{why} → 退出碼 {rc}（點前 {pre.get("pos")} 步驟 {pre.get("step")}；後 {pos1} 步驟 {step1}；hp {st.get("hp")} / {hp_pct}%）', None if rc == 0 else snap('boss-result'))
+    return rc
 
 
 def click_npc(npc: tuple[int, int], a) -> bool:
@@ -912,6 +993,7 @@ def _main() -> int:
     team_on = team_size > 1 and not a.solo and (bool(npc_xy) if a.fight else True)     # --solo 本來就是單人跑；--fight --no-click 不點 NPC。預設模式即使 --no-track 也會按對話框 → 一樣要驗隊伍
     last_team_check = 0.0
     pre_checked = not team_on    # 第一次點任何東西 / 按對話框之前是否已驗過隊伍（不受 TEAM_CHECK_GAP 限制）
+    boss_pre = {}                # --fight：點 NPC 前的座標 / 步驟（verify_boss_result 比對）
     dialog_esc = 0               # 啟動時對話框已開：為了開切換面板先 ESC 關掉的次數
 
     def team_gate(tag: str, code: int, force: bool = False) -> int:
@@ -940,10 +1022,12 @@ def _main() -> int:
                 return rc
             pre_checked = True
         if npc_xy:
+            boss_pre = capture_pre(a)
             if not click_npc(npc_xy, a):
-                return 4
+                return getattr(a, 'click_rc', 4)
             npc_click_t = last_action = time.time()
         elif a.no_click:
+            boss_pre = capture_pre(a)
             last_action = time.time()
             event('--fight --no-click：不點 NPC，從現在起算 BOSS 戰時間窗')
     while True:
@@ -1109,7 +1193,7 @@ def _main() -> int:
                 if idle_ok:
                     event(f'--fight BOSS 戰結束（對話 {dialogs}、獎勵 {rewards}），連續閒置 {idle_streak} 次 → 結束，不巡路')
                     print('BOSS 戰結束', flush=True)
-                    return 0
+                    return verify_boss_result(a, boss_pre, team_size, team_on)
             elif npc_click_t and not dialogs and now - npc_click_t >= NPC_WAIT:
                 shot = snap('no-npc')
                 event(f'--fight 點 NPC 後 {NPC_WAIT:.0f} 秒內沒對話框也沒戰鬥 → 沒點到 NPC（或被小怪打斷）→ 不亂走，退出碼 {EXIT_NO_NPC}', shot)
