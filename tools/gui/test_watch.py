@@ -229,7 +229,7 @@ for _ in range(20):                       # 畫面不變：每輪 0.5 s（假時
     if s != last_seq:
         writes += 1
         last_seq = s
-check('畫面不變 20 輪（約 10 s）：只有心跳寫（≈ 每 2 s 一次，不是每輪）', 3 <= writes <= 6, f'writes={writes}')
+check('畫面不變 20 輪（約 10 s）：只有心跳寫（≈ 每 1 s 一次，不是每輪）', 6 <= writes <= 11, f'writes={writes}')
 w.flush(force=True)
 check('seq 每次寫入遞增 1', watchstate.read()['seq'] == last_seq + 1)
 # 內容變化（idle → battle）馬上寫，且 transitions 有畫面時間 / 寫入時間

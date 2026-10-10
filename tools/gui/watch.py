@@ -4,7 +4,7 @@
 
 用法（WSL / Windows 原生都一樣）：
   uv run --no-project python tools/gui/watch.py              常駐（單例鎖；通常由 psa-hud 啟動，也可手動跑）
-  uv run --no-project python tools/gui/watch.py --get [--max-age 3]   印 state.json（年齡超過 / watcher 不在 → 退出碼 1）
+  uv run --no-project python tools/gui/watch.py --get [--max-age 2]   印 state.json（年齡超過 / watcher 不在 → 退出碼 1）
   uv run --no-project python tools/gui/watch.py --status     印鎖與 state 摘要
   uv run --no-project python tools/gui/watch.py --stop       要求常駐 watch 結束（寫 watch.stop 與 psa-hud.json watch=false）
   uv run --no-project python tools/gui/watch.py --unlock     刪鎖（別平台 / 已死擁有者的殘鎖；同平台擁有者還活著要加 --force）
@@ -16,7 +16,7 @@
 
 **零輸入**：只送 gui.ps1 的 pixel / info（一律帶 -NoRestore 1：遊戲最小化時不還原視窗）與 stat.ps1 / ocr.ps1（第 3 階段才用）。
 不送任何點擊、按鍵、走路、fg / max / seq / shot / waitpix；test_watch.py 用白名單與 AST 檢查把關。
-watch 不上傳 Clef，不做驗證視窗判斷（那是 quest 那一層）；state 不能當點擊依據。
+watch 不上傳截圖，不做驗證視窗判斷（那是 quest 那一層）；state 不能當點擊依據。
 """
 import argparse
 import json
@@ -42,7 +42,7 @@ import winenv  # noqa: E402
 INTERVAL = 0.5                    # 使用者決定：固定 0.5 s
 SLOW_CYCLE_MS = 300               # 中位數超過 → 判斷退回一次性（server 沒在用 / 起不來），降頻保護 CPU
 SLOW_MIN, SLOW_MAX = 2.0, 4.0     # 降頻間隔 = min(4, max(2, 3×cycle))
-HEARTBEAT = 2.0                   # 內容沒變也每 2 s 寫一次（seq +1）
+HEARTBEAT = 1.0                   # 內容沒變也每 1 s 寫一次（seq +1）
 INFO_EVERY = 5.0                  # 每 5 s 用 info 看版面
 IDLE_INTERVAL = 5.0               # 最小化 / 沒開遊戲：5 s 一次
 GUI_TIMEOUT = 3.0                 # pixel / info 單次逾時
@@ -464,7 +464,7 @@ class Watcher:
         return c[1]
 
     def flush(self, force: bool = False) -> bool:
-        """內容有變（排除時間戳等欄位）或距上次寫 ≥ 2 s（心跳）才寫；seq 每次寫 +1。回 True = 有寫。
+        """內容有變（排除時間戳等欄位）或距上次寫 ≥ 1 s（心跳）才寫；seq 每次寫 +1。回 True = 有寫。
         只在持鎖時寫（沒拿到鎖 / 鎖被換走一律不寫 state）"""
         if not self.owns_lock:
             return False
@@ -626,7 +626,7 @@ def main(argv=None) -> int:
     g.add_argument('--unlock', action='store_true')
     g.add_argument('--once', action='store_true')
     g.add_argument('--bench', type=int, metavar='N')
-    ap.add_argument('--max-age', type=float, default=3.0)
+    ap.add_argument('--max-age', type=float, default=2.0)
     ap.add_argument('--force', action='store_true')
     ap.add_argument('--dump-px', action='store_true')
     try:

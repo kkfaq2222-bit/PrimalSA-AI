@@ -16,6 +16,10 @@ export type Stat = {
 // errlog.jsonl 一筆
 export type ErrEntry = { id: number; ts: number; error: string; fix: string | null; source: string | null }
 
+// pane 頂端狀態行：主行 + 提示行（tone：red 警示 / yellow 提醒 / gray 資訊）
+export type WatchTone = 'red' | 'yellow' | 'gray'
+export type WatchLine = { main: string; hints: { text: string; tone: WatchTone }[] }
+
 declare module 'claude-code' {
   interface PluginState {
     'psa-hud': {
@@ -25,6 +29,8 @@ declare module 'claude-code' {
       errs: ErrEntry[]
       // 最近一次讀取的時間（毫秒）
       at: number
+      // 即時狀態行（讀 tools/.cache/state.json 組成；顯示文字變了才更新）
+      line: WatchLine
     }
   }
 }

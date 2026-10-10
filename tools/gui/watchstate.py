@@ -108,11 +108,11 @@ class Liveness:
         return base + (self._mono() - self.changed_at)
 
 
-def fresh(max_age: float = 3.0, path=None, wait: float = 2.5, now=time.time, sleep=time.sleep, platform: str | None = None) -> dict | None:
+def fresh(max_age: float = 2.0, path=None, wait: float = 2.5, now=time.time, sleep=time.sleep, platform: str | None = None) -> dict | None:
     """一次性讀者（watch.py --get）。同平台：state.ts 在 max_age 內且 watcher.running → 回 state。
     不同平台（不能比時鐘）：最多等 wait 秒看 (token, seq) 有沒有前進，前進了才回。
-    注意：心跳是 2 s 一次（內容沒變不寫），所以 max_age < 2.5 時，畫面穩定的情況下有可能讀到「剛好超過」而回 None；
-    max_age 預設 3 s 涵蓋一個心跳週期。"""
+    注意：心跳是 1 s 一次（內容沒變也寫），所以 max_age < 1.5 時有可能讀到「剛好超過」而回 None；
+    max_age 預設 2 s 涵蓋一個心跳週期 + 一輪讀取。"""
     st = read(path, sleep=sleep)
     if not st:
         return None
@@ -135,7 +135,7 @@ def fresh(max_age: float = 3.0, path=None, wait: float = 2.5, now=time.time, sle
 def screen(max_age: float = 1.5, after: float | None = None, path=None, now=time.time, sleep=time.sleep, platform: str | None = None) -> dict | None:
     """screen 區段。資料年齡 > max_age，或（同平台時）screen.ts < after → None。
     after = 呼叫端自己做完某個動作的時間（例：點擊後要等「之後」的畫面）；跨平台讀者拿不到可比的 ts，一律回 None。
-    注意畫面穩定時 state.ts 只每 2 s 更新（心跳），age 以 state.ts + age_s 算，所以 max_age 太小會常拿不到。"""
+    注意畫面穩定時 state.ts 只每 1 s 更新（心跳），age 以 state.ts + age_s 算，所以 max_age 太小會常拿不到。"""
     st = read(path, sleep=sleep)
     if not st or not (st.get('watcher') or {}).get('running'):
         return None
