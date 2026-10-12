@@ -61,6 +61,14 @@ def main():
         pd.click(pd.ROLE_X, pd.ROLE_Y[r - 1], wait=700, note=f'petgive 選角色 {r}')
         pd.click(*pd.TAB_DEPOT, wait=900, note='petgive 倉庫分頁')
         pd.click(*PUBLIC, wait=600, note='petgive 公共分頁')
+        for _t in range(3):                          # 公共分頁一定要真的選中（亮黃）才取，不然取到的是個人倉庫
+            c = uikit.px([(790, 96)])
+            if c and c[0][0] > 225 and c[0][1] > 190:
+                break
+            pd.click(*PUBLIC, wait=900, note='petgive 重點公共分頁')
+        else:
+            print(f'角色{r} 公共分頁切不過去 → 停手')
+            return 8
         have = sum(1 for i in range(5) if not pd.slot_empty(i))
         if a.first:
             idxs = [0] * len(wanted)                 # 永遠第 1 格：取出後後面的會往前補位

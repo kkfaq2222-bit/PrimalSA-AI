@@ -110,6 +110,28 @@ def take_label_ok() -> bool:
     return '取出' in t or ('取' in t and '存' not in t)
 
 
+TAB_PROBE = {'personal': (560, 96), 'public': (790, 96)}   # 選中的分頁是亮黃 (251,219,135)，沒選中是棕 (171,127,84)
+
+
+def tab_on(tab: str) -> bool:
+    import uikit
+    c = uikit.px([TAB_PROBE[tab]])
+    return bool(c) and c[0][0] > 225 and c[0][1] > 190
+
+
+def ensure_tab(tab: str, tries: int = 3) -> bool:
+    """倉庫的「個人 / 公共」分頁一定要真的切到才存 / 取：遊戲偶爾吃掉點擊，存入就會進錯倉庫
+    （2026-10-12 角色 5 的 3 隻貝魯卡被存進個人倉庫，公共只有 1 隻）"""
+    import time as _t
+    import petdepot1920 as pd
+    for _ in range(tries):
+        if tab_on(tab):
+            return True
+        pd.click(*TAB[tab], wait=900, note=f'petfetchimg 切到{tab}分頁')
+        _t.sleep(0.3)
+    return tab_on(tab)
+
+
 def ensure_take_ready(x: int, y: int) -> bool:
     """點選倉庫格後按鈕要變成「取出寵物」。遊戲偶爾吃掉這一下點擊（或標籤還沒更新）：
     先等一下重讀，還不是就重點該格（最多 2 次），仍不是才放棄（不會去按「存入寵物」）。"""
@@ -175,6 +197,8 @@ def goto(role: int, tab: str):
     pd.click(pd.ROLE_X, pd.ROLE_Y[role - 1], wait=1200, note=f'petfetchimg 選角色 {role}')
     pd.click(*pd.TAB_DEPOT, wait=1300, note='petfetchimg 倉庫分頁')
     pd.click(*TAB[tab], wait=900, note=f'petfetchimg {tab} 分頁')
+    if not ensure_tab(tab):
+        raise SystemExit(f'倉庫{tab}分頁切不過去 → 停手（不存、不取）')
 
 
 def close_pet_panel_if_open() -> None:
@@ -301,6 +325,9 @@ def cmd_storebar(a):
         if not a.do:
             continue
         pd.click(pd.SLOT_X, pd.SLOT_Y[sl - 1], wait=700, note=f'petfetchimg 選欄 {sl}')
+        if not ensure_tab(tab):
+            print(f'倉庫{tab}分頁不在選中狀態 → 不存、停手')
+            return 6
         pd.click(*STORE_BTN, wait=1000, note='petfetchimg 存入寵物')
         for _ in range(10):
             if pd.warn_dialog():
