@@ -239,37 +239,33 @@ def read_levels(q, qf) -> dict:
     return out
 
 
+def ge_all(levels: dict, roles, target: int) -> bool:
+    """roles 裡每個角色的讀數都有且 >= target"""
+    return all(levels.get(r) is not None and levels[r] >= target for r in roles)
+
+
 def cmd_train(a) -> int:
+    """練寵：5 人轉換設定 → 組隊 → 五兄弟洞窟 → 每輪開寵物面板（寵物分頁）逐人讀第 --slot 隻的「0轉N」，
+    5 人都 >= --target 才收；連續 --stall-min 分鐘總和沒增加就停手。（卡坦：第 4 隻 >= 25；恐龍博士：第 2 隻 >= 30）"""
     q, qf = setup_env(a.client)
     import pausegate
+    roles = [1, 2, 3, 4, 5]
     try:
-        lv0 = {}
-        import walk as _walk
-        lvn = None
-        for _ in range(4):                       # 戰鬥動畫中 HUD 會被蓋住讀不到：隔幾秒重讀，不要一次讀不到就當作還沒練
-            lvn = hud_pet_level(_walk)
-            if lvn is not None:
-                break
-            q.sleep(4)
-        if lvn is not None and lvn > a.target:
-            log(f'出戰寵物已是 {lvn} 級（> {a.target}，一定是最後一隻）→ 不用再練，直接收')
+        lv = slot_levels(q, qf, roles, slot=a.slot)
+        log(f'目前第 {a.slot} 隻等級：{lv}')
+        if ge_all(lv, roles, a.target):
+            log(f'5 人第 {a.slot} 隻都已 >= {a.target}，不用再練')
             return 0
         battle_first(q, qf)
         log('5 人第 1 隻已設出戰')
-        rc = sub('autoswap1920.py', '--client', a.client, '--roles', '1,2,3,4,5', '--level', a.target)
+        rc = sub('autoswap1920.py', '--client', a.client, '--roles', '1,2,3,4,5', '--level', a.swap_level)
         if rc != 0:
             log(f'自動轉換戰寵設定失敗（退出碼 {rc}）→ 停手')
             return 4
         ensure_team(q)
         q.grind(TRAIN_SPOT)
-        # 完成判斷改用 HUD 的「出戰寵物等級」（數字 OCR 穩）+ 換寵次數：外掛轉換級數 25 是照 1→2→3→4 順序換，
-        # 出戰寵物升到 25 就換下一隻（等級從 25 掉回個位數）；換過 3 次且現在出戰的第 4 隻 >= 25 = 4 隻都到了。
-        # 不再逐隻點進去讀（2026-10-12：一隻一隻點、20 隻全讀成 None、花 1 分鐘）。
-        import walk
         t0 = time.time()
-        swaps, prev, reset_pending = 0, None, False
-        none_streak, bar_best, finished = 0, 0, False
-        progress, t_prog = (0, 0), time.time()
+        best, t_prog = sum(v for v in lv.values() if v), time.time()
         first = True
         while True:
             pausegate.wait(log)
@@ -279,47 +275,22 @@ def cmd_train(a) -> int:
                 q.sleep(5)
                 if q.state() == 'OTHER':
                     raise q.Halt(q.EXIT_HALT, '練寵中連續看到不認得的畫面（疑似驗證視窗）：停手')
-            lv = hud_pet_level(walk)
-            if lv is None:
-                # 1 級的單一數字 OCR 讀不到（'0轉級'）：高等級之後讀不到 = 剛換上新的 1 級寵物
-                if prev is not None and prev >= 24:
-                    reset_pending = True
-                none_streak += 1
-                log('出戰寵物等級讀不到（1 級單一數字 / 戰鬥中）')
-                if none_streak >= 1:                   # HUD 讀不到：開寵物面板看第 4 隻的等級（>= 目標就全部達標）
-                    try:
-                        l4 = slot4_level(q, qf)
-                    except q.Halt:
-                        l4 = None                      # 戰鬥中開不了面板：下一輪再試
-                    log(f'寵物面板第 4 隻等級：{l4}')
-                    if l4 is not None and l4 >= a.target:
-                        finished = True
-                    elif l4 is not None and l4 > bar_best:
-                        bar_best, t_prog = l4, time.time()
-                if finished:
-                    break
-                if time.time() - t_prog >= a.stall_min * 60:
-                    raise q.Halt(q.EXIT_TIMEOUT, f'連續 {a.stall_min} 分鐘等級沒有進展：停手，請看畫面')
+            try:
+                lv = slot_levels(q, qf, roles, slot=a.slot)
+            except q.Halt:
+                log('戰鬥中開不了寵物面板，下一輪再讀')
                 continue
-            none_streak = 0
-            if prev is not None and (lv < prev - 3 or (reset_pending and lv <= prev)):
-                swaps += 1
-                log(f'偵測到換寵（{prev} → {lv} 級），第 {swaps} 次')
-            reset_pending = False
-            prev = lv
-            log(f'練寵進度（{int(time.time() - t0)} 秒）：出戰寵物 {lv} 級；已換寵 {swaps} 次')
-            if done_by_swaps(swaps, lv, a.target):
+            tot = sum(v for v in lv.values() if v)
+            log(f'練寵進度（{int(time.time() - t0)} 秒）：第 {a.slot} 隻 {lv}（目標 {a.target}）')
+            if ge_all(lv, roles, a.target):
                 break
-            now_prog = (swaps, lv)
-            if now_prog > progress:
-                progress, t_prog = now_prog, time.time()
+            if tot > best:
+                best, t_prog = tot, time.time()
             elif time.time() - t_prog >= a.stall_min * 60:
-                raise q.Halt(q.EXIT_TIMEOUT, f'連續 {a.stall_min} 分鐘出戰寵物等級沒有進展（{lv} 級、換寵 {swaps} 次）：停手，請看畫面')
-        log(f'4 隻都到 {a.target} 級（換寵 {swaps} 次、HUD 最後讀到 {prev} 級）；再多練 {SETTLE_S} 秒讓其他角色跟上')
-        q.sleep(SETTLE_S)
+                raise q.Halt(q.EXIT_TIMEOUT, f'連續 {a.stall_min} 分鐘等級總和沒有增加（{lv}）：停手，請看畫面')
+        log(f'5 人第 {a.slot} 隻都 >= {a.target} 級，關原地遇敵')
         q.set_ass(encounter=False)
         q.wait_battle_end()
-        log(f'5 人 × {SLOTS} 隻都 >= {a.target} 級，已關原地遇敵')
         return 0
     except Exception as e:
         code = getattr(e, 'code', 99)
@@ -383,12 +354,49 @@ def cmd_check(a) -> int:
     return 0
 
 
+def cmd_dino_handin(a) -> int:
+    """恐龍博士交任務（任務 2016；使用者 2026-10-12）：全部改休息 → 5 人組隊 → 到研究所接任務（哈魯）→ 隊長解散 →
+    5 人逐一切換角色、各自交步 1（魯尼帖斯）+ 步 2（貝魯卡）（dino1920.py：選擇視窗依名字點卡片）。"""
+    q, qf = setup_env(a.client)
+    try:
+        rc = sub('petrest1920.py', '--client', a.client, '--roles', '1,2,3,4,5')
+        if rc != 0:
+            log(f'改休息失敗（退出碼 {rc}）→ 停手')
+            return 4
+        ensure_team(q)
+        if qf.find_track_row('恐龍博士', scroll=False, reveal=False) is None:
+            log('=== 接「恐龍博士」（5 人組隊，傳到研究所跟哈魯對話）===')
+            qf.accept_top('恐龍博士')
+        else:
+            log('追蹤欄已有恐龍博士，不重接')
+        log('=== 隊長解散，5 人逐一交 ===')
+        q.disband()
+        for r in (1, 2, 3, 4, 5):
+            rc = sub('switch1920.py', '--client', a.client, '--role', r)
+            if rc != 0:
+                log(f'切到角色 {r} 失敗（退出碼 {rc}）→ 停手')
+                return 4
+            rc = sub('dino1920.py', '--client', a.client, '--track', 2)
+            if rc != 0:
+                log(f'角色 {r} 交恐龍博士沒成功（退出碼 {rc}）→ 停手（前面角色已交完的不會重交）')
+                return 5
+            log(f'角色 {r} 步 1 + 步 2 已交')
+        sub('switch1920.py', '--client', a.client, '--role', 1)
+        return 0
+    except Exception as e:
+        code = getattr(e, 'code', 99)
+        log(f'停手（退出碼 {code}）：{getattr(e, "msg", e)}')
+        return code if isinstance(code, int) else 99
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='卡坦的願望：練寵 + 交任務')
     ap.add_argument('--client', default=os.environ.get('PSA_EXE_MATCH', 'kkfaq22222'))
     sp = ap.add_subparsers(dest='cmd', required=True)
     t = sp.add_parser('train')
     t.add_argument('--target', type=int, default=25)
+    t.add_argument('--slot', type=int, default=4, help='讀第幾隻的等級（卡坦 4、恐龍博士 2）')
+    t.add_argument('--swap-level', type=int, default=25, help='外掛自動轉換戰寵的轉換級數（1~4 列）')
     t.add_argument('--stall-min', type=int, default=30)
     c = sp.add_parser('check', help='只偵測第 N 隻的等級，達標就停、未達標隔幾秒再看')
     c.add_argument('--target', type=int, default=25)
@@ -396,10 +404,11 @@ def main(argv=None) -> int:
     c.add_argument('--roles', default='1,2,3,4,5', help='要檢查的角色（預設 5 人都要達標）')
     c.add_argument('--slot', type=int, default=4)
     c.add_argument('--max-min', type=int, default=0, help='最多偵測幾分鐘（0 = 不限）')
+    sp.add_parser('dino-handin', help='恐龍博士：改休息 → 組隊接任務 → 解散 → 5 人逐一交')
     h = sp.add_parser('handin')
     h.add_argument('--step', type=int, choices=[1, 2], required=True)
     a = ap.parse_args(argv)
-    return {'train': cmd_train, 'handin': cmd_handin, 'check': cmd_check}[a.cmd](a)
+    return {'train': cmd_train, 'handin': cmd_handin, 'check': cmd_check, 'dino-handin': cmd_dino_handin}[a.cmd](a)
 
 
 if __name__ == '__main__':

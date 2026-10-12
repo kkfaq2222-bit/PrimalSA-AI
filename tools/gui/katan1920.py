@@ -38,6 +38,8 @@ FAMILY = {
     'bird': {'role': 3, 'system': '火雞系', 'kinds': ['火雞', '克克洛斯', '霍爾克', '奇寶']},
 }
 ALL_ROLES = [1, 2, 3, 4, 5]
+# 恐龍博士（任務 2016；使用者 2026-10-12）：5 人最後都是 寵物 1 = 魯尼帖斯、寵物 2 = 貝魯卡，不騎乘
+DINO_PHASES = ['setup', 'r1', 'r2', 'r3', 'train', 'handin', 'cleanup']
 BAIT_SOURCE = 'public'            # 誘餌全放共用倉庫（使用者 2026-10-12）；鯊魚（角色 2）背包已有誘餌 → 不再檢查；火雞（角色 3）只在 r1 檢查 / 取一次
 PHASES = ['setup', 'r1', 'r2', 'r3', 'r4', 'final', 'train', 'handin', 'cleanup']
 
@@ -46,8 +48,58 @@ def py(script: str, *args) -> list:
     return [sys.executable, str(HERE / script), *[str(x) for x in args]]
 
 
+def plan_dino(client: str, phase: str) -> list:
+    """恐龍博士：角色 4 抓魯尼帖斯（呼拔拔系）、角色 5 抓貝魯卡（老虎系）。
+    公共倉庫每一批只放同一種，所以分給大家一律固定領第 1 格（--first），不認圖。"""
+    c = ['--client', client]
+    out = []
+    if phase == 'setup':
+        out.append(('解散隊伍（抓寵要單人）', py('q1920.py', *c, 'disband')))
+        out.append(('5 人身上的寵物全部存個人倉庫（卡坦剩的 / 朵拉比斯，寵物欄要空才抓得滿）', py('petdepot1920.py', *c, '--do')))
+        out.append(('角色 3 背包剩的寵物誘餌存回共用倉庫（火雞抓完還在它身上）', py('baitstore1920.py', *c, '--role', 3)))
+        return out
+    if phase == 'r1':
+        out.append(('角色 4 抓魯尼帖斯 ×5（不勾自動存倉庫，誘餌從共用倉庫取）',
+                    py('catchrun1920.py', *c, '--role', 4, '--system', '呼拔拔系', '--pet', '魯尼帖斯', '--n', 5, '--source', BAIT_SOURCE)))
+        out.append(('角色 4 寵物欄第 2~5 格存公共（4 隻；第 1 格留自己用）',
+                    py('petfetchimg1920.py', *c, 'storebar', '--role', 4, '--slots', '2,3,4,5', '--tab', 'public', '--do')))
+        out.append(('魯尼帖斯分給角色 1、2、3、5（各領公共第 1 格）',
+                    py('petgive1920.py', *c, '--first', '--plan', '1:魯尼帖斯;2:魯尼帖斯;3:魯尼帖斯;5:魯尼帖斯')))
+        out.append(('角色 4 剩餘寵物誘餌存回共用倉庫（給角色 5 抓貝魯卡）', py('baitstore1920.py', *c, '--role', 4)))
+        return out
+    if phase == 'r2':
+        out.append(('角色 5 抓貝魯卡（寵物欄第 1 格已是魯尼帖斯，只剩 4 格，抓滿 4 隻自己停）',
+                    py('catchrun1920.py', *c, '--role', 5, '--system', '老虎系', '--pet', '貝魯卡', '--n', 5, '--source', BAIT_SOURCE)))
+        out.append(('角色 5 寵物欄第 3~5 格存公共（3 隻；第 2 格的貝魯卡留下）',
+                    py('petfetchimg1920.py', *c, 'storebar', '--role', 5, '--slots', '3,4,5', '--tab', 'public', '--do')))
+        return out
+    if phase == 'r3':
+        out.append(('角色 5 再抓 1 隻貝魯卡（拆分誘餌只留 1 個，抓 1 隻就停）',
+                    py('catchrun1920.py', *c, '--role', 5, '--system', '老虎系', '--pet', '貝魯卡', '--n', 1, '--split', '--source', BAIT_SOURCE)))
+        out.append(('角色 5 寵物欄第 3 格存公共（公共現在 4 隻貝魯卡）',
+                    py('petfetchimg1920.py', *c, 'storebar', '--role', 5, '--slots', '3', '--tab', 'public', '--do')))
+        out.append(('貝魯卡分給角色 1、2、3、4（各領公共第 1 格）',
+                    py('petgive1920.py', *c, '--first', '--plan', '1:貝魯卡;2:貝魯卡;3:貝魯卡;4:貝魯卡')))
+        return out
+    if phase == 'train':
+        out.append(('練寵：魯尼 18 級後換貝魯卡，5 人第 2 隻 >= 30 級才收（五兄弟洞窟；30 分鐘沒進展就停手）',
+                    py('katantrain1920.py', *c, 'train', '--slot', 2, '--target', 30)))
+        return out
+    if phase == 'handin':
+        out.append(('全部改休息 → 5 人組隊到研究所接任務 → 解散 → 5 人逐一交步 1 + 步 2',
+                    py('katantrain1920.py', *c, 'dino-handin')))
+        return out
+    if phase == 'cleanup':
+        out.append(('丟棄獎勵「布克布克」（只准丟布克布克，提示窗名稱不對就取消）',
+                    py('petdelbk1920.py', *c, '--roles', '1,2,3,4,5')))
+        return out
+    raise ValueError(phase)
+
+
 def plan(client: str, family: str, phase: str) -> list:
     """純函式：回傳該階段要跑的指令清單 [(說明, argv)]。離線可測。"""
+    if family == 'dino':
+        return plan_dino(client, phase)
     f = FAMILY[family]
     catcher, system, kinds = f['role'], f['system'], f['kinds']
     others = [r for r in ALL_ROLES if r != catcher]
@@ -151,8 +203,9 @@ def run_phase(client: str, family: str, phase: str, do: bool, skip: int = 0) -> 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='卡坦的願望 抓寵 → 分寵總控')
     ap.add_argument('--client', default=os.environ.get('PSA_EXE_MATCH', 'kkfaq22222'))
-    ap.add_argument('--family', choices=list(FAMILY) + ['all'], required=True, help='shark / bird / all（鯊魚做完接火雞，一次從頭到尾）')
-    ap.add_argument('--phase', default='all', help='setup / r1 / r2 / r3 / r4 / final / all')
+    ap.add_argument('--family', choices=list(FAMILY) + ['dino', 'rest', 'all'], required=True,
+                    help='shark / bird / dino（恐龍博士）/ rest（火雞接續 → 恐龍博士：從卡坦步 2 交付到恐龍博士做完）/ all（鯊魚 → 火雞 → 恐龍博士，從頭到尾）')
+    ap.add_argument('--phase', default='all', help='setup / r1~r4 / final / train / handin / cleanup，可用逗號接多個；all = 該系別全部')
     ap.add_argument('--do', action='store_true', help='真的執行（預設只預覽指令）')
     ap.add_argument('--plan', action='store_true', help='只印計畫（同不加 --do）')
     ap.add_argument('--resume', action='store_true', help='跳過已完成的階段（all 時用）')
@@ -162,16 +215,18 @@ def main(argv=None) -> int:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     do = a.do and not a.plan
-    phases = PHASES if a.phase == 'all' else [a.phase]
-    if any(p not in PHASES for p in phases):
-        print(f'階段只能是 {PHASES} 或 all')
-        return 2
-    families = list(FAMILY) if a.family == 'all' else [a.family]
+    want = None if a.phase == 'all' else [x.strip() for x in a.phase.split(',') if x.strip()]
+    families = {'all': ['shark', 'bird', 'dino'], 'rest': ['bird', 'dino']}.get(a.family, [a.family])
     skip_left = a.skip_cmds
     for fi, fam in enumerate(families):
-        ph = list(phases)
-        if a.no_setup or fi > 0:                 # 第二個系別不用再解散 / 全存倉庫（第一個系別的 setup 已做）
-            ph = [p for p in ph if p != 'setup']
+        allp = DINO_PHASES if fam == 'dino' else PHASES
+        ph = list(allp) if want is None else [p for p in want if p in allp]
+        if want is not None and not ph and fam == families[-1] and not any(p in allp for p in want):
+            print(f'階段只能是 {allp} 或 all')
+            return 2
+        # setup（解散 + 全存倉庫）只在整套的第一個系別做；恐龍博士有自己的 setup（解散 + 存卡坦剩的 + 誘餌存回公共）一定要做
+        if fam in ('shark', 'bird') and (a.no_setup or fi > 0 or a.family == 'rest'):
+            ph = [p for p in ph if p != 'setup']     # rest = 鯊魚 / 火雞抓寵早就做完：絕不能再「全存倉庫」把要交的任務寵存走
         done = load_done(a.client, fam) if a.resume else []
         for p in ph:
             if p in done and a.resume:
