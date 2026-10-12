@@ -70,7 +70,7 @@ def plan(client: str, family: str, phase: str) -> list:
         out.append(('寵物欄第 1 格存個人倉庫（1 隻）', py('petfetchimg1920.py', *c, 'storebar', '--role', catcher, '--slots', '1', '--tab', 'personal', '--do')))
         if family == 'shark':
             out.append((f'{k} 分給角色 ' + '、'.join(map(str, others)),
-                        py('petgive1920.py', *c, '--plan', ';'.join(f'{r}:{k}' for r in others))))
+                        py('petgive1920.py', *c, '--first', '--plan', ';'.join(f'{r}:{k}' for r in others))))
         else:
             for r in others:
                 out.append((f'角色 {r} 從公共領「{k}」', py('petfetchimg1920.py', *c, 'fetch', '--role', r, '--tab', 'public', '--names', k, '--do')))
@@ -82,7 +82,7 @@ def plan(client: str, family: str, phase: str) -> list:
         out.append(('寵物欄第 2~5 格存公共（第 1 格留著）', py('petfetchimg1920.py', *c, 'storebar', '--role', catcher, '--slots', '2,3,4,5', '--tab', 'public', '--do')))
         if family == 'shark':
             out.append((f'{k} 分給角色 ' + '、'.join(map(str, others)),
-                        py('petgive1920.py', *c, '--plan', ';'.join(f'{r}:{k}' for r in others))))
+                        py('petgive1920.py', *c, '--first', '--plan', ';'.join(f'{r}:{k}' for r in others))))
         else:
             out.append((f'學「{k}」樣板（公共倉庫現在只有這 4 隻）', py('petfetchimg1920.py', *c, 'learn', '--open-role', catcher, '--tab', 'public', '--slot', 1, '--name', k)))
             for r in others:

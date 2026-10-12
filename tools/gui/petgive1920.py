@@ -37,6 +37,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--client', default='kkfaq11111')
     ap.add_argument('--plan', required=True)
+    ap.add_argument('--first', action='store_true',
+                    help='公共倉庫只放同一種（katan 每輪的 4 隻）時：每次都取第 1 格（取出後後面會補位），不用顏色比對')
     a = ap.parse_args()
     plan = {}
     for part in a.plan.split(';'):
@@ -52,15 +54,18 @@ def main():
         pd.click(*pd.TAB_DEPOT, wait=900, note='petgive 倉庫分頁')
         pd.click(*PUBLIC, wait=600, note='petgive 公共分頁')
         have = sum(1 for i in range(5) if not pd.slot_empty(i))
-        grid = read_public(uikit)
-        if grid is None:
-            print('讀不到倉庫像素 → 停手'); return 4
-        idxs = []
-        for sp in wanted:
-            cand = [i for i, (c0, c1) in grid.items() if i not in idxs and PRED[sp](c0, c1)]
-            if not cand:
-                print(f'角色{r} 要 {sp}，公共倉庫沒有（顏色比對）→ 停手'); return 5
-            idxs.append(cand[-1])
+        if a.first:
+            idxs = [0] * len(wanted)                 # 永遠第 1 格：取出後後面的會往前補位
+        else:
+            grid = read_public(uikit)
+            if grid is None:
+                print('讀不到倉庫像素 → 停手'); return 4
+            idxs = []
+            for sp in wanted:
+                cand = [i for i, (c0, c1) in grid.items() if i not in idxs and PRED[sp](c0, c1)]
+                if not cand:
+                    print(f'角色{r} 要 {sp}，公共倉庫沒有（顏色比對）→ 停手'); return 5
+                idxs.append(cand[-1])
         for i in sorted(idxs, reverse=True):
             pd.click(XS[i % 5], YS[i // 5], wait=450, note=f'petgive 角色{r} 取第 {i + 1} 格')
             pd.click(*TAKE_BTN, wait=700, note='petgive 取出寵物')
