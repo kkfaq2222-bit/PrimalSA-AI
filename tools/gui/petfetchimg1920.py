@@ -163,6 +163,17 @@ def goto(role: int, tab: str):
     pd.click(*TAB[tab], wait=900, note=f'petfetchimg {tab} 分頁')
 
 
+def close_pet_panel_if_open() -> None:
+    try:
+        import petdepot1920 as pd
+        for _ in range(3):
+            if not pd.panel_open():
+                return
+            pd.click(*pd.CLOSE_X, wait=700, note='petfetchimg 關寵物面板')
+    except Exception:
+        pass
+
+
 def maybe_open(a):
     """--open-role N：先開寵物面板、選角色 N、倉庫、--tab 分頁（沒給就用目前畫面）"""
     if getattr(a, 'open_role', 0):
@@ -453,7 +464,11 @@ def main(argv=None):
     winenv.enable_server()
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    return {'scan': cmd_scan, 'names': cmd_names, 'snap': cmd_snap, 'learn': cmd_learn, 'fetch': cmd_fetch, 'move': cmd_move, 'storebar': cmd_storebar}[a.cmd](a)
+    fn = {'scan': cmd_scan, 'names': cmd_names, 'snap': cmd_snap, 'learn': cmd_learn, 'fetch': cmd_fetch, 'move': cmd_move, 'storebar': cmd_storebar}[a.cmd]
+    try:
+        return fn(a)
+    finally:
+        close_pet_panel_if_open()      # 不留著面板（會蓋住外掛按鈕，後面的抓寵就打不開外掛面板；2026-10-12 火雞 r3）
 
 
 if __name__ == '__main__':

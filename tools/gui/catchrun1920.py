@@ -194,7 +194,18 @@ def main(argv=None) -> int:
             gui('key', '{ESC}', note='catchrun 關浮窗'); sleep(0.5)   # 浮窗還開著（找誘餌 / 取出後）
             click(*CLOSE_BAG, wait=700, note='catchrun 關背包')
 
-    # 4. 外掛
+    # 4. 外掛（前一個指令可能留著寵物面板 / 背包，會蓋住外掛鈕：先關掉）
+    try:
+        import petdepot1920 as _pd
+        for _ in range(3):
+            if _pd.panel_open():
+                click(*_pd.CLOSE_X, wait=700, note='catchrun 關寵物面板')
+        if bag_open():
+            click(*CLOSE_BAG, wait=600, note='catchrun 關背包')
+    except SystemExit:
+        raise
+    except Exception:
+        pass
     if not ass.open_panel():
         print('外掛面板打不開')
         return 3
