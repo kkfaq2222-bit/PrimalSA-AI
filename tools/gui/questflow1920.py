@@ -527,7 +527,7 @@ def pick_start_step(state: dict, name: str, all_steps: list, fresh: bool, given)
 
 
 def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potion: bool = True,
-              dry: bool = False, from_step=None, _retry: int = 0) -> None:
+              dry: bool = False, from_step=None, _retry: int = 0, to_step=None) -> None:
     key = key or name
     led = q.ledger_load().get(q.CLIENT, {}).get(name, {})
     if led.get('status') == 'done':
@@ -572,6 +572,8 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
         log('提醒：沒有 --from-step，起始步由追蹤欄副標題 OCR 猜測（不一定準）')
         find_track_row(name)                     # 只有要猜起始步才需要把副標題拉到看得見
     _, steps = q.plan_steps(key, from_step)
+    if to_step is not None:                      # 只做到第 to_step 步（卡坦的願望步 1 / 步 2 分兩次交）
+        steps = [s for s in steps if s[0] <= to_step]
     if stop_after_last_boss:
         steps = [s for s in steps if s[0] <= last]
     log(f'「{disp}」追蹤欄第 {row} 條；起始步來源：{src or "預設（第 1 步）"}；要做 {len(steps)} 步：' + ' '.join(f'{st}:{k}' for st, k, _, _ in steps))
@@ -621,6 +623,10 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
                 raise q.Halt(q.EXIT_BOSS, f'「{kw}」交不出去（追蹤欄仍顯示訓練）：停手，請看畫面')
         q.save_state({'quest': name, 'step': st, 'at': time.strftime('%F %T')})
     detail = f'questflow 全程組隊；{len(steps)} 步；{q.clock() - t0:.0f} 秒'
+    if to_step is not None and steps and to_step < max(s[0] for s in all_steps):
+        q.ledger_mark(name, 'doing', detail + f'；已做到第 {steps[-1][0]} 步（分段做，後面還有步驟）')
+        q.note(f'questflow「{name}」做到第 {steps[-1][0]} 步（分段）')
+        return
     if not stop_after_last_boss:
         still = find_track_row(name, scroll=False, reveal=False)
         if still is not None:                    # 剛做完可能還在演出：隔幾秒再讀一次

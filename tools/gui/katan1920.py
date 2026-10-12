@@ -8,7 +8,10 @@ r"""卡坦的願望（任務 2019）抓寵 → 分寵流程總控（1920×1017�
   第 4 輪不勾自動存倉庫：5 隻留在寵物欄，第 1 格留著、第 2~5 格存公共分出去；最後從個人倉庫領回前 3 輪各 1 隻（名稱是數字）。
   一開始先解散隊伍、把 5 人身上的寵物全部存個人倉庫（含騎寵，不領回）。
 
-階段（--phase）：setup（解散 + 全存個人倉庫）、r1 r2 r3 r4、final（抓寵者領回自己的 3 隻）。--phase all = 依序全部。
+階段（--phase）：setup（解散 + 全存個人倉庫）、r1 r2 r3 r4、final（抓寵者領回自己的 3 隻）、
+  train（5 人轉換 25 級 → 組隊 → 五兄弟洞窟練，30 分鐘總等級沒增加就停手）、handin（全部休息 → 組隊 → 交卡坦步 1 / 步 2）、
+  cleanup（鯊魚：刪修寶；火雞：朵拉比斯存個人倉庫）。--phase all = 依序全部。
+一整套（鯊魚 → 火雞）：先 --family shark --phase all --do --resume；做完再 --family bird --phase all --no-setup --do --resume。
 用法（專案根目錄）：
   uv run --no-project python tools/gui/katan1920.py --client kkfaq22222 --family shark --plan            # 只印每個階段要跑的指令
   uv run --no-project python tools/gui/katan1920.py --client kkfaq22222 --family shark --phase setup --do
@@ -16,7 +19,6 @@ r"""卡坦的願望（任務 2019）抓寵 → 分寵流程總控（1920×1017�
   uv run --no-project python tools/gui/katan1920.py --client kkfaq22222 --family shark --phase all --do --resume   # 從上次中斷的階段接續
 --family bird（火雞系）沒有校準過的顏色判斷，改用頭像樣板：每輪抓完先 learn --new 學這一種再搬 / 分。
 每個階段都是「一串指令」，任何一個指令退出碼不是 0 就停手並通知（notifyhalt）；暫停檔（pausegate）在指令之間生效。
-做完分寵之後：練到 25 級（autoswap1920 / 五兄弟洞窟）→ 組隊 → 卡坦（薩伊那斯 100:230,180）交任務；那一段這支不處理。
 """
 import argparse
 import json
@@ -37,7 +39,7 @@ FAMILY = {
 }
 ALL_ROLES = [1, 2, 3, 4, 5]
 BAIT_SOURCE = 'public'            # 誘餌全放共用倉庫（使用者 2026-10-12）
-PHASES = ['setup', 'r1', 'r2', 'r3', 'r4', 'final']
+PHASES = ['setup', 'r1', 'r2', 'r3', 'r4', 'final', 'train', 'handin', 'cleanup']
 
 
 def py(script: str, *args) -> list:
@@ -81,6 +83,19 @@ def plan(client: str, family: str, phase: str) -> list:
             out.append((f'學「{k}」樣板（公共倉庫現在只有這 4 隻）', py('petfetchimg1920.py', *c, 'learn', '--open-role', catcher, '--tab', 'public', '--slot', 1, '--name', k)))
             for r in others:
                 out.append((f'角色 {r} 從公共領「{k}」', py('petfetchimg1920.py', *c, 'fetch', '--role', r, '--tab', 'public', '--names', k, '--do')))
+        return out
+    if phase == 'train':
+        out.append(('練寵到 25 級（五兄弟洞窟；30 分鐘沒進展就停手）', py('katantrain1920.py', *c, 'train')))
+        return out
+    if phase == 'handin':
+        step = 1 if family == 'shark' else 2
+        out.append((f'全部改休息 → 組隊 → 交卡坦的願望步 {step}', py('katantrain1920.py', *c, 'handin', '--step', step)))
+        return out
+    if phase == 'cleanup':
+        if family == 'shark':
+            out.append(('刪除步 1 獎勵「修寶」（只准丟修寶）', py('petdelxb1920.py', *c, '--roles', '1,2,3,4,5')))
+        else:
+            out.append(('步 2 獎勵（朵拉比斯）存個人倉庫', py('petdepot1920.py', *c, '--do')))
         return out
     if phase == 'final':
         out.append((f'角色 {catcher} 從個人倉庫領回前 3 輪各 1 隻（名稱是數字）',

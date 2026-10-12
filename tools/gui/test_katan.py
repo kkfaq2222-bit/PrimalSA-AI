@@ -37,7 +37,7 @@ check('r4 存的是 2~5 格', '--slots 2,3,4,5' in joined('r4')[1], True)
 check('r4 第 4 種是邦恩吉', '邦恩吉' in joined('r4')[0], True)
 check('final：領 3 隻數字名稱', '--numeric 3' in joined('final')[0] and '--role 2' in joined('final')[0], True)
 check('火雞系抓寵者是角色 3', '--role 3' in joined('r1', 'bird')[0] and '火雞系' in joined('r1', 'bird')[0], True)
-check('火雞 r1 先學樣板再搬再分', [next(x for x in a if x in ('learn', 'move', 'fetch')) for _, a in k.plan('C', 'bird', 'r1')][1:3],
+check('火雞 r1 先學樣板再搬再分', [next((x for x in a if x in ('learn', 'move', 'fetch')), None) for _, a in k.plan('C', 'bird', 'r1')][1:3],
       ['learn', 'move'])
 check('火雞 r1 分給 1、2、4、5', sum('fetch' in j and '--tab public' in j for j in joined('r1', 'bird')), 4)
 check('火雞 r4 分給 4 個角色', sum('fetch' in j for j in joined('r4', 'bird')), 4)
