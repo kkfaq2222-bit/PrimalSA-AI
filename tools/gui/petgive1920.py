@@ -80,7 +80,15 @@ def main():
         for attempt in range(attempts):
             for i in sorted(idxs, reverse=True):
                 pd.click(XS[i % 5], YS[i // 5], wait=450, note=f'petgive 角色{r} 取第 {i + 1} 格')
-                if not take_label_ok(uikit):
+                ready = False
+                for _k in range(3):                  # 遊戲偶爾吃掉這一下點擊：等一下重讀，不對就重點該格（最多 2 次）
+                    time.sleep(0.4)
+                    if take_label_ok(uikit):
+                        ready = True
+                        break
+                    if _k < 2:
+                        pd.click(XS[i % 5], YS[i // 5], wait=800, note=f'petgive 重點倉庫第 {i + 1} 格')
+                if not ready:
                     print(f'角色{r} 按鈕不是「取出寵物」（倉庫第 {i + 1} 格是空的？）→ 不按、停手')
                     return 7
                 pd.click(*TAKE_BTN, wait=700, note='petgive 取出寵物')
