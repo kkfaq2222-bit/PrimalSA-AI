@@ -14,7 +14,7 @@ set PSA_EXE_MATCH=%C%
 set PSA_GUI_SERVER=1
 if "%PSA_CLICK_HOLD_MS%"=="" set PSA_CLICK_HOLD_MS=120
 set PYTHONIOENCODING=utf-8
-cd /d "%~dp0..\.."
+cd /d "%HERE%..\.."
 uv run --no-project python tools/gui/katan1920.py --client %C% --family %F% %1 %2 %3 %4 %5 %6 %7 %8 %9
 echo.
 echo katan exit code %ERRORLEVEL%
