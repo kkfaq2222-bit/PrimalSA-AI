@@ -26,13 +26,17 @@ check('parse 兩者一致', lw.parse_level({'level': '0轉112級', 'petLevel': '
 check('parse 只讀到隊長', lw.parse_level({'level': '0轉45級'}), (0, 45))
 check('parse 都讀不到', lw.parse_level({'level': None, 'petLevel': ''}), None)
 check('parse 轉生數', lw.parse_level({'level': '2轉30級', 'petLevel': '2轉30級'}), (2, 30))
+check('parse 轉字讀壞', lw.parse_level({'level': '嘨117', 'petLevel': None}), (-1, 117))
+check('parse 轉字讀壞取較高等級', lw.parse_level({'level': '嘨117', 'petLevel': '0轉112級'}), (-1, 117))
+check('parse 單位數不算', lw.parse_level({'level': '7', 'petLevel': None}), None)
 
 # first_read_ok：兩個等級都要讀到、同轉生數、差 ≤ 2
 check('first 兩者一致', lw.first_read_ok({'level': '0轉112級', 'petLevel': '0轉112級'}), True)
 check('first 差 2 可', lw.first_read_ok({'level': '0轉112級', 'petLevel': '0轉110級'}), True)
 check('first 差 3 不可', lw.first_read_ok({'level': '0轉112級', 'petLevel': '0轉109級'}), False)
 check('first 漏位數不可（2 vs 112）', lw.first_read_ok({'level': '0轉2級', 'petLevel': '0轉112級'}), False)
-check('first 只讀到一個不可', lw.first_read_ok({'level': '0轉112級'}), False)
+check('first 只讀到隊長可（寵物欄讀不到）', lw.first_read_ok({'level': '1轉1級'}), True)
+check('first 只讀到寵物不可', lw.first_read_ok({'petLevel': '0轉112級'}), False)
 check('first 轉生數不同不可', lw.first_read_ok({'level': '1轉30級', 'petLevel': '0轉30級'}), False)
 
 # target_for：真門檻（REAL_STAGES）

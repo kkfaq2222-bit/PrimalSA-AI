@@ -10,7 +10,7 @@
   uv run --no-project python tools/gui/ass.py pet DKBO first off normal 攻擊   # 首次動作取消勾選（值不動）、一般動作 = 攻擊
 角色：DKBO / DKBO2 / DKBO3 / DKBO4 / DKBO5（真名字母 O；DKB0… 同義；不分大小寫）。
 項目：原地遇敵(encounter) / 快速戰鬥(fast) / 自動戰鬥(auto) / 夥伴助戰(partner)。
-（2026-10-10 起不再支援外掛「自動逃跑」：使用者要求外掛自動逃跑一律不用、不看那個勾選框；逃跑改由 quest.py 手動按戰鬥畫面逃跑鈕。）
+（2026-10-10 起 2880 版面不支援外掛「自動逃跑」；2026-10-11 使用者改要求：自動巡路遇野怪且路途遠的任務用單人 + 外掛自動逃跑，1920×1017 版面已加（項目名「自動逃跑」/ escape）。）
 流程：開外掛 → 驗證面板真的開了 → 選角色並驗證 → pixel 讀四項 → （set：只點與目標不同的，再讀確認）→ 關面板（X 1318,90）並驗證。
 安全：每次點面板內座標前都先 pixel 驗證面板還開著（面板沒開時點這些座標會穿透到地面讓角色走掉）；
       主畫面看不到外掛鈕（對話 / 載入中）或被擋 → 等待重試，最多 OPEN_TIMEOUT 秒，失敗回報、不亂點。
@@ -43,7 +43,7 @@ HUD_PROBE = (1300, 745, 254, 0, 0)   # 主畫面外掛鈕紅字（同 quest.SIG_
 ROLES = {'DKBO': (137, 151), 'DKBO2': (298, 151), 'DKBO3': (461, 151), 'DKBO4': (137, 204), 'DKBO5': (298, 204)}   # 真名字母 O；DKB0 同義（norm_role 容錯）
 # 左欄戰鬥設定勾選框（框心）；每個角色各自設定
 ITEMS = {'原地遇敵': (146, 343), '快速戰鬥': (484, 343), '自動戰鬥': (146, 400), '夥伴助戰': (315, 400)}
-ALIASES = {'encounter': '原地遇敵', 'fast': '快速戰鬥', 'quick': '快速戰鬥',
+ALIASES = {'escape': '自動逃跑', 'flee': '自動逃跑', 'encounter': '原地遇敵', 'fast': '快速戰鬥', 'quick': '快速戰鬥',
            'auto': '自動戰鬥', 'partner': '夥伴助戰', 'assist': '夥伴助戰'}
 
 # 面板開著的特徵：右上橘 X + 五個角色圓鈕（選中 0,0,0、沒選中 197,227,255；有 EXP 橫幅可能蓋住 DKB03，容許 1 個不符）
@@ -52,6 +52,19 @@ AVATAR_SEL = (0, 0, 0)
 AVATAR_OFF = (197, 227, 255)
 TOL = 25
 UNCHECKED = (255, 255, 255)      # 框心純白 = 未勾；其他 = 已勾
+
+# 1920×1017 版面（截圖 960×508；2026-10-11 在 22222 實機量：只讀像素，沒改任何設定）。
+# 勾選規則同 2880：框心純白 255,255,255 = 未勾，其他值 = 已勾；角色圓鈕選中 0,0,0、沒選中 197,227,255。
+# 戰寵動作（pet）的 1920 座標沒量，pet 指令在 1920 版面仍回 EXIT_LAYOUT。
+LAYOUT = layout.resolve()
+if LAYOUT == '1920x1017':
+    ASS_BTN = (872, 462)
+    CLOSE_BTN = (855, 50)
+    HUD_PROBE = (874, 455, 255, 0, 0)
+    ROLES = {'DKBO': (113, 89), 'DKBO2': (214, 89), 'DKBO3': (317, 89), 'DKBO4': (113, 122), 'DKBO5': (214, 122)}
+    # 自動逃跑（226,208）：2026-10-11 使用者要求「自動巡路會遇野怪、路途遠的任務」改單人 + 外掛自動逃跑，只在 1920 版面支援（2880 座標沒量）
+    ITEMS = {'原地遇敵': (120, 208), '自動逃跑': (226, 208), '快速戰鬥': (333, 208), '自動戰鬥': (120, 243), '夥伴助戰': (226, 243)}
+    X_SIG = (855, 50, 195, 127, 8)
 
 OPEN_TIMEOUT = 40.0              # 等外掛面板能開的最長秒數（戰鬥 / 載入中 / 對話會擋）
 OPEN_RETRY_GAP = 1.5
@@ -101,6 +114,8 @@ def in_battle() -> str | None:
     if battleguard.locked():
         return 'lock'
     if panel_open():
+        return None
+    if LAYOUT != '2880x1659':          # battleguard 的戰鬥畫面像素只量過 2880；其他版面只看鎖檔（戰鬥中外掛面板本來就打不開）
         return None
     return 'screen' if battleguard.screen_in_battle(gui) else None
 
@@ -167,8 +182,13 @@ def select_role(role: str) -> bool:
     if not panel_open():
         return False
     x, y = ROLES[role]
-    gui('seq', f'click {x} {y}; wait 600', note=f'ass.py 選角色 {role}')
-    return selected_role() == role
+    for _ in range(3):             # 訊息橫幅會吃掉點擊 → 沒切過去就再點，最多 3 次
+        gui('seq', f'click {x} {y}; wait 600', note=f'ass.py 選角色 {role}')
+        if selected_role() == role:
+            return True
+        if not panel_open():
+            return False
+    return False
 
 
 def read_checks(items=None) -> dict | None:
@@ -341,6 +361,113 @@ def set_pet(role: str, want: dict, no_wait: bool = False):
     return _pet_session(role, want, no_wait)
 
 
+def _apply(role: str, changes: dict | None):
+    """面板已開、角色已選好：讀 → 補點（只點與目標不同的）→ 讀回確認。回 (退出碼, 狀態 dict 或 None, 訊息)。同 _session 的主體"""
+    states = read_checks()
+    if states is None:
+        return EXIT_PANEL_LOST, None, '讀不到勾選框像素'
+    for item, want in (changes or {}).items():
+        if states[item] == want:
+            continue
+        if not panel_open() or selected_role() != role:
+            return EXIT_PANEL_LOST, states, f'點 {item} 前面板已不在 / 角色不對 → 不點'
+        x, y = ITEMS[item]
+        for attempt in range(2):   # 橫幅擋住時第一下可能被吃：沒變就補點一次（之後仍沒變才回報）
+            gui('seq', f'click {x} {y}; wait 300', note=f'ass.py {role} {item} → {"開" if want else "關"}')
+            done = False
+            for w in (CONFIRM_WAIT, CONFIRM_WAIT2):
+                sleep(w)
+                if not panel_open():
+                    return EXIT_PANEL_LOST, states, f'點 {item} 後面板消失'
+                now = read_checks([item])
+                if now and now[item] == want:
+                    done = True
+                    break
+            if done:
+                break
+            now = read_checks([item])
+            if now and now[item] == states[item] and attempt == 0:
+                continue           # 完全沒變 = 點擊被吃掉，補點一次
+            break                  # 變成別的值（切換式）不再補點，避免切回去
+        else:
+            pass
+        now = read_checks([item])
+        if not now or now[item] != want:
+            return EXIT_CONFIRM, read_checks(), f'{item} 點了仍是 {"開" if (read_checks() or states)[item] else "關"}（可能是地圖禁止快速戰鬥等）'
+        states = read_checks() or states
+        log(f'ass：{role} {item} → {"開" if want else "關"}（已確認）')
+    return EXIT_OK, states, ''
+
+
+def all_session(changes: dict | None, no_wait: bool = False):
+    """開一次面板，5 個角色逐一讀（有 changes 就補點），最後選回隊長並關面板。回 (退出碼, {角色: 狀態 / None}, [訊息])"""
+    ok_, why = wait_not_battle(no_wait)
+    if not ok_:
+        return EXIT_IN_BATTLE, {}, [why]
+    if not open_panel():
+        return EXIT_NO_PANEL, {}, [f'外掛面板 {OPEN_TIMEOUT:.0f} 秒內打不開；沒點任何面板內座標']
+    res, msgs, rc = {}, [], EXIT_OK
+    try:
+        for role in ROLES:
+            if not select_role(role):
+                res[role] = None
+                msgs.append(f'{role}：選不到角色（圓鈕沒變選中，或面板中途消失）')
+                rc = rc or EXIT_NO_ROLE
+                if not panel_open():
+                    break
+                continue
+            r, st, m = _apply(role, changes)
+            res[role] = st
+            if r:
+                msgs.append(f'{role}：{m}')
+                rc = rc or r
+                if r == EXIT_PANEL_LOST:
+                    break
+        if panel_open():
+            select_role(next(iter(ROLES)))      # 選回隊長（第 1 個）
+        return rc, res, msgs
+    finally:
+        if not close_panel():
+            print('警告：外掛面板沒關成功（請 shot 看畫面，手動點關閉鈕）', flush=True)
+
+
+def _main_all(argv) -> int:
+    ap = argparse.ArgumentParser(prog='ass.py check-all|fix-all', description='5 人一次讀 / 補勾 快速戰鬥 + 自動戰鬥（一次開面板）')
+    ap.add_argument('cmd', choices=['check-all', 'fix-all'])
+    ap.add_argument('--items', nargs='*', default=['快速戰鬥', '自動戰鬥'], help='要檢查 / 補勾的項目（預設 快速戰鬥 自動戰鬥）')
+    ap.add_argument('--no-wait', action='store_true')
+    a = ap.parse_args(argv)
+    import winenv
+    winenv.enable_server()         # 常駐 PowerShell：每次 pixel / click 不用再啟動一次
+    items = []
+    for n in a.items:
+        it = norm_item(n)
+        if not it:
+            print(f'不認得的項目：{n}（{" / ".join(ITEMS)}）')
+            return EXIT_USAGE
+        items.append(it)
+    if layout.current() not in layout.SUPPORTED:
+        print('ass.py 只量過 2880×1659 / 1920×1017 版面，先跑 gui.sh max')
+        return EXIT_LAYOUT
+    changes = {i: True for i in items} if a.cmd == 'fix-all' else None
+    t0 = clock()
+    rc, res, msgs = all_session(changes, a.no_wait)
+    bad = 0
+    for role, st in res.items():
+        if st is None:
+            print(f'{role}：讀不到')
+            bad += 1
+            continue
+        miss = [i for i in items if not st.get(i)]
+        bad += bool(miss)
+        print(f'{role}：{fmt(st, items)}' + (f'  ← 未勾：{" ".join(miss)}' if miss else ''))
+    for m in msgs:
+        print(f'注意：{m}')
+    verb = '檢查' if a.cmd == 'check-all' else '補勾'
+    print(f'{verb}完成：{len(res) - bad}/{len(ROLES)} 人全部勾好（{clock() - t0:.0f} 秒，退出碼 {rc if rc else (4 if bad else 0)}）')
+    return rc if rc else (EXIT_CONFIRM if bad else EXIT_OK)
+
+
 def get_states(role: str, no_wait: bool = False):
     return _session(role, None, None, no_wait)
 
@@ -375,7 +502,7 @@ def _main_pet(role: str, rest: list, no_wait: bool = False) -> int:
                 return EXIT_USAGE
             i += 2
     if layout.current() != '2880x1659':
-        print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+        print('ass.py pet 只量過 2880×1659 版面，先跑 gui.sh max')
         return EXIT_LAYOUT
     rc, st, msg = _pet_session(role, want or None, no_wait)
     if st:
@@ -386,6 +513,9 @@ def _main_pet(role: str, rest: list, no_wait: bool = False) -> int:
 
 
 def main(argv=None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] in ('check-all', 'fix-all'):
+        return _main_all(args)
     ap = argparse.ArgumentParser(description='外掛 ASS 左欄戰鬥設定讀 / 設')
     ap.add_argument('cmd', choices=['get', 'set', 'pet'])
     ap.add_argument('role', help='DKBO / DKBO2~5（DKB0… 同義）')
@@ -417,8 +547,8 @@ def main(argv=None) -> int:
                 return EXIT_USAGE
             changes[it] = v.lower() in ('on', '開')
         items = list(changes)
-    if layout.current() != '2880x1659':
-        print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+    if layout.current() not in layout.SUPPORTED:
+        print('ass.py 只量過 2880×1659 / 1920×1017 版面，先跑 gui.sh max')
         return EXIT_LAYOUT
     rc, states, msg = _session(role, changes if a.cmd == 'set' else None, None, a.no_wait)
     if states:

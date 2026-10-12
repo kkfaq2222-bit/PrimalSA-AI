@@ -282,12 +282,25 @@ def _line(c: Card) -> str:
     return f'slot{c.slot} {c.name or "?":6} {st} {lb:6} {ck} {c.ocr or ""}'.rstrip()
 
 
+def _is_1920() -> bool:
+    import layout
+    return layout.current() == '1920x1017'
+
+
+def _read_state_any(ocr: bool = True) -> dict:
+    """依版面讀切換面板：1920×1017 走 team1920（純像素、唯讀）；其餘走原本 read_state"""
+    if _is_1920():
+        import team1920
+        return team1920.read_state()
+    return read_state(ocr)
+
+
 def status(as_json: bool = False, ocr: bool = True) -> int:
-    rc = uikit.preflight(SRC)
+    rc = 0 if _is_1920() else uikit.preflight(SRC)
     if rc:
         return rc
     t0 = time.time()
-    r = read_state(ocr)
+    r = _read_state_any(ocr)
     if not r['ok']:
         uikit.snap('team-status-fail')
         return uikit.fail(SRC, EXIT_PANEL, r['err'])
@@ -303,7 +316,7 @@ def status(as_json: bool = False, ocr: bool = True) -> int:
 
 
 def check(size: int = 5, leader=None, ocr: bool = True) -> int:
-    rc = uikit.preflight(SRC)
+    rc = 0 if _is_1920() else uikit.preflight(SRC)
     if rc:
         return rc
     if leader:
@@ -312,7 +325,7 @@ def check(size: int = 5, leader=None, ocr: bool = True) -> int:
         if not leader:
             print('team：--leader 不在白名單', file=sys.stderr)
             return uikit.EXIT_USAGE
-    r = read_state(ocr)
+    r = _read_state_any(ocr)
     if not r['ok']:
         uikit.snap('team-check-fail')
         return uikit.fail(SRC, EXIT_PANEL, r['err'])

@@ -64,7 +64,7 @@ OCR_ON = True                     # 測試可關（關了就完全不呼叫 stat
 DIGIT_ON = True                   # HUD 數值第一順位用 digitmatch 樣板比對；False = 一律 stat.ps1 OCR（測試 / 緊急退路）
 LEARN_EVERY = 60.0                # 自動補樣板（需要 stat 當標籤 + 多截一張圖）最短間隔：每分鐘最多一次
 OCR_STATES = ('idle', 'walking', 'battle')   # 只在這些畫面讀 HUD（battle 僅限非完整戰鬥；對話 / 面板 / 未知畫面可能蓋住 HUD，OCR 會讀到雜訊）
-LAYOUT_OK = '2880x1659'
+LAYOUT_OK = ('2880x1659', '1920x1017')   # screen_sigs 依 layout 自己選特徵；1920 沒量到的畫面會判 unknown（警示）
 TRANSITIONS_KEEP = 20
 STABLE_CAP = 5                    # stable_n 上限（不封頂會每輪都「內容有變」）
 
@@ -401,9 +401,9 @@ class Watcher:
         info_due = self.layout is None or self.cur in NOGAME_STATES or self.mono() - self.last_info >= INFO_EVERY
         if info_due:
             kind = self._do_info()
-            if kind == 'ok' and self.layout != LAYOUT_OK:
+            if kind == 'ok' and self.layout not in LAYOUT_OK:
                 kind = 'unsupported'
-        elif self.layout != LAYOUT_OK:
+        elif self.layout not in LAYOUT_OK:
             kind = 'unsupported'
         if kind == 'ok':
             kind, px = self._read_pixels()
@@ -795,7 +795,7 @@ class Watcher:
                         'cycle_ms': self.cur_cycle_ms, 'ocr_ms': self.ocr_ms, 'ocr_every': OCR_EVERY, 'errors': self.errors, 'owner': self.owner,
                         'hb_p95_s': round(_p95(self.hb_intervals), 2), 'cpu_pct': self.cpu_pct},
             'game': {'ts': self.screen_ts, 'running': bool(self.game_running), 'minimized': self.minimized,
-                     'layout': self.layout, 'screen_supported': self.layout == LAYOUT_OK},
+                     'layout': self.layout, 'screen_supported': self.layout in LAYOUT_OK},
             'screen': {'ts': self.screen_ts, 'age_s': round(max(0.0, now - self.screen_ts), 3), 'state': self.cur or 'starting',
                        'prev': self.prev, 'annot': self.annot,
                        'label': screen_sigs.label({'state': self.cur, **self.cls}, self.annot) if self.cur else '啟動中',

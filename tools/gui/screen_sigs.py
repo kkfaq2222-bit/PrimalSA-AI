@@ -7,6 +7,7 @@ tol 是該特徵原本使用的容差（搬移時逐一保留，不要統一）�
 classify(px) 與搬出前的 quest.read_screen 判定逐點相同（fixtures/screen_px.json 驗證）。
 """
 import battleguard
+import layout
 
 # ---- 容差原值 ----
 TOL = 40                             # quest 預設：對話框 / 獲得物品 / 切換面板 / 選擇對象 / HUD / VS 牌
@@ -61,6 +62,30 @@ NET_CHARSEL = _t([(640, 640, 197, 134, 70), (500, 250, 241, 213, 179), (1186, 19
 
 # ---- heal 特徵：主畫面「取消遇敵」紅龍頭（容差 50）----
 ENC_ON = _t([(1380, 630, 129, 6, 0), (1360, 632, 179, 12, 0)], ENC_TOL)
+
+# ---- 1920×1017 版面（截圖 960×508；2026-10-12 在 11111 實機量 / 取 heal.py 已實測的點）----
+# 沒量到的畫面（獎勵視窗、選擇對象、完整戰鬥、網路提示 / 登入 / 選角）放「永不符合」的點（顏色 -999）：
+# 寧可判成 unknown（watch 會警示請人看），也不拿 2880 座標去誤判。量到再補。
+NEVER = (0, 0, -999, -999, -999)
+LAYOUT = layout.resolve()
+if LAYOUT == '1920x1017':
+    SIG_DIALOG = _t([(620, 272, 229, 197, 159), (860, 272, 229, 197, 155), (900, 205, 107, 70, 44), (700, 215, 107, 70, 44)], TOL)
+    SIG_REWARD = _t([NEVER], TOL)
+    SIG_PANEL = _t([(698, 125, 183, 65, 41), (600, 357, 90, 113, 22)], TOL)      # 切換角色面板：右上紅 ✕ + 刷新鈕深綠
+    SIG_HUD = _t([(874, 455, 255, 0, 0)], TOL)                                    # 外掛鈕 ASS 紅字
+    SIG_LOADING = _t([NEVER], TOL)
+    SIG_SELECT = _t([NEVER], TOL)
+    SIG_BATTLE = _t(battleguard.SIG_BATTLE, TOL_BATTLE)                           # battleguard 1920：完整戰鬥未量 = NEVER
+    SIG_CMD = _t([NEVER], TOL_CMD)
+    SIG_AUTO_OFF = _t([NEVER], TOL_AUTO_OFF)
+    SIG_CLOSE_ROW = _t([NEVER], TOL_CLOSE_ROW)
+    AW_POINTS = [(x, y) for y in range(300, 331, 5) for x in range(370, 660, 8)]    # 依 2880 換算的範圍，未實測；抓不到只會判成 idle
+    NET_DIALOG = _t([NEVER], NET_TOL)
+    NET_LOGIN = _t([NEVER], NET_TOL)
+    NET_CHARSEL = _t([NEVER], NET_TOL)
+    ENC_ON = _t([(910, 386, 201, 12, 0), (920, 390, 177, 8, 0)], ENC_TOL)
+    VS_PROBE = battleguard.VS_PROBE
+    VS_COLOR = battleguard.VS_COLOR
 
 
 def sig_str(sig, neg: bool = False) -> str:
@@ -149,7 +174,7 @@ def enc_on(px: dict, base: dict):
 
 _LABELS = {'idle': '主畫面（未偵測到已知視窗）', 'walking': '自動跑路中', 'dialog': '對話框', 'reward': '獲得物品視窗',
            'select': '選擇對象面板', 'panel': '切換角色面板', 'unknown': '不認得的畫面',
-           'no_game': '遊戲未執行', 'minimized': '遊戲視窗最小化', 'error': '讀取畫面失敗', 'unsupported': '版面不支援（非 2880×1659）'}
+           'no_game': '遊戲未執行', 'minimized': '遊戲視窗最小化', 'error': '讀取畫面失敗', 'unsupported': '版面不支援（只量過 2880×1659 / 1920×1017）'}
 
 _ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面'}
 

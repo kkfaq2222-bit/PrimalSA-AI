@@ -86,8 +86,8 @@ def preflight(src: str) -> int:
     """開跑前檢查，回退出碼（0 = 可以動）：版面不是 2880x1659 → 2；netwatch halt → 直接 sys.exit(10)；
     battle.lock（quest 跑著）→ 8；畫面連 3 次（間隔 ≥5 s）unknown / 讀不到 → 9（疑似驗證視窗，停手通知使用者）"""
     import layout
-    if layout.current() != LAYOUT:
-        print(f'{src}：只量過 {LAYOUT}，目前 {layout.current()}', file=sys.stderr)
+    if layout.current() not in (LAYOUT, '1920x1017'):
+        print(f'{src}：只量過 {LAYOUT} / 1920x1017，目前 {layout.current()}', file=sys.stderr)
         return EXIT_LAYOUT
     import netwatch
     netwatch.guard(src)
@@ -138,6 +138,18 @@ TEAMPANEL = Panel('TEAMPANEL', (850, 760),
                    (1300, 400, 255, 229, 191, screen_sigs.TOL), (720, 670, 187, 73, 43, screen_sigs.TOL)],
                   (1250, 77), forbidden={'disband': rect(720, 670, 60)})
 ASS = Panel('ASS', None, None, None)                                          # 見 _ass_panel()
+
+# 1920×1017（截圖 960×508）；2026-10-12 在 11111 實機量：面板只開 / 關，沒點面板內東西。
+# 面板內座標 = 2880 值換算（x×0.628、y×0.62，中心錨定）後對照截圖確認；寵物倉庫分頁的「擴充」鈕還沒量，所以 PET 沒有 depot_expand 禁區（不要點倉庫分頁內的東西）。
+import layout as _layout  # noqa: E402
+if _layout.resolve() == '1920x1017':
+    SWITCH = Panel('SWITCH', (533, 465), screen_sigs.SIG_PANEL, (698, 125),
+                   forbidden={'login_all': rect(478, 357, 36)})
+    PET = Panel('PET', (202, 40), [(851, 63, 197, 73, 49, screen_sigs.TOL)], (851, 63),
+                forbidden={'trash': rect(473, 347, 20), 'recycle': rect(261, 378, 22), 'loyal_minus': rect(745, 141, 16),
+                           'loyal_plus': rect(823, 141, 16), 'lock': rect(473, 387, 20)})
+    TEAMPANEL = Panel('TEAMPANEL', (598, 465), [(812, 42, 197, 73, 49, screen_sigs.TOL)], (812, 42),
+                      forbidden={'disband': rect(480, 413, 40)})
 
 
 def _ass_panel() -> Panel:

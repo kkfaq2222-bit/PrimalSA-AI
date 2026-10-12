@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""等級監測換練功點（用實測的真門檻，見 ui/transfer.md），掛到 131 級才結束。
+"""等級監測換練功點（用實測的真門檻，見 ui/transfer.md），掛到 131 級後留在最高練功點繼續補血 / 檢查（--stop-at-end 才結束）。
 
   1 級 柯奧龜洞、10 級 阿布龜洞、20 級 海主人隧道、45 級 五兄弟洞窟、60 級 柯奧4F龜洞、
   80 級 波拉島、120 級 地雷區
@@ -8,6 +8,8 @@
   PSA_EXE_MATCH=gameClient uv run --no-project python tools/gui/levelwatch.py [--every 30] [--verbose] [--dry-run]
   --label：改用傳送面板標的 Lv 當門檻（比真門檻晚換點）
 
+組隊：換點前先確認 1 隊長 + 4 隊員，沒組就一鍵組隊（q1920.form_team，只支援 1920×1017；--no-team 關掉）；補血回來後再確認一次。
+外掛：換點前、補血回來後檢查 5 人快速戰鬥 + 自動戰鬥，沒勾的補勾（ass.py fix-all；--no-ass 關掉）。
 補血：隊長血條 < --hp% 或魔條 < --mp%（連續讀到 2 次）就用 heal.heal_trip 回村補血，再傳回「現在該在的練功點」（--no-heal 關掉）。
 換點流程：關原地遇敵 → 等戰鬥結束（VS 牌消失）→ 傳送 → 開原地遇敵。
 視窗被最小化會自動還原（不搶焦點）。
@@ -28,11 +30,12 @@ from pathlib import Path
 import healthcheck
 import heal
 import layout
+import pausegate
 import progress
 import winenv
 from walk import log, stat
 
-# (等級門檻, 練功點名稱) 由高到低；只認 0 轉（轉生後門檻未實測）
+# (等級門檻, 練功點名稱) 由高到低；0～5 轉都用同一組門檻（使用者 2026-10-12：每次轉生都從 1 級重練，只看人物等級）
 END_LEVEL = 131      # 到這個等級才結束監測
 STAGES = [(130, '地雷區'), (120, '波拉島'), (80, '柯奧4F龜洞'), (60, '五兄弟洞窟'),
           (30, '海主人隧道'), (20, '阿布龜洞'), (10, '柯奧龜洞')]
@@ -40,26 +43,34 @@ REAL_STAGES = [(120, '地雷區'), (80, '波拉島'), (60, '柯奧4F龜洞'), (4
                (20, '海主人隧道'), (10, '阿布龜洞'), (1, '柯奧龜洞')]
 
 
+def _one_level(v):
+    """「N轉M級」→ (N, M)。OCR 常把「1轉」讀成一個怪字、「級」漏掉（2026-10-12「1轉117級」讀成「嘨117」→ 連續 5 次讀不到而停止），
+    所以格式不完整但還剩 2~3 位數字時，轉生數記 -1（未知）、等級照讀；等級只升不降 + 連續兩次一致的保護照舊。"""
+    t = str(v or '')
+    m = re.match(r'(\d+)轉(\d+)級', t)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.fullmatch(r'\D{0,3}(\d{2,3})\D{0,2}', t.strip())
+    return (-1, int(m.group(1))) if m else None
+
+
 def parse_level(s: dict) -> tuple[int, int] | None:
     """隊長等級。隊長等級的 OCR 會漏讀位數（112 級讀成 2），所以同時看寵物等級取較大者
     （練功階段隊長和戰寵等級相同；寵物欄讀到的位數比較穩）。"""
-    def one(v):
-        m = re.match(r'(\d+)轉(\d+)級', str(v or ''))
-        return (int(m.group(1)), int(m.group(2))) if m else None
-    a, b = one(s.get('level')), one(s.get('petLevel'))
+    a, b = _one_level(s.get('level')), _one_level(s.get('petLevel'))
     if a and b:
-        return max(a, b)
+        return max(a, b, key=lambda x: x[1])
     return a or b
 
 
 def first_read_ok(s: dict) -> bool:
-    """啟動後第一次確認等級用：隊長等級與寵物等級都要讀到、同轉生數、等級差 ≤ 2。
+    """啟動後第一次確認等級用：隊長等級要讀到；寵物等級也讀到時必須同轉生數、等級差 ≤ 2（不一致不採信）。
+    寵物等級讀不到（1920 的寵物欄常讀不到）就只靠隊長等級 + 後面「連續兩次相同」的確認。
     只升不降的保護要有「已確認的等級」才擋得住；第一次若兩次都漏讀同樣位數（112 讀成 2）就會傳錯地圖。"""
-    def one(v):
-        m = re.match(r'(\d+)轉(\d+)級', str(v or ''))
-        return (int(m.group(1)), int(m.group(2))) if m else None
-    a, b = one(s.get('level')), one(s.get('petLevel'))
-    return bool(a and b and a[0] == b[0] and abs(a[1] - b[1]) <= 2)
+    a, b = _one_level(s.get('level')), _one_level(s.get('petLevel'))
+    if not a:
+        return False
+    return bool(not b or ((a[0] == b[0] or -1 in (a[0], b[0])) and abs(a[1] - b[1]) <= 2))
 
 
 def target_for(level: int, stages=None) -> str | None:
@@ -85,6 +96,36 @@ def median(xs: list[float]) -> float:
     return xs[len(xs) // 2]
 
 
+def ensure_team(dry_run: bool = False) -> bool:
+    """確認 1 隊長 + 4 隊員，不是就一鍵組隊並驗證（用 q1920.form_team；只支援 1920×1017）。
+    組隊失敗（有人離線 / 地圖禁止）→ 回 False，呼叫端停下來請人處理。"""
+    if dry_run:
+        log('（dry-run）這裡會確認隊伍，沒組好就一鍵組隊')
+        return True
+    try:
+        import q1920
+        q1920.preflight()
+        q1920.form_team()
+        return True
+    except Exception as e:      # q1920.Halt 或其他
+        log(f'組隊失敗：{getattr(e, "msg", e)}')
+        return False
+
+
+def ensure_ass(dry_run: bool = False) -> bool:
+    """5 人「快速戰鬥 + 自動戰鬥」都勾好（ass.py fix-all：沒勾的才點一次並讀回；一次開面板，約 10 秒）。
+    戰鬥中 / 面板打不開會回非 0，不當成致命錯誤（回 False，呼叫端只記 log，下次換點 / 補血再試）。"""
+    if dry_run:
+        log('（dry-run）這裡會檢查 5 人快速 + 自動戰鬥，沒勾的補勾')
+        return True
+    import subprocess
+    r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'ass.py'), 'fix-all'],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=180)
+    tail = (r.stdout or '').strip().splitlines()[-1:] or ['']
+    log(f'外掛勾選檢查：退出碼 {r.returncode}；{tail[0]}')
+    return r.returncode == 0
+
+
 def move_to(spot: str) -> None:
     sx, sy, spot_map = heal.SPOTS[spot]
     out = heal.gui('seq', heal.encounter_steps(False) + f'; waitpix 20000 {heal.SIG_NO_BATTLE} 40')
@@ -102,6 +143,8 @@ def main() -> int:
     ap.add_argument('--label', action='store_true', help='改用傳送面板標的 Lv 當門檻（預設用實測的真門檻）')
     ap.add_argument('--at', choices=list(heal.SPOTS), help='重啟時告訴腳本現在已經在這個練功點（地名折兩行的地圖 OCR 讀不到座標）')
     ap.add_argument('--no-heal', action='store_true', help='不要自動回村補血')
+    ap.add_argument('--no-ass', action='store_true', help='不要自動補勾 5 人快速戰鬥 / 自動戰鬥（預設換點前、補血回來後會檢查）')
+    ap.add_argument('--no-team', action='store_true', help='不要自動確認 / 組隊（預設換點前會確認 5 人隊伍，沒組就一鍵組隊）')
     ap.add_argument('--hp', type=int, default=40, help='隊長血條低於這個百分比就回村（預設 40）')
     ap.add_argument('--mp', type=int, default=20, help='隊長魔條低於這個百分比就回村（預設 20）')
     ap.add_argument('--note', default='', help='寫進經驗紀錄的備註，例：2倍智慧果中')
@@ -110,6 +153,7 @@ def main() -> int:
     ap.add_argument('--exp-slow', type=float, default=1.6, help='升級時間超過預期的幾倍算經驗速度異常（預設 1.6）')
     ap.add_argument('--exp-per-min', type=float, default=0, help='基準每分鐘經驗；沒給就用同一張地圖最近 5 次升級的中位數')
     ap.add_argument('--battle-max', type=int, default=120, help='連續幾秒都在戰鬥中算戰鬥過久（預設 120）')
+    ap.add_argument('--stop-at-end', action='store_true', help=f'隊長達 {END_LEVEL} 級就結束監測（預設改成留在練功點繼續補血 / 檢查）')
     ap.add_argument('--dry-run', action='store_true', help='只印會做什麼，不傳送')
     a = ap.parse_args()
     if layout.current() not in layout.SUPPORTED:
@@ -121,9 +165,11 @@ def main() -> int:
     log_path.parent.mkdir(exist_ok=True)
     if not log_path.exists():
         log_path.write_text('time,level,pos,note\n', encoding='utf-8')
-    good_level = None    # 已確認的等級（只升不降）
+    good_level = None    # 已確認的等級（只升不降；轉生數變了就重新算）
+    good_trans = None
     pending = None       # 上一次讀到、等第二次確認的等級
     bad = 0
+    reached_end = False
     stages = STAGES if a.label else REAL_STAGES
     exp_table = load_exp_table()
     track = {'level': None, 'map': None, 't0': time.time()}   # 目前等級從什麼時候開始、在哪張地圖
@@ -133,6 +179,7 @@ def main() -> int:
     busy_since: float | None = None
     log('監測中：' + '、'.join(f'{n} 級→{name}' for n, name in reversed(stages)) + '（Ctrl+C 結束）')
     while True:
+        pausegate.wait(log)                      # 每輪開頭的安全點（不會停在補血 / 換點中途）
         s = stat()
         lv = parse_level(s)
         if lv is None and '最小化' in str(s.get('error') or ''):
@@ -161,13 +208,13 @@ def main() -> int:
             trans, level = lv
             # OCR 會漏讀位數（112 讀成 2）：等級只升不降；比已確認的等級低就不信（2026-10-10 112 級被讀成 2 級傳錯地圖）
             # 另外要連續兩次讀到同一個數字才採信
-            if good_level is not None and level < good_level:
+            if good_level is not None and good_trans == trans and level < good_level:
                 log(f'讀到 {level} 級，比已確認的 {good_level} 級低，視為 OCR 誤讀，略過')
                 time.sleep(a.every)
                 continue
             if good_level is None and not first_read_ok(s):
                 # 第一次確認：隊長與寵物等級要讀到且一致才採信，否則只觀察不傳送（見 first_read_ok）
-                log(f'啟動後第一次確認：隊長 {s.get("level")} / 寵物 {s.get("petLevel")} 不一致或讀不全，先觀察不傳送')
+                log(f'啟動後第一次確認：隊長 {s.get("level")} / 寵物 {s.get("petLevel")} 讀不到隊長或兩者不一致，先觀察不傳送')
                 pending = None
                 time.sleep(a.every)
                 continue
@@ -175,7 +222,7 @@ def main() -> int:
                 pending = level
                 time.sleep(3)
                 continue
-            good_level = level
+            good_level, good_trans = level, trans
             now = time.time()
             m_map = re.match(r'(\d+):', str(s.get('pos') or ''))
             cur_map = m_map.group(1) if m_map else '?'
@@ -196,14 +243,15 @@ def main() -> int:
                 fh.write(f'{time.strftime("%Y-%m-%d %H:%M:%S")},{level},{s.get("pos") or ""},{a.note}\n')
             if a.verbose:
                 log(f'{trans}轉{level}級 地圖 {s.get("pos")}')
-            spot = target_for(level, stages) if trans == 0 else None
-            if trans != 0:
-                log(f'{trans} 轉角色，門檻未實測，停止監測')
-                return 1
-            if level >= END_LEVEL:
-                log(f'隊長已達 {level} 級，結束監測。注意：只看了隊長，5 個角色都要 {END_LEVEL} 級才算完成，請再開「切換」面板確認其他 4 人')
-                progress.add(f'levelwatch 隊長已達 {level} 級，結束監測（5 個角色要逐一確認）')
-                return 0
+            spot = target_for(level, stages)
+            if level >= END_LEVEL and not reached_end:
+                reached_end = True
+                if a.stop_at_end:
+                    log(f'隊長已達 {level} 級，結束監測。注意：只看了隊長，5 個角色都要 {END_LEVEL} 級才算完成，請再開「切換」面板確認其他 4 人')
+                    progress.add(f'levelwatch 隊長已達 {level} 級，結束監測（5 個角色要逐一確認）')
+                    return 0
+                log(f'隊長已達 {level} 級；繼續留在 {done or spot} 練功並維持補血 / 組隊 / 外掛檢查（--stop-at-end 才會結束）。5 個角色都要 {END_LEVEL} 級才算完成，請確認其他 4 人')
+                progress.add(f'levelwatch 隊長已達 {level} 級，繼續留在練功點（5 個角色要逐一確認）')
             if done is None and spot:
                 # 重啟時人已經在該練功點的地圖上就不用再傳送
                 m = re.match(r'(\d+):', str(s.get('pos') or ''))
@@ -211,6 +259,11 @@ def main() -> int:
                     done = spot
                     log(f'已在 {spot}，不重複傳送')
             if spot and spot != done:
+                if not a.no_team and not ensure_team(a.dry_run):
+                    log('隊伍沒組好，停止監測，請人工處理（有人離線 / 地圖禁止組隊？）')
+                    return 1
+                if not a.no_ass:
+                    ensure_ass(a.dry_run)
                 log(f'{level} 級，換到 {spot}')
                 if a.dry_run:
                     done = spot
@@ -237,6 +290,11 @@ def main() -> int:
                     with (log_path.parent / f'heal-log-{winenv.resolve_client() or "game"}.csv').open('a', encoding='utf-8') as hf:
                         hf.write(f'{time.strftime("%Y-%m-%d %H:%M:%S")},{level},{done},HP{s2.get("hpPct")}%/MP{s2.get("mpPct")}%\n')
                     heal.heal_trip(done)
+                    if not a.no_team and not ensure_team():
+                        log('補血回來後隊伍不完整，停止監測，請人工處理')
+                        return 1
+                    if not a.no_ass:
+                        ensure_ass()
                 except RuntimeError as e:
                     log(f'補血流程失敗：{e}；停止監測，請人工處理')
                     return 1
@@ -244,4 +302,8 @@ def main() -> int:
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    import notifyhalt
+    rc = main()
+    if rc:
+        notifyhalt.alert(f'levelwatch 退出碼 {rc}（見上方訊息）')
+    sys.exit(rc)

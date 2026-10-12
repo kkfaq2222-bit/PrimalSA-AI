@@ -5,7 +5,7 @@ description: Use when the PrimalSA (精靈王石器) party must start or resume 
 
 # 開始練功（選點 → 傳送 → 遇敵 → 5 人戰鬥設定）
 
-**REQUIRED BACKGROUND:** 先載入 psa-game-ui（工具、紅區、驗證視窗立刻停手、不花鑽石）。座標是截圖座標（客戶區 2880×1659）。`G="bash tools/gui/gui.sh"`，在專案根目錄執行。
+**REQUIRED BACKGROUND:** 先載入 psa-game-ui（工具、紅區、驗證視窗立刻停手、不花鑽石）。座標是截圖座標：**使用者的視窗是 1920×1017（優先；座標見 `../psa-game-ui/ui/layout-1920x1017.md`，走路 / 補血用 `walk.py`、`heal.py`，外掛勾選用 `ass.py`）**，下面表格的點擊座標是 2880×1659（前人版面）。`G="bash tools/gui/gui.sh"`，在專案根目錄執行。
 外掛勾選 / 傳送屬紅區：**使用者要求練功 / 掛機就等於授權**；否則先問。外掛面板細節 `../psa-game-ui/ui/ass.md`，傳送 `ui/transfer.md`。
 
 ## 1. 讀目前等級與位置

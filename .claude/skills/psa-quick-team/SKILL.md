@@ -6,7 +6,7 @@ description: Use when the PrimalSA (精靈王石器) characters need to be group
 # 快速組隊（5 角色組一隊）
 
 **REQUIRED BACKGROUND:** 先載入 psa-game-ui（工具、操作迴圈、紅區）。介面細節見 `../psa-game-ui/ui/team.md`。
-座標是截圖座標，只在客戶區 2880×1659 有效。工具：`G="bash tools/gui/gui.sh"`（在專案根目錄執行）。
+**使用者的視窗是 1920×1017（優先）**：直接跑 `PSA_EXE_MATCH=<客戶端代號> uv run --no-project python tools/gui/q1920.py team`（一鍵組隊並驗證；唯讀檢查用 `team.py check`），座標見 `../psa-game-ui/ui/layout-1920x1017.md`。下面的手動步驟座標只在客戶區 2880×1659（前人版面）有效。工具：`G="bash tools/gui/gui.sh"`（在專案根目錄執行）。
 
 ## 步驟（遊戲響應很快：用 `seq` 一次送多個動作，只在兩個檢查點截圖）
 1. **檢查點 1（看現況）**：

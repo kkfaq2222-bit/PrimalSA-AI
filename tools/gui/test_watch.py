@@ -403,11 +403,11 @@ check('遊戲回來：恢復 idle、prev 記錄', watchstate.read()['screen']['s
 check('所有呼叫都帶 -NoRestore 1', all(c[1][-2:] == ('-NoRestore', '1') for c in fk.calls))
 # 版面不支援
 w, clk, fk = make('lay')
-fk.info = (0, 'client=1920x1017 origin=(0,0) scale=2\n', '')
+fk.info = (0, 'client=1280x720 origin=(0,0) scale=2\n', '')
 n0 = len(fk.calls)
 w.cycle()
 st = watchstate.read()
-check('1920×1017：unsupported、不送 pixel', st['screen']['state'] == 'unsupported' and not st['game']['screen_supported']
+check('1280×720：unsupported、不送 pixel', st['screen']['state'] == 'unsupported' and not st['game']['screen_supported']
       and all(c[1][0] == 'info' for c in fk.calls[n0:]))
 # 逾時 → error 並保留 prev
 w, clk, fk = make('err')

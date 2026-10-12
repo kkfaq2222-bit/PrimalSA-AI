@@ -267,16 +267,18 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     "saved ${w}x${hh}"
   }
   'click' {
+    # 按下到放開的間隔（毫秒，預設 40）：環境變數 PSA_CLICK_HOLD_MS 可加長，遊戲吃不到太快的點擊時用（常駐 server 要重開才吃到新值）
+    $holdMs = 40; if ($env:PSA_CLICK_HOLD_MS -match '^\d+$') { $holdMs = [Math]::Min([int]$env:PSA_CLICK_HOLD_MS, 1000) }
     if ($A3 -eq 'right') { $dn = 0x0204; $up = 0x0205; $mk = 2; $fdn = 8; $fup = 16 } else { $dn = 0x0201; $up = 0x0202; $mk = 1; $fdn = 2; $fup = 4 }
     if ($script:Fg) {
       Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
-      [W]::mouse_event($fdn, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 60
+      [W]::mouse_event($fdn, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds ([Math]::Max(60, $holdMs))
       [W]::mouse_event($fup, 0, 0, 0, [IntPtr]::Zero)
     } else {
       try {
         BgBegin
         BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
-        BgMsg $dn $mk $A1 $A2; Start-Sleep -Milliseconds 40
+        BgMsg $dn $mk $A1 $A2; Start-Sleep -Milliseconds $holdMs
         BgMsg $up 0 $A1 $A2
       } finally { BgEnd }
     }

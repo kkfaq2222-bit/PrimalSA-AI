@@ -173,7 +173,7 @@ class Flaky(Game):
 
 g = install(Flaky())
 check('preflight unknown 2 次後恢復 → 0', uikit.preflight('t') == 0)
-layout.current = lambda: '1920x1017'
+layout.current = lambda: '1280x720'
 check('preflight 版面不符 → 2', uikit.preflight('t') == 2)
 layout.current = lambda: '2880x1659'
 battleguard.LOCK_FILE.write_text(json.dumps({'pid': __import__('os').getpid(), 'start': __import__('time').time(), 'note': 'x'}), encoding='utf-8')

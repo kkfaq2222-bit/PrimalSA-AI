@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """ass.py 模擬測試（不碰遊戲）：假 gui（pixel / seq）模擬外掛面板，驗證讀 / 設 / 確認失敗 / 面板沒開。
 用法：uv run --no-project python tools/gui/test_ass.py"""
+import os
 import re
 import sys
 from pathlib import Path
 
+os.environ.setdefault('PSA_LAYOUT', '2880x1659')     # 這份模擬資料是 2880 版面的像素（layout.DEFAULT 已改 1920）
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ass  # noqa: E402
 import battleguard  # noqa: E402
