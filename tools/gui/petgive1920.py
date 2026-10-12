@@ -66,12 +66,28 @@ def main():
                 if not cand:
                     print(f'角色{r} 要 {sp}，公共倉庫沒有（顏色比對）→ 停手'); return 5
                 idxs.append(cand[-1])
-        for i in sorted(idxs, reverse=True):
-            pd.click(XS[i % 5], YS[i // 5], wait=450, note=f'petgive 角色{r} 取第 {i + 1} 格')
-            pd.click(*TAKE_BTN, wait=700, note='petgive 取出寵物')
-        time.sleep(0.6)
-        now = sum(1 for i in range(5) if not pd.slot_empty(i))
-        pd.log(f'角色{r} 領 {wanted}（倉庫格 {sorted(idxs)}）欄內 {have}→{now}')
+        want_n = len(wanted)
+        base_have = have
+        attempts = 3 if a.first else 1               # 固定第 1 格時可安全重試（2026-10-12 角色 4 點了沒取到：3→3）
+        for attempt in range(attempts):
+            for i in sorted(idxs, reverse=True):
+                pd.click(XS[i % 5], YS[i // 5], wait=450, note=f'petgive 角色{r} 取第 {i + 1} 格')
+                pd.click(*TAKE_BTN, wait=700, note='petgive 取出寵物')
+            time.sleep(0.8)
+            other = 0 if r != 1 else 1                # 切別人再切回來才會刷新寵物欄
+            pd.click(pd.ROLE_X, pd.ROLE_Y[other], wait=700, note='petgive 先切別人（刷新）')
+            pd.click(pd.ROLE_X, pd.ROLE_Y[r - 1], wait=900, note=f'petgive 切回角色 {r}')
+            now = sum(1 for i in range(5) if not pd.slot_empty(i))
+            got = now - base_have
+            pd.log(f'角色{r} 領 {wanted}（倉庫格 {sorted(idxs)}）欄內 {base_have}→{now}' + (f'（第 {attempt + 1} 次）' if attempt else ''))
+            if got >= want_n:
+                break
+            if attempt < attempts - 1:
+                if got > 0:
+                    idxs = idxs[:want_n - got]        # 只取到一部分：只補差額
+                    base_have, want_n = now, want_n - got
+                pd.click(*pd.TAB_DEPOT, wait=900, note='petgive 重試：倉庫分頁')
+                pd.click(*PUBLIC, wait=600, note='petgive 重試：公共分頁')
         if now - have != len(wanted):
             print('數量不符 → 停手'); return 6
     pd.click(*pd.CLOSE_X, wait=500, note='petgive 關面板')
