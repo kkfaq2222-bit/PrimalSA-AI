@@ -22,6 +22,14 @@ PRED = {
 }
 
 
+def take_label_ok(uikit) -> bool:
+    """選中的是「倉庫裡的寵物」時，左下按鈕是「取出寵物」；若倉庫第 1 格是空的，選取還停在寵物欄的寵物上，
+    同一個位置的按鈕是「存入寵物」→ 點下去會把自己的寵物存進公共（2026-10-12 角色 1 的克邦凱斯因此被存走）。
+    所以按之前一定要確認按鈕文字含「取出」。"""
+    t = ''.join(uikit.ocr((300, 412, 125, 36), '-Zooms', '2,3'))
+    return '取出' in t or ('取' in t and '存' not in t)
+
+
 def read_public(uikit):
     pts = []
     for y in YS:
@@ -72,6 +80,9 @@ def main():
         for attempt in range(attempts):
             for i in sorted(idxs, reverse=True):
                 pd.click(XS[i % 5], YS[i // 5], wait=450, note=f'petgive 角色{r} 取第 {i + 1} 格')
+                if not take_label_ok(uikit):
+                    print(f'角色{r} 按鈕不是「取出寵物」（倉庫第 {i + 1} 格是空的？）→ 不按、停手')
+                    return 7
                 pd.click(*TAKE_BTN, wait=700, note='petgive 取出寵物')
             time.sleep(0.8)
             other = 0 if r != 1 else 1                # 切別人再切回來才會刷新寵物欄
