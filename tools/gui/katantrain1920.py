@@ -67,6 +67,30 @@ def hud_pet_level(walk):
     return int(m[2]) if m else None
 
 
+def bar_levels(q, qf) -> list:
+    """開寵物面板，直接讀角色 1 寵物欄 1~4 格右下角的等級數字（不點進任何寵物）→ [等級 or None ×4]。
+    2 位數以上 OCR 讀得到；1~9 級的單一數字讀不到 = None（視為還沒到 10 級）。"""
+    qf.open_pet_panel()
+    try:
+        other = 1
+        q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[other]), wait_ms=500, note='katan 刷新')
+        q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[0]), wait_ms=900, note='katan 讀寵物欄等級')
+        out = []
+        for i in range(SLOTS):
+            x, dy, w, h = LVL_BOX
+            y = qf.PET_SLOT_Y[i] + dy
+            texts = []
+            for opts in (('-Zooms', '3,4'), ('-Zooms', '3,4', '-Dark', '170'), ('-Zooms', '2,3')):
+                try:
+                    texts += list(q.uk().ocr((x, y, w, h), *opts))
+                except Exception:
+                    pass
+            out.append(parse_level(texts))
+        return out
+    finally:
+        qf.close_pet_panel()
+
+
 def battle_first(q, qf) -> None:
     """5 人各把寵物欄第 1 隻設「出戰」（取出 / 分來的寵物預設是「等待」，沒有出戰寵物就拿不到經驗，HUD 也沒有寵物等級）"""
     qf.open_pet_panel()
@@ -171,6 +195,7 @@ def cmd_train(a) -> int:
         import walk
         t0 = time.time()
         swaps, prev, reset_pending = 0, None, False
+        none_streak, bar_best, finished = 0, 0, False
         progress, t_prog = (0, 0), time.time()
         first = True
         while True:
@@ -186,8 +211,26 @@ def cmd_train(a) -> int:
                 # 1 級的單一數字 OCR 讀不到（'0轉級'）：高等級之後讀不到 = 剛換上新的 1 級寵物
                 if prev is not None and prev >= 24:
                     reset_pending = True
-                log('出戰寵物等級讀不到（1 級單一數字 / 戰鬥中），下一輪再讀')
+                none_streak += 1
+                log('出戰寵物等級讀不到（1 級單一數字 / 戰鬥中）')
+                if none_streak >= 2:                   # HUD 連續讀不到：改開寵物面板，直接看 4 隻各自的等級
+                    try:
+                        bl = bar_levels(q, qf)
+                    except q.Halt:
+                        bl = []                        # 戰鬥中開不了面板：下一輪再試
+                    if bl:
+                        log(f'寵物面板等級（第 1~4 隻）：{bl}')
+                        if all(v is not None and v >= a.target for v in bl):
+                            finished = True
+                        tot = sum(v for v in bl if v)
+                        if tot > bar_best:
+                            bar_best, t_prog = tot, time.time()
+                if finished:
+                    break
+                if time.time() - t_prog >= a.stall_min * 60:
+                    raise q.Halt(q.EXIT_TIMEOUT, f'連續 {a.stall_min} 分鐘等級沒有進展：停手，請看畫面')
                 continue
+            none_streak = 0
             if prev is not None and (lv < prev - 3 or (reset_pending and lv <= prev)):
                 swaps += 1
                 log(f'偵測到換寵（{prev} → {lv} 級），第 {swaps} 次')
@@ -201,7 +244,7 @@ def cmd_train(a) -> int:
                 progress, t_prog = now_prog, time.time()
             elif time.time() - t_prog >= a.stall_min * 60:
                 raise q.Halt(q.EXIT_TIMEOUT, f'連續 {a.stall_min} 分鐘出戰寵物等級沒有進展（{lv} 級、換寵 {swaps} 次）：停手，請看畫面')
-        log(f'4 隻都到 {a.target} 級（換寵 {swaps} 次、第 4 隻 {prev} 級）；再多練 {SETTLE_S} 秒讓其他角色跟上')
+        log(f'4 隻都到 {a.target} 級（換寵 {swaps} 次、HUD 最後讀到 {prev} 級）；再多練 {SETTLE_S} 秒讓其他角色跟上')
         q.sleep(SETTLE_S)
         q.set_ass(encounter=False)
         q.wait_battle_end()
