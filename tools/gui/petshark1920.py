@@ -31,6 +31,7 @@ def main():
     ap.add_argument('--role', type=int, required=True)
     ap.add_argument('--n', type=int, default=4)
     ap.add_argument('--flush', action='store_true', help='欄 1 有上次中斷留下的寵物就先存公共')
+    ap.add_argument('--kinds', default='', help='只處理這些種類（逗號分隔，例 克邦凱斯）；沒給就用該角色預設的兩種')
     a = ap.parse_args()
     os.environ['PSA_EXE_MATCH'] = a.client
     import winenv; winenv.enable_server()
@@ -44,7 +45,15 @@ def main():
             pd.click(pd.SLOT_X, pd.SLOT_Y[0], wait=700); pd.click(*STORE_BTN, wait=1200)
         if any(not pd.slot_empty(i) for i in range(5)):
             print('寵物欄不是空的 → 停手'); return 4
-    for name, pred in CLASSES[a.role]:
+    if a.kinds:
+        every = {n: p for lst in CLASSES.values() for n, p in lst}
+        bad = [k for k in a.kinds.split(',') if k not in every]
+        if bad:
+            print(f'不認得的種類：{bad}（可用：{list(every)}）'); return 2
+        todo = [(k, every[k]) for k in a.kinds.split(',')]
+    else:
+        todo = CLASSES[a.role]
+    for name, pred in todo:
         for k in range(a.n):
             pd.click(*pd.TAB_DEPOT, wait=1100, note='petshark 倉庫分頁')
             pd.click(*PERSONAL, wait=800, note='petshark 個人分頁')
