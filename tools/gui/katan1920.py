@@ -38,7 +38,7 @@ FAMILY = {
     'bird': {'role': 3, 'system': '火雞系', 'kinds': ['火雞', '克克洛斯', '霍爾克', '奇寶']},
 }
 ALL_ROLES = [1, 2, 3, 4, 5]
-BAIT_SOURCE = 'public'            # 誘餌全放共用倉庫（使用者 2026-10-12）
+BAIT_SOURCE = 'public'            # 誘餌全放共用倉庫（使用者 2026-10-12）；鯊魚（角色 2）背包已有誘餌 → 不再檢查；火雞（角色 3）只在 r1 檢查 / 取一次
 PHASES = ['setup', 'r1', 'r2', 'r3', 'r4', 'final', 'train', 'handin', 'cleanup']
 
 
@@ -61,7 +61,8 @@ def plan(client: str, family: str, phase: str) -> list:
         k = kinds[int(phase[1]) - 1]
         # 不勾自動存倉庫（使用者規定）：5 隻抓在寵物欄 → 手動 2~5 格存公共（4 隻）、第 1 格存個人（1 隻）
         out.append((f'抓 {k} ×5（不勾自動存倉庫，5 隻留在寵物欄）', py('catchrun1920.py', *c, '--role', catcher, '--system', system,
-                                                              '--pet', k, '--n', 5, '--source', BAIT_SOURCE)))
+                                                              '--pet', k, '--n', 5, '--source', BAIT_SOURCE,
+                                                              *(['--no-bait-check'] if (family == 'shark' or phase != 'r1') else []))))
         if family == 'bird':
             out.append(('公共倉庫存入前先拍一次（學樣板用）', py('petfetchimg1920.py', *c, 'snap', '--open-role', catcher, '--tab', 'public')))
         out.append(('寵物欄第 2~5 格存公共（4 隻）', py('petfetchimg1920.py', *c, 'storebar', '--role', catcher, '--slots', '2,3,4,5', '--tab', 'public', '--do')))
@@ -78,11 +79,13 @@ def plan(client: str, family: str, phase: str) -> list:
     if phase == 'r4':
         k = kinds[3]
         out.append((f'抓 {k} ×5（不自動存，5 隻留在寵物欄）', py('catchrun1920.py', *c, '--role', catcher, '--system', system,
-                                                        '--pet', k, '--n', 5, '--source', BAIT_SOURCE)))
+                                                        '--pet', k, '--n', 5, '--source', BAIT_SOURCE, '--no-bait-check')))
         out.append(('寵物欄第 2~5 格存公共（第 1 格留著）', py('petfetchimg1920.py', *c, 'storebar', '--role', catcher, '--slots', '2,3,4,5', '--tab', 'public', '--do')))
         if family == 'shark':
             out.append((f'{k} 分給角色 ' + '、'.join(map(str, others)),
                         py('petgive1920.py', *c, '--first', '--plan', ';'.join(f'{r}:{k}' for r in others))))
+            # 鯊魚抓完了：剩的寵物誘餌整疊存回共用倉庫道具（火雞組之後從公共倉庫取；使用者 2026-10-12）
+            out.append((f'角色 {catcher} 剩餘寵物誘餌存共用倉庫', py('baitstore1920.py', *c, '--role', catcher)))
         else:
             out.append((f'學「{k}」樣板（公共倉庫現在只有這 4 隻）', py('petfetchimg1920.py', *c, 'learn', '--open-role', catcher, '--tab', 'public', '--slot', 1, '--name', k)))
             for r in others:

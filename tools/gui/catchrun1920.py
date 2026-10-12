@@ -122,6 +122,7 @@ def main(argv=None) -> int:
     ap.add_argument('--source', choices=['personal', 'public'], default='personal')
     ap.add_argument('--store', action='store_true', help='勾自動存倉庫')
     ap.add_argument('--split', action='store_true', help='拆分誘餌成 N 個、剩餘存回倉庫（預設不拆）')
+    ap.add_argument('--no-bait-check', action='store_true', help='不開背包找誘餌（誘餌已在背包時用；沒有誘餌時外掛會取消自動抓寵）')
     ap.add_argument('--dry', action='store_true')
     ap.add_argument('--no-wait', action='store_true')
     a = ap.parse_args(argv)
@@ -146,46 +147,47 @@ def main(argv=None) -> int:
         print('戰鬥中，停手')
         return 8
 
-    # 1. 背包：切角色、看有沒有誘餌；沒有就從倉庫取出
-    click(*BAG_BTN, wait=1500, note='catchrun 開背包')
-    click(ROLE_X, ROLE_Y[a.role - 1], wait=1200, note=f'catchrun 背包切角色 {a.role}')
-    click(*TAB_BAG, wait=900, note='catchrun 背包分頁')
-    pos = find_bait(bag_slots())
-    if pos is None:
-        click(*TAB_DEPOT, wait=1200, note='catchrun 倉庫分頁')
-        click(*(DEPOT_PUBLIC if a.source == 'public' else DEPOT_PERSONAL), wait=800, note='catchrun 倉庫來源')
-        dpos = find_bait(depot_slots())
-        if dpos is None:
-            print('背包 / 倉庫都找不到誘餌')
-            click(*CLOSE_BAG, wait=500)
-            return 4
-        click(*POP_BTN, wait=1000, note='catchrun 取出誘餌')
-        click(*TAB_BAG, wait=900, note='catchrun 回背包')
+    if not a.no_bait_check:                    # 誘餌已經在背包（使用者 2026-10-12：檢查誘餌是多餘的）→ 整段略過
+        # 1. 背包：切角色、看有沒有誘餌；沒有就從倉庫取出
+        click(*BAG_BTN, wait=1500, note='catchrun 開背包')
+        click(ROLE_X, ROLE_Y[a.role - 1], wait=1200, note=f'catchrun 背包切角色 {a.role}')
+        click(*TAB_BAG, wait=900, note='catchrun 背包分頁')
         pos = find_bait(bag_slots())
         if pos is None:
-            print('取出後背包仍找不到誘餌')
-            click(*CLOSE_BAG, wait=500)
-            return 5
-    # 2. 不用拆分（使用者 2026-10-11）：身上帶滿誘餌，寵物欄 5 個空格就是目標，欄滿遊戲自己停；--split 才拆
-    if a.split:
-        # 2. 拆分（此時浮窗開著，按「拆分」）
-        click(*POP_SPLIT, wait=900, note='catchrun 拆分')
-        click(*QTY_BOX, wait=800, note='catchrun 數量框')
-        click(*KEYS[str(a.n)], wait=400, note=f'catchrun 輸入 {a.n}')
-        click(*KEY_ENTER, wait=700, note='catchrun Enter')
-        click(*QTY_OK, wait=1000, note='catchrun 確定')
-        # 3. 剩餘（原格）存回倉庫：倉庫分頁開著時雙擊原格 → 「存入」
-        click(*TAB_DEPOT, wait=1200, note='catchrun 倉庫分頁')
-        click(*(DEPOT_PUBLIC if a.source == 'public' else DEPOT_PERSONAL), wait=800, note='catchrun 倉庫來源')
-        click(*pos, wait=900, note='catchrun 剩餘單擊（雙擊不可靠）')
-        if BAIT in title():
-            click(*POP_BTN, wait=1000, note='catchrun 存入剩餘')
-        click(*CLOSE_BAG, wait=700, note='catchrun 關背包')
-        log('誘餌拆分完成（背包留 N 個，剩餘已存回倉庫）')
+            click(*TAB_DEPOT, wait=1200, note='catchrun 倉庫分頁')
+            click(*(DEPOT_PUBLIC if a.source == 'public' else DEPOT_PERSONAL), wait=800, note='catchrun 倉庫來源')
+            dpos = find_bait(depot_slots())
+            if dpos is None:
+                print('背包 / 倉庫都找不到誘餌')
+                click(*CLOSE_BAG, wait=500)
+                return 4
+            click(*POP_BTN, wait=1000, note='catchrun 取出誘餌')
+            click(*TAB_BAG, wait=900, note='catchrun 回背包')
+            pos = find_bait(bag_slots())
+            if pos is None:
+                print('取出後背包仍找不到誘餌')
+                click(*CLOSE_BAG, wait=500)
+                return 5
+        # 2. 不用拆分（使用者 2026-10-11）：身上帶滿誘餌，寵物欄 5 個空格就是目標，欄滿遊戲自己停；--split 才拆
+        if a.split:
+            # 2. 拆分（此時浮窗開著，按「拆分」）
+            click(*POP_SPLIT, wait=900, note='catchrun 拆分')
+            click(*QTY_BOX, wait=800, note='catchrun 數量框')
+            click(*KEYS[str(a.n)], wait=400, note=f'catchrun 輸入 {a.n}')
+            click(*KEY_ENTER, wait=700, note='catchrun Enter')
+            click(*QTY_OK, wait=1000, note='catchrun 確定')
+            # 3. 剩餘（原格）存回倉庫：倉庫分頁開著時雙擊原格 → 「存入」
+            click(*TAB_DEPOT, wait=1200, note='catchrun 倉庫分頁')
+            click(*(DEPOT_PUBLIC if a.source == 'public' else DEPOT_PERSONAL), wait=800, note='catchrun 倉庫來源')
+            click(*pos, wait=900, note='catchrun 剩餘單擊（雙擊不可靠）')
+            if BAIT in title():
+                click(*POP_BTN, wait=1000, note='catchrun 存入剩餘')
+            click(*CLOSE_BAG, wait=700, note='catchrun 關背包')
+            log('誘餌拆分完成（背包留 N 個，剩餘已存回倉庫）')
 
-    else:
-        gui('key', '{ESC}', note='catchrun 關浮窗'); sleep(0.5)   # 浮窗還開著（找誘餌 / 取出後）
-        click(*CLOSE_BAG, wait=700, note='catchrun 關背包')
+        else:
+            gui('key', '{ESC}', note='catchrun 關浮窗'); sleep(0.5)   # 浮窗還開著（找誘餌 / 取出後）
+            click(*CLOSE_BAG, wait=700, note='catchrun 關背包')
 
     # 4. 外掛
     if not ass.open_panel():
