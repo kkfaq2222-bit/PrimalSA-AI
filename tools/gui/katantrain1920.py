@@ -107,6 +107,29 @@ def slot4_level(q, qf, role: int = 1, slot: int = 4):
         qf.close_pet_panel()
 
 
+def slot_levels(q, qf, roles, slot: int = 4) -> dict:
+    """面板只開一次，逐個角色讀第 slot 隻的「0轉N」→ {角色: 等級 or None}"""
+    qf.open_pet_panel()
+    out = {}
+    try:
+        q.click(PET_TAB, wait_ms=900, note='katan 寵物面板：寵物分頁')
+        for r in roles:
+            other = 1 if r == 1 else 0
+            q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[other]), wait_ms=450, note='katan 刷新')
+            q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[r - 1]), wait_ms=800, note=f'katan 角色 {r}')
+            q.click((qf.PET_SLOT_X, qf.PET_SLOT_Y[slot - 1]), wait_ms=800, note=f'katan 選第 {slot} 隻')
+            lv = None
+            for _ in range(3):
+                lv = qf.read_level_text()
+                if lv is not None:
+                    break
+                q.sleep(0.5)
+            out[r] = lv
+    finally:
+        qf.close_pet_panel()
+    return out
+
+
 def bar_levels(q, qf) -> list:
     """開寵物面板，直接讀角色 1 寵物欄 1~4 格右下角的等級數字（不點進任何寵物）→ [等級 or None ×4]。
     2 位數以上 OCR 讀得到；1~9 級的單一數字讀不到 = None（視為還沒到 10 級）。"""
@@ -322,6 +345,44 @@ def cmd_handin(a) -> int:
         return code if isinstance(code, int) else 99
 
 
+def cmd_check(a) -> int:
+    """只偵測、不做任何其他事：開寵物面板 → 寵物分頁 → 逐個角色選第 slot 隻 → 讀「0轉N」；
+    --roles 的每一個角色都 >= 目標才停（退出碼 0），還沒達標的隔 --every 秒再看（只重看沒達標的）。
+    不傳送、不組隊、不設出戰、不改任何設定。"""
+    q, qf = setup_env(a.client)
+    import pausegate
+    roles = [int(x) for x in a.roles.split(',') if x.strip()]
+    pending = list(roles)
+    last = {}
+    t0 = time.time()
+    n = 0
+    while pending:
+        pausegate.wait(log)
+        n += 1
+        try:
+            got = slot_levels(q, qf, pending, slot=a.slot)
+        except Exception as e:                       # 戰鬥中開不了面板等：下一輪再看
+            got = {}
+            log(f'第 {n} 次：開面板失敗（{getattr(e, "msg", e)}）')
+        last.update({r: v for r, v in got.items()})
+        pending = [r for r in roles if last.get(r) is None or last[r] < a.target]
+        shown = '  '.join(f'角色{r}={last.get(r) if last.get(r) is not None else "?"}' for r in roles)
+        log(f'第 {n} 次（第 {a.slot} 隻，目標 {a.target}）：{shown}' + (f'；還沒達標：{pending}' if pending else ''))
+        if not pending:
+            break
+        if a.max_min and time.time() - t0 >= a.max_min * 60:
+            log(f'超過 {a.max_min} 分鐘仍未全部達標，停止偵測')
+            return 7
+        time.sleep(a.every)
+    log(f'角色 {",".join(map(str, roles))} 的第 {a.slot} 隻都 >= {a.target} 級，停止偵測')
+    try:
+        import notifyhalt
+        notifyhalt.alert('全部達標', ok=True)
+    except Exception:
+        pass
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='卡坦的願望：練寵 + 交任務')
     ap.add_argument('--client', default=os.environ.get('PSA_EXE_MATCH', 'kkfaq22222'))
@@ -329,10 +390,16 @@ def main(argv=None) -> int:
     t = sp.add_parser('train')
     t.add_argument('--target', type=int, default=25)
     t.add_argument('--stall-min', type=int, default=30)
+    c = sp.add_parser('check', help='只偵測第 N 隻的等級，達標就停、未達標隔幾秒再看')
+    c.add_argument('--target', type=int, default=25)
+    c.add_argument('--every', type=int, default=20)
+    c.add_argument('--roles', default='1,2,3,4,5', help='要檢查的角色（預設 5 人都要達標）')
+    c.add_argument('--slot', type=int, default=4)
+    c.add_argument('--max-min', type=int, default=0, help='最多偵測幾分鐘（0 = 不限）')
     h = sp.add_parser('handin')
     h.add_argument('--step', type=int, choices=[1, 2], required=True)
     a = ap.parse_args(argv)
-    return {'train': cmd_train, 'handin': cmd_handin}[a.cmd](a)
+    return {'train': cmd_train, 'handin': cmd_handin, 'check': cmd_check}[a.cmd](a)
 
 
 if __name__ == '__main__':
