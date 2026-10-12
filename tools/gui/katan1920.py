@@ -68,16 +68,17 @@ def plan_dino(client: str, phase: str) -> list:
         out.append(('角色 4 剩餘寵物誘餌存回共用倉庫（給角色 5 抓貝魯卡）', py('baitstore1920.py', *c, '--role', 4)))
         return out
     if phase == 'r2':
+        # 角色 5 排法（使用者 2026-10-12）：抓 4 隻（第 2~5 格）→ 只存第 5 格 → 再補抓 1 隻進第 5 格 → 存第 5、4、3 格 → 第 2 格留下
         out.append(('角色 5 抓貝魯卡（寵物欄第 1 格已是魯尼帖斯，只剩 4 格，抓滿 4 隻自己停）',
                     py('catchrun1920.py', *c, '--role', 5, '--system', '老虎系', '--pet', '貝魯卡', '--n', 5, '--source', BAIT_SOURCE)))
-        out.append(('角色 5 寵物欄第 3~5 格存公共（3 隻；第 2 格的貝魯卡留下）',
-                    py('petfetchimg1920.py', *c, 'storebar', '--role', 5, '--slots', '3,4,5', '--tab', 'public', '--do')))
+        out.append(('角色 5 只存第 5 格到公共（公共 1 隻；寵物欄變成 魯、貝、貝、貝、空）',
+                    py('petfetchimg1920.py', *c, 'storebar', '--role', 5, '--slots', '5', '--tab', 'public', '--do')))
         return out
     if phase == 'r3':
-        out.append(('角色 5 再抓 1 隻貝魯卡（拆分誘餌只留 1 個，抓 1 隻就停）',
+        out.append(('角色 5 再抓 1 隻貝魯卡（拆分誘餌只留 1 個，抓 1 隻就停；補進空的第 5 格）',
                     py('catchrun1920.py', *c, '--role', 5, '--system', '老虎系', '--pet', '貝魯卡', '--n', 1, '--split', '--source', BAIT_SOURCE)))
-        out.append(('角色 5 寵物欄第 3 格存公共（公共現在 4 隻貝魯卡）',
-                    py('petfetchimg1920.py', *c, 'storebar', '--role', 5, '--slots', '3', '--tab', 'public', '--do')))
+        out.append(('角色 5 存第 5、4、3 格到公共（公共現在 4 隻貝魯卡；第 2 格留下）',
+                    py('petfetchimg1920.py', *c, 'storebar', '--role', 5, '--slots', '5,4,3', '--tab', 'public', '--do')))
         out.append(('貝魯卡分給角色 1、2、3、4（各領公共第 1 格）',
                     py('petgive1920.py', *c, '--first', '--plan', '1:貝魯卡;2:貝魯卡;3:貝魯卡;4:貝魯卡')))
         return out
