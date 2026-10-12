@@ -186,7 +186,12 @@ def cmd_train(a) -> int:
     try:
         lv0 = {}
         import walk as _walk
-        lvn = hud_pet_level(_walk)
+        lvn = None
+        for _ in range(4):                       # 戰鬥動畫中 HUD 會被蓋住讀不到：隔幾秒重讀，不要一次讀不到就當作還沒練
+            lvn = hud_pet_level(_walk)
+            if lvn is not None:
+                break
+            q.sleep(4)
         if lvn is not None and lvn > a.target:
             log(f'出戰寵物已是 {lvn} 級（> {a.target}，一定是最後一隻）→ 不用再練，直接收')
             return 0
