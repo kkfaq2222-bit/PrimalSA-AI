@@ -4,7 +4,7 @@ r"""卡坦的願望（任務 2019）抓寵 → 分寵流程總控（1920×1017�
 任務條件（knowledge）：步 1 收集 4 色鯊魚並練至 25 等以上、步 2 收集 4 色雞並練至 25 等以上；5 個角色各要一套，5 人組隊由隊長交一次。
 使用者規劃（2026-10-12）：
   角色 2 抓鯊魚系（克邦凱斯 → 加克拉 → 加格 → 邦恩吉，各 5 隻）、角色 3 抓火雞系（火雞 → 克克洛斯 → 霍爾克 → 奇寶）。
-  每一輪：抓 5 隻自動存個人倉庫 → 4 隻搬公共倉庫 → 馬上分給其他 4 個角色（公共倉庫永遠只放這一批）→ 1 隻留在個人倉庫。
+  每一輪：抓 5 隻（不勾自動存倉庫）→ 寵物欄第 2~5 格手動存公共（4 隻）→ 第 1 格存個人倉庫（1 隻）→ 馬上分給其他 4 個角色（公共倉庫永遠只放這一批）。
   第 4 輪不勾自動存倉庫：5 隻留在寵物欄，第 1 格留著、第 2~5 格存公共分出去；最後從個人倉庫領回前 3 輪各 1 隻（名稱是數字）。
   一開始先解散隊伍、把 5 人身上的寵物全部存個人倉庫（含騎寵，不領回）。
 
@@ -59,15 +59,19 @@ def plan(client: str, family: str, phase: str) -> list:
         return out
     if phase in ('r1', 'r2', 'r3'):
         k = kinds[int(phase[1]) - 1]
-        out.append((f'抓 {k} ×5（自動存個人倉庫）', py('catchrun1920.py', *c, '--role', catcher, '--system', system,
-                                                  '--pet', k, '--n', 5, '--store', '--source', BAIT_SOURCE)))
+        # 不勾自動存倉庫（使用者規定）：5 隻抓在寵物欄 → 手動 2~5 格存公共（4 隻）、第 1 格存個人（1 隻）
+        out.append((f'抓 {k} ×5（不勾自動存倉庫，5 隻留在寵物欄）', py('catchrun1920.py', *c, '--role', catcher, '--system', system,
+                                                              '--pet', k, '--n', 5, '--source', BAIT_SOURCE)))
+        if family == 'bird':
+            out.append(('公共倉庫存入前先拍一次（學樣板用）', py('petfetchimg1920.py', *c, 'snap', '--open-role', catcher, '--tab', 'public')))
+        out.append(('寵物欄第 2~5 格存公共（4 隻）', py('petfetchimg1920.py', *c, 'storebar', '--role', catcher, '--slots', '2,3,4,5', '--tab', 'public', '--do')))
+        if family == 'bird':
+            out.append((f'學「{k}」樣板（前後比對找出新存進公共的）', py('petfetchimg1920.py', *c, 'learn', '--open-role', catcher, '--tab', 'public', '--new', '--name', k)))
+        out.append(('寵物欄第 1 格存個人倉庫（1 隻）', py('petfetchimg1920.py', *c, 'storebar', '--role', catcher, '--slots', '1', '--tab', 'personal', '--do')))
         if family == 'shark':
-            out.append((f'{k} 4 隻 個人 → 公共', py('petshark1920.py', *c, '--role', catcher, '--kinds', k, '--n', 4)))
             out.append((f'{k} 分給角色 ' + '、'.join(map(str, others)),
                         py('petgive1920.py', *c, '--plan', ';'.join(f'{r}:{k}' for r in others))))
         else:
-            out.append((f'學「{k}」樣板（前後比對找出新存的）', py('petfetchimg1920.py', *c, 'learn', '--open-role', catcher, '--new', '--name', k)))
-            out.append((f'{k} 4 隻 個人 → 公共', py('petfetchimg1920.py', *c, 'move', '--role', catcher, '--name', k, '--n', 4, '--do')))
             for r in others:
                 out.append((f'角色 {r} 從公共領「{k}」', py('petfetchimg1920.py', *c, 'fetch', '--role', r, '--tab', 'public', '--names', k, '--do')))
         return out
