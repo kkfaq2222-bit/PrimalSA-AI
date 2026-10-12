@@ -11,7 +11,7 @@ r"""卡坦的願望（任務 2019）抓寵 → 分寵流程總控（1920×1017�
 階段（--phase）：setup（解散 + 全存個人倉庫）、r1 r2 r3 r4、final（抓寵者領回自己的 3 隻）、
   train（5 人轉換 25 級 → 組隊 → 五兄弟洞窟練，30 分鐘總等級沒增加就停手）、handin（全部休息 → 組隊 → 交卡坦步 1 / 步 2）、
   cleanup（鯊魚：刪修寶；火雞：朵拉比斯存個人倉庫）。--phase all = 依序全部。
-一整套（鯊魚 → 火雞）：先 --family shark --phase all --do --resume；做完再 --family bird --phase all --no-setup --do --resume。
+一整套從頭到尾（鯊魚 → 火雞）：--family all --phase all --do --resume（一個指令；中斷後同一行再跑會接續）。
 用法（專案根目錄）：
   uv run --no-project python tools/gui/katan1920.py --client kkfaq22222 --family shark --plan            # 只印每個階段要跑的指令
   uv run --no-project python tools/gui/katan1920.py --client kkfaq22222 --family shark --phase setup --do
@@ -152,7 +152,7 @@ def run_phase(client: str, family: str, phase: str, do: bool) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='卡坦的願望 抓寵 → 分寵總控')
     ap.add_argument('--client', default=os.environ.get('PSA_EXE_MATCH', 'kkfaq22222'))
-    ap.add_argument('--family', choices=list(FAMILY), required=True)
+    ap.add_argument('--family', choices=list(FAMILY) + ['all'], required=True, help='shark / bird / all（鯊魚做完接火雞，一次從頭到尾）')
     ap.add_argument('--phase', default='all', help='setup / r1 / r2 / r3 / r4 / final / all')
     ap.add_argument('--do', action='store_true', help='真的執行（預設只預覽指令）')
     ap.add_argument('--plan', action='store_true', help='只印計畫（同不加 --do）')
@@ -166,19 +166,22 @@ def main(argv=None) -> int:
     if any(p not in PHASES for p in phases):
         print(f'階段只能是 {PHASES} 或 all')
         return 2
-    if a.no_setup:
-        phases = [p for p in phases if p != 'setup']
-    done = load_done(a.client, a.family) if a.resume else []
-    for p in phases:
-        if p in done and a.resume:
-            log(f'階段 {p} 已完成，跳過')
-            continue
-        rc = run_phase(a.client, a.family, p, do)
-        if rc:
-            return rc
-        if do:
-            done = sorted(set(load_done(a.client, a.family)) | {p})
-            save_done(a.client, a.family, done)
+    families = list(FAMILY) if a.family == 'all' else [a.family]
+    for fi, fam in enumerate(families):
+        ph = list(phases)
+        if a.no_setup or fi > 0:                 # 第二個系別不用再解散 / 全存倉庫（第一個系別的 setup 已做）
+            ph = [p for p in ph if p != 'setup']
+        done = load_done(a.client, fam) if a.resume else []
+        for p in ph:
+            if p in done and a.resume:
+                log(f'[{fam}] 階段 {p} 已完成，跳過')
+                continue
+            rc = run_phase(a.client, fam, p, do)
+            if rc:
+                return rc
+            if do:
+                done = sorted(set(load_done(a.client, fam)) | {p})
+                save_done(a.client, fam, done)
     log('全部階段完成' if do else '預覽結束（加 --do 才真的執行）')
     return 0
 

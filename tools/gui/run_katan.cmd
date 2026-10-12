@@ -1,6 +1,7 @@
 @echo off
 rem Katan wish launcher (ASCII only): run_katan.cmd <client> <shark|bird> [extra args for katan1920.py]
-rem   shark (whole run):  run_katan.cmd kkfaq22222 shark --phase all --do --resume
+rem   EVERYTHING (shark then bird, from zero): run_katan.cmd kkfaq22222 all --phase all --do --resume
+rem   shark only:  run_katan.cmd kkfaq22222 shark --phase all --do --resume
 rem   bird  (after shark): run_katan.cmd kkfaq22222 bird --phase all --no-setup --do --resume
 rem   preview only:       run_katan.cmd kkfaq22222 shark --plan
 set "C=%1"
