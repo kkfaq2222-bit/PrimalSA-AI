@@ -44,6 +44,7 @@ SAMPLE_DX = (-21, -7, 7, 21)           # 頭像區取樣（避開上方名稱字
 SAMPLE_DY = (-14, -4, 6, 16)
 TAB = {'personal': (592, 100), 'public': (757, 100)}
 TAKE_BTN = (362, 430)
+SAME_SPECIES_MAX = 35.0                # 同一批同種寵物兩兩距離的上限（learn --new）
 MATCH_MAX = 28.0                       # 平均每通道差距門檻（RGB 0~255）；超過就當作不是這個
 AMBIG_MARGIN = 8.0                     # 最佳與「不同名稱」次佳至少差這麼多，否則判為不明確
 
@@ -101,6 +102,14 @@ def save_tpls(t: dict) -> None:
 
 
 # ---------- 遊戲操作 ----------
+def take_label_ok() -> bool:
+    """選中的是倉庫寵物時左下按鈕是「取出寵物」；若選取還停在寵物欄的寵物上，同位置是「存入寵物」，點下去會把自己的寵物存走
+    （2026-10-12 角色 1 的克邦凱斯因此被存走）。按之前一定要確認。"""
+    import uikit
+    t = ''.join(uikit.ocr((300, 412, 125, 36), '-Zooms', '2,3'))
+    return '取出' in t or ('取' in t and '存' not in t)
+
+
 def read_grid():
     """一次讀 20 格 → [vec×20]；讀不到回 None"""
     import uikit
@@ -227,22 +236,25 @@ def cmd_learn(a):
             print('沒有存入前的快照：先在存入寵物前跑 snap')
             return 2
         ch = changed_slots(old, grid)
-        if not ch or any(dist(grid[ch[0]], grid[j]) > 12.0 for j in ch[1:]):
+        # 同一種寵物的頭像會有動作 / 位置差（實測 4 隻火雞兩兩差 3~22、不同種差 70 以上）→ 門檻 35
+        if not ch or any(dist(grid[ch[0]], grid[j]) > SAME_SPECIES_MAX for j in ch[1:]):
             print(f'變動的格子 {[i + 1 for i in ch]} 不是同一種（或沒有變動）→ 不學，請改用 --slot 指定')
             return 5
         a.slot = ch[0] + 1
         print(f'剛存進去的是第 {a.slot} 格')
-    vec = grid[a.slot - 1]
+    vecs = [grid[i] for i in ch] if a.new else [grid[a.slot - 1]]   # --new：剛存進去的每一隻都當變體（涵蓋頭像動作差）
     tpls = load_tpls()
     tpls.setdefault(a.name, [])
-    if any(dist(vec, v) < 3.0 for v in tpls[a.name]):
-        print(f'「{a.name}」已有相同樣板，不重複存')
-        return 0
-    if len(tpls[a.name]) >= 6:
-        tpls[a.name].pop(0)
-    tpls[a.name].append(vec)
+    added = 0
+    for vec in vecs:
+        if any(dist(vec, v) < 3.0 for v in tpls[a.name]):
+            continue
+        if len(tpls[a.name]) >= 6:
+            tpls[a.name].pop(0)
+        tpls[a.name].append(vec)
+        added += 1
     save_tpls(tpls)
-    print(f'已存「{a.name}」樣板（共 {len(tpls[a.name])} 個變體）')
+    print(f'已存「{a.name}」樣板（新增 {added} 個，共 {len(tpls[a.name])} 個變體）')
     return 0
 
 
@@ -305,6 +317,9 @@ def cmd_move(a):
             continue
         x, y = slot_center(i)
         pd.click(x, y, wait=800, note=f'petfetchimg 選第 {i + 1} 格')
+        if not take_label_ok():
+            print('按鈕不是「取出寵物」→ 不按、停手')
+            return 8
         pd.click(*TAKE_BTN, wait=1100, note='petfetchimg 取出寵物')
         for _ in range(8):
             if not pd.slot_empty(0):
@@ -352,6 +367,9 @@ def cmd_fetch_numeric(a):
             continue
         x, y = slot_center(i)
         pd.click(x, y, wait=800, note=f'petfetchimg 選第 {i + 1} 格')
+        if not take_label_ok():
+            print('按鈕不是「取出寵物」→ 不按、停手')
+            return 8
         pd.click(*TAKE_BTN, wait=1200, note='petfetchimg 取出寵物')
         now = bar_filled()
         if len(now) != len(before) + taken + 1:
@@ -399,6 +417,9 @@ def cmd_fetch(a):
             continue
         x, y = slot_center(i)
         pd.click(x, y, wait=800, note=f'petfetchimg 選第 {i + 1} 格「{name}」')
+        if not take_label_ok():
+            print('按鈕不是「取出寵物」→ 不按、停手')
+            return 8
         pd.click(*TAKE_BTN, wait=1200, note='petfetchimg 取出寵物')
         now = bar_filled()
         if len(now) != len(before) + taken + 1:
