@@ -154,9 +154,14 @@ def main(argv=None) -> int:
         click(*TAB_BAG, wait=900, note='catchrun 背包分頁')
         pos = find_bait(bag_slots())
         if pos is None:
-            click(*TAB_DEPOT, wait=1200, note='catchrun 倉庫分頁')
-            click(*(DEPOT_PUBLIC if a.source == 'public' else DEPOT_PERSONAL), wait=800, note='catchrun 倉庫來源')
-            dpos = find_bait(depot_slots())
+            dpos = None
+            for _try in range(3):                  # 剛切角色後倉庫頁偶爾還沒畫好 → 讀不到就重點分頁再讀（2026-10-12 角色 3 火雞第 1 輪）
+                click(*TAB_DEPOT, wait=1300, note='catchrun 倉庫分頁')
+                click(*(DEPOT_PUBLIC if a.source == 'public' else DEPOT_PERSONAL), wait=1100, note='catchrun 倉庫來源')
+                dpos = find_bait(depot_slots())
+                if dpos is not None:
+                    break
+                sleep(1.0)
             if dpos is None:
                 print('背包 / 倉庫都找不到誘餌')
                 click(*CLOSE_BAG, wait=500)
