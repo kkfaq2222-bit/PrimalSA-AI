@@ -227,8 +227,7 @@ def main(argv=None) -> int:
                 events.append(round(time.time() - t0, 1))
                 base = now
                 log(f'角色{a.role} 可抓捕數變動（第 {len(events)} 次，{events[-1]} 秒）')
-            cols = c.px([c.CHK_CATCH])
-            if cols and cols[0] == c.UNCHECKED:
+            if not c.is_checked(c.CHK_CATCH):
                 log(f'角色{a.role} 抓寵結束：{time.time() - t0:.1f} 秒；可抓捕數變動 {len(events)} 次 {events}；偵測 {polls} 圈')
                 __import__('uikit').gui('shot', f'catchrun_r{a.role}_done.png')
                 return 0

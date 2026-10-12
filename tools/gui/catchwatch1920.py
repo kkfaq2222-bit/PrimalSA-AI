@@ -23,7 +23,7 @@ def main():
     while time.time() - t0 < a.max:
         if True:
             if ass.open_panel(timeout=20) and ass.select_role(names[0] if a.role != 1 else names[1])                     and ass.select_role(names[a.role - 1]) and c.ensure_tab():   # 切別人再切回來才會刷新勾選
-                on = c.px([c.CHK_CATCH])[0] != c.UNCHECKED
+                on = c.is_checked(c.CHK_CATCH)
                 print(time.strftime('%H:%M:%S'), f'已過 {int(time.time() - t0)}s 自動抓寵={"開" if on else "關"}', flush=True)
                 if not on:
                     uikit.gui('shot', f'catchwatch_r{a.role}.png')

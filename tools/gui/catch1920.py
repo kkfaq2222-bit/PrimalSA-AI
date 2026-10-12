@@ -90,13 +90,12 @@ def ensure_tab() -> bool:
 
 
 def read_state() -> dict:
-    cols = px([CHK_CATCH, CHK_STORE])
     return {
         'system': read_field(SYS_BOX),
         'pet': read_field(PET_BOX),
         'count': read_field(CNT_BOX),
-        'catch': bool(cols) and cols[0] != UNCHECKED,
-        'store': bool(cols) and cols[1] != UNCHECKED,
+        'catch': is_checked(CHK_CATCH),
+        'store': is_checked(CHK_STORE),
     }
 
 
@@ -272,15 +271,22 @@ def pick(which: str, target: str, ctx: str = '') -> bool:
     return False
 
 
+CHK_OFFS = [(dx, dy) for dy in (-6, -3, 0, 3, 6) for dx in (-6, -3, 0, 3, 6)]
+
+
+def is_checked(pt) -> bool:
+    """勾選框是否打勾：框內有一點是深色（勾的筆畫）就算。只讀中心一點會剛好落在白底上（2026-10-12 22222 實測：
+    已勾選但中心點仍是純白 → 誤判沒勾、點了又取消）。"""
+    cols = px([(pt[0] + dx, pt[1] + dy) for dx, dy in CHK_OFFS])
+    return bool(cols) and any(sum(c) < 220 for c in cols)
+
+
 def set_check(pt, want: bool, name: str) -> bool:
-    c = px([pt])
-    now = bool(c) and c[0] != UNCHECKED
-    if now == want:
+    if is_checked(pt) == want:
         return True
     click(*pt, wait=900, note=f'catch {name} → {want}')
     for _ in range(4):                                   # 勾選圖示更新有延遲：輪詢最多約 2 秒
-        c = px([pt])
-        if bool(c) and (c[0] != UNCHECKED) == want:
+        if is_checked(pt) == want:
             return True
         sleep(0.5)
     return False
