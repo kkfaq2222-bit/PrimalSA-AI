@@ -59,6 +59,9 @@ def plan(client: str, family: str, phase: str) -> list:
         return out
     if phase in ('r1', 'r2', 'r3'):
         k = kinds[int(phase[1]) - 1]
+        if phase == 'r1':
+            # 抓寵一律單人：前一個系別交任務時是 5 人隊，火雞開抓前一定要先解散（使用者 2026-10-12；本來就單人時不點任何東西）
+            out.append(('解散隊伍（抓寵要單人）', py('q1920.py', *c, 'disband')))
         # 不勾自動存倉庫（使用者規定）：5 隻抓在寵物欄 → 手動 2~5 格存公共（4 隻）、第 1 格存個人（1 隻）
         out.append((f'抓 {k} ×5（不勾自動存倉庫，5 隻留在寵物欄）', py('catchrun1920.py', *c, '--role', catcher, '--system', system,
                                                               '--pet', k, '--n', 5, '--source', BAIT_SOURCE,
