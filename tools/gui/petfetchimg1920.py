@@ -139,6 +139,12 @@ def bar_filled():
 
 def goto(role: int, tab: str):
     import petdepot1920 as pd
+    try:                                    # 外掛面板還開著（catchrun 剛抓完）會蓋住寵物鈕 → 寵物面板打不開（2026-10-12 火雞 r1）
+        import ass
+        if ass.panel_open():
+            ass.close_panel()
+    except Exception:
+        pass
     if not pd.open_panel():
         raise SystemExit('寵物面板打不開')
     other = 0 if role != 1 else 1          # 先切到別的角色再切回來才會刷新寵物欄（剛抓完的第 5 隻否則還顯示空格；2026-10-12 實測）
