@@ -53,8 +53,12 @@ SETTLE_S = 120                # 達標後多練一會兒，讓經驗略少的角
 
 
 def done_by_swaps(swaps: int, lv: int, target: int) -> bool:
-    """換過 3 次（1→2→3→4）且現在出戰的第 4 隻 >= target"""
-    return swaps >= SLOTS - 1 and lv is not None and lv >= target
+    """出戰寵物等級 > target = 一定是最後一隻（前面的在剛好 target 級就被換掉了）→ 完成；
+    或換過 3 次（1→2→3→4）且現在出戰的第 4 隻 >= target。（2026-10-12：第一次讀到數字時已經 34 級、換寵次數是 0，
+    只看換寵次數會永遠等不到完成）"""
+    if lv is None:
+        return False
+    return lv > target or (swaps >= SLOTS - 1 and lv >= target)
 
 
 def hud_pet_level(walk):
@@ -181,6 +185,11 @@ def cmd_train(a) -> int:
     import pausegate
     try:
         lv0 = {}
+        import walk as _walk
+        lvn = hud_pet_level(_walk)
+        if lvn is not None and lvn > a.target:
+            log(f'出戰寵物已是 {lvn} 級（> {a.target}，一定是最後一隻）→ 不用再練，直接收')
+            return 0
         battle_first(q, qf)
         log('5 人第 1 隻已設出戰')
         rc = sub('autoswap1920.py', '--client', a.client, '--roles', '1,2,3,4,5', '--level', a.target)
