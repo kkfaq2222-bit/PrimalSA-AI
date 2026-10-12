@@ -176,9 +176,12 @@ def classify(cols: dict) -> str:
         return 'DIALOG'
     fam = cols.get('fam')
     in_battle_ui = fam is not None and near(fam, (232, 192, 71), 40)
-    if hud_red and (near(cols['banner'], (226, 199, 148), 22) or in_battle_ui):
+    main_like = hud_red and near(cols['avatar'], (151, 70, 43), 30) and near(cols['tab'], (145, 135, 108), 40)
+    # 橫幅探針只有 1 個點：沙地地圖（薩伊那斯）背景色 (237,209,139) 與橫幅 (226,199,148) 幾乎一樣 → 誤判戰鬥而卡住
+    # （2026-10-12 卡坦步 1）。HUD 頭像 / 分頁都像主畫面時，不能只憑橫幅那一點判戰鬥。
+    if hud_red and (in_battle_ui or (near(cols['banner'], (226, 199, 148), 22) and not main_like)):
         return 'BATTLE'      # 播放中橫幅，或（含快速戰鬥）下方按鈕列沒有家族鈕
-    if hud_red and near(cols['avatar'], (151, 70, 43), 30) and near(cols['tab'], (145, 135, 108), 40):
+    if main_like:
         return 'MAIN'
     return 'OTHER'
 
