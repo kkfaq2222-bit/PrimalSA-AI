@@ -110,6 +110,20 @@ def take_label_ok() -> bool:
     return '取出' in t or ('取' in t and '存' not in t)
 
 
+def ensure_take_ready(x: int, y: int) -> bool:
+    """點選倉庫格後按鈕要變成「取出寵物」。遊戲偶爾吃掉這一下點擊（或標籤還沒更新）：
+    先等一下重讀，還不是就重點該格（最多 2 次），仍不是才放棄（不會去按「存入寵物」）。"""
+    import time as _t
+    import petdepot1920 as pd
+    for k in range(3):
+        _t.sleep(0.4)
+        if take_label_ok():
+            return True
+        if k < 2:
+            pd.click(x, y, wait=800, note=f'petfetchimg 重點倉庫格（第 {k + 1} 次重試）')
+    return False
+
+
 def read_grid():
     """一次讀 20 格 → [vec×20]；讀不到回 None"""
     import uikit
@@ -328,7 +342,7 @@ def cmd_move(a):
             continue
         x, y = slot_center(i)
         pd.click(x, y, wait=800, note=f'petfetchimg 選第 {i + 1} 格')
-        if not take_label_ok():
+        if not ensure_take_ready(x, y):
             print('按鈕不是「取出寵物」→ 不按、停手')
             return 8
         pd.click(*TAKE_BTN, wait=1100, note='petfetchimg 取出寵物')
@@ -378,7 +392,7 @@ def cmd_fetch_numeric(a):
             continue
         x, y = slot_center(i)
         pd.click(x, y, wait=800, note=f'petfetchimg 選第 {i + 1} 格')
-        if not take_label_ok():
+        if not ensure_take_ready(x, y):
             print('按鈕不是「取出寵物」→ 不按、停手')
             return 8
         pd.click(*TAKE_BTN, wait=1200, note='petfetchimg 取出寵物')
@@ -428,7 +442,7 @@ def cmd_fetch(a):
             continue
         x, y = slot_center(i)
         pd.click(x, y, wait=800, note=f'petfetchimg 選第 {i + 1} 格「{name}」')
-        if not take_label_ok():
+        if not ensure_take_ready(x, y):
             print('按鈕不是「取出寵物」→ 不按、停手')
             return 8
         pd.click(*TAKE_BTN, wait=1200, note='petfetchimg 取出寵物')
