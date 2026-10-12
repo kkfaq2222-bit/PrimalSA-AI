@@ -141,6 +141,8 @@ def goto(role: int, tab: str):
     import petdepot1920 as pd
     if not pd.open_panel():
         raise SystemExit('寵物面板打不開')
+    other = 0 if role != 1 else 1          # 先切到別的角色再切回來才會刷新寵物欄（剛抓完的第 5 隻否則還顯示空格；2026-10-12 實測）
+    pd.click(pd.ROLE_X, pd.ROLE_Y[other], wait=900, note='petfetchimg 先切別人（刷新）')
     pd.click(pd.ROLE_X, pd.ROLE_Y[role - 1], wait=1200, note=f'petfetchimg 選角色 {role}')
     pd.click(*pd.TAB_DEPOT, wait=1300, note='petfetchimg 倉庫分頁')
     pd.click(*TAB[tab], wait=900, note=f'petfetchimg {tab} 分頁')

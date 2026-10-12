@@ -131,8 +131,8 @@ def log(m: str) -> None:
     print(time.strftime('%H:%M:%S'), m, flush=True)
 
 
-def run_phase(client: str, family: str, phase: str, do: bool) -> int:
-    steps = plan(client, family, phase)
+def run_phase(client: str, family: str, phase: str, do: bool, skip: int = 0) -> int:
+    steps = plan(client, family, phase)[skip:]
     log(f'===== 階段 {phase}（{family}，{len(steps)} 個指令）{"" if do else " [預覽，不執行]"} =====')
     for i, (title, argv) in enumerate(steps, 1):
         shown = ' '.join(str(x) for x in argv[1:]).replace(str(HERE) + os.sep, '')
@@ -164,6 +164,7 @@ def main(argv=None) -> int:
     ap.add_argument('--do', action='store_true', help='真的執行（預設只預覽指令）')
     ap.add_argument('--plan', action='store_true', help='只印計畫（同不加 --do）')
     ap.add_argument('--resume', action='store_true', help='跳過已完成的階段（all 時用）')
+    ap.add_argument('--skip-cmds', type=int, default=0, help='第一個執行的階段略過前 N 個指令（該階段前幾個指令已經手動 / 上次做完時用，例：r4 抓完寵但存倉庫失敗 → --skip-cmds 1）')
     ap.add_argument('--no-setup', action='store_true', help='all 時不做 setup（已經解散 + 存好了，例如做第二個系別）')
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, 'reconfigure'):
@@ -174,6 +175,7 @@ def main(argv=None) -> int:
         print(f'階段只能是 {PHASES} 或 all')
         return 2
     families = list(FAMILY) if a.family == 'all' else [a.family]
+    skip_left = a.skip_cmds
     for fi, fam in enumerate(families):
         ph = list(phases)
         if a.no_setup or fi > 0:                 # 第二個系別不用再解散 / 全存倉庫（第一個系別的 setup 已做）
@@ -183,7 +185,8 @@ def main(argv=None) -> int:
             if p in done and a.resume:
                 log(f'[{fam}] 階段 {p} 已完成，跳過')
                 continue
-            rc = run_phase(a.client, fam, p, do)
+            rc = run_phase(a.client, fam, p, do, skip=skip_left)
+            skip_left = 0                        # --skip-cmds 只套用在第一個實際執行的階段
             if rc:
                 return rc
             if do:
