@@ -37,5 +37,13 @@ check('換 3 次但第 4 隻 24 級不算', kt.done_by_swaps(3, 24, 25), False)
 check('出戰寵物 34 級（沒看到換寵）= 完成', kt.done_by_swaps(0, 34, 25), True)
 check('剛好 25 級、沒換寵不算', kt.done_by_swaps(0, 25, 25), False)
 check('讀不到等級不算', kt.done_by_swaps(3, None, 25), False)
+check('HUD 等級解析', kt.parse_pet_level('0轉44級'), 44)
+check('HUD 只讀到轉', kt.parse_pet_level('0轉'), None)
+check('HUD 漏數字', kt.parse_pet_level('0轉級'), None)
+class _W:
+    def __init__(self, vals): self.v = list(vals)
+    def stat(self): return {'petLevel': self.v.pop(0) if self.v else ''}
+check('第 3 次才讀到', kt.hud_pet_level(_W(['0轉', '', '0轉44級']), tries=5), 44)
+check('全部讀不到', kt.hud_pet_level(_W(['0轉', '0轉級']), tries=2), None)
 print(f'失敗 {fails}')
 sys.exit(1 if fails else 0)

@@ -61,14 +61,27 @@ def done_by_swaps(swaps: int, lv: int, target: int) -> bool:
     return lv > target or (swaps >= SLOTS - 1 and lv >= target)
 
 
-def hud_pet_level(walk):
-    """HUD 的出戰寵物等級（walk.stat 的 petLevel，例 '0轉17級'）；讀不到 None"""
+def parse_pet_level(text) -> int | None:
+    """'0轉44級' → 44；'0轉' / '' / '0轉級'（OCR 漏讀數字）→ None"""
     import re
-    try:
-        m = re.search(r'(\d+)\s*轉\s*(\d+)', str(walk.stat().get('petLevel') or ''))
-    except Exception:
-        return None
+    m = re.search(r'(\d+)\s*轉\s*(\d+)', str(text or ''))
     return int(m[2]) if m else None
+
+
+def hud_pet_level(walk, tries: int = 5):
+    """HUD 的出戰寵物等級（walk.stat 的 petLevel）。單次讀取不穩（實測 3 次只讀到 2 次），
+    所以連讀最多 tries 次，取第一個讀得到的；全部讀不到 None。"""
+    import time as _t
+    for k in range(tries):
+        try:
+            lv = parse_pet_level(walk.stat().get('petLevel'))
+        except Exception:
+            lv = None
+        if lv is not None:
+            return lv
+        if k < tries - 1:
+            _t.sleep(0.8)
+    return None
 
 
 def bar_levels(q, qf) -> list:
