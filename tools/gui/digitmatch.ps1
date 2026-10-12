@@ -67,6 +67,8 @@ if ($Image) {
 } else {
   [DM]::SetProcessDPIAware() | Out-Null
   $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
+  # 同時開多個客戶端時，用 PSA_EXE_MATCH 指定哪一個（沒選會拿到陣列 → IsIconic 型別轉換失敗；2026-10-12）
+  if ($env:PSA_EXE_MATCH -and $proc) { . (Join-Path $PSScriptRoot 'psaclient.ps1'); $proc = Select-PsaProc $proc }
   if (-not $proc) { Out-Json @{ ok = $false; error = '遊戲沒有在執行' } }
   $h = $proc.MainWindowHandle
   if ([DM]::IsIconic($h)) { Out-Json @{ ok = $false; error = '遊戲視窗最小化' } }
