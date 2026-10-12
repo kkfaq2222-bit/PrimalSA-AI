@@ -84,6 +84,29 @@ def hud_pet_level(walk, tries: int = 5):
     return None
 
 
+PET_TAB = (884, 150)             # 寵物面板右側「寵物」分頁（倉庫 884,285 / 圖鑑 884,420）；等級「0轉N」只有這個分頁才顯示
+
+
+def slot4_level(q, qf, role: int = 1, slot: int = 4):
+    """開寵物面板 → 切到「寵物」分頁 → 選第 slot 隻 → 讀中間下方黃字「0轉N」的 N（使用者 2026-10-12 的做法）。
+    外掛是 1→2→3→4 順序換，第 4 隻 >= 25 就代表 4 隻都達標。讀不到 None。"""
+    qf.open_pet_panel()
+    try:
+        q.click(PET_TAB, wait_ms=900, note='katan 寵物面板：寵物分頁')
+        other = 1 if role == 1 else 0
+        q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[other]), wait_ms=500, note='katan 刷新')
+        q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[role - 1]), wait_ms=900, note=f'katan 角色 {role}')
+        q.click((qf.PET_SLOT_X, qf.PET_SLOT_Y[slot - 1]), wait_ms=900, note=f'katan 選第 {slot} 隻')
+        for _ in range(3):
+            lv = qf.read_level_text()
+            if lv is not None:
+                return lv
+            q.sleep(0.6)
+        return None
+    finally:
+        qf.close_pet_panel()
+
+
 def bar_levels(q, qf) -> list:
     """開寵物面板，直接讀角色 1 寵物欄 1~4 格右下角的等級數字（不點進任何寵物）→ [等級 or None ×4]。
     2 位數以上 OCR 讀得到；1~9 級的單一數字讀不到 = None（視為還沒到 10 級）。"""
@@ -240,18 +263,16 @@ def cmd_train(a) -> int:
                     reset_pending = True
                 none_streak += 1
                 log('出戰寵物等級讀不到（1 級單一數字 / 戰鬥中）')
-                if none_streak >= 2:                   # HUD 連續讀不到：改開寵物面板，直接看 4 隻各自的等級
+                if none_streak >= 1:                   # HUD 讀不到：開寵物面板看第 4 隻的等級（>= 目標就全部達標）
                     try:
-                        bl = bar_levels(q, qf)
+                        l4 = slot4_level(q, qf)
                     except q.Halt:
-                        bl = []                        # 戰鬥中開不了面板：下一輪再試
-                    if bl:
-                        log(f'寵物面板等級（第 1~4 隻）：{bl}')
-                        if all(v is not None and v >= a.target for v in bl):
-                            finished = True
-                        tot = sum(v for v in bl if v)
-                        if tot > bar_best:
-                            bar_best, t_prog = tot, time.time()
+                        l4 = None                      # 戰鬥中開不了面板：下一輪再試
+                    log(f'寵物面板第 4 隻等級：{l4}')
+                    if l4 is not None and l4 >= a.target:
+                        finished = True
+                    elif l4 is not None and l4 > bar_best:
+                        bar_best, t_prog = l4, time.time()
                 if finished:
                     break
                 if time.time() - t_prog >= a.stall_min * 60:
