@@ -34,6 +34,15 @@ MAX_SAME_IN_WINDOW = 3   # 同一退出碼在 WINDOW_S 內最多自動重啟幾�
 WINDOW_S = 1800
 
 
+def loop_decision(rounds: int, trans, max_rounds: int, max_trans: int) -> str:
+    """--loop 一輪成功後要不要開下一輪：'next' 開下一輪 / 'stop' 到上限結束 / 'unknown' 讀不到轉數（停手通知，不盲目再轉）"""
+    if trans is None:
+        return 'unknown'
+    if trans >= max_trans or (max_rounds and rounds >= max_rounds):
+        return 'stop'
+    return 'next'
+
+
 def now() -> str:
     return time.strftime('%F %T')
 
@@ -126,10 +135,11 @@ def main() -> int:
             except Exception:
                 pass
             log(f'第 {rounds} 輪完成；目前轉數 {trans}')
-            if trans is None:
+            decision = loop_decision(rounds, trans, a.max_rounds, a.max_trans)
+            if decision == 'unknown':
                 stop(3, '第 %d 輪完成但讀不到轉數 → 不自動開下一輪，請人確認' % rounds, tail)
                 return 3
-            if trans >= a.max_trans or (a.max_rounds and rounds >= a.max_rounds):
+            if decision == 'stop':
                 log(f'已到上限（轉數 {trans}/{a.max_trans}、輪數 {rounds}/{a.max_rounds or "不限"}）→ 看門狗結束')
                 return 0
             history.clear()

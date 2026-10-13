@@ -768,8 +768,11 @@ def autoswap_off() -> None:
         raise q.Halt(q.EXIT_ASS, '外掛面板打不開（戰鬥中？）')
 
     def is_checked() -> bool:
-        c = q.px([AUTOSWAP_CHK])
-        return bool(c) and tuple(c[0]) != (255, 255, 255)
+        # 勾選框內暗色（✓ 筆劃）點數：有勾約 63、沒勾 0（2026-10-13 實測）。舊版只取 (439,270) 一個像素，
+        # 有勾時那個點也可能是白的 → 以為「沒勾」就不去關，自動轉換戰寵一直開著（使用者 2026-10-13 發現）
+        pts = [(x, y) for y in range(259, 281, 2) for x in range(428, 452, 2)]
+        c = q.px(pts) or []
+        return sum(1 for (r_, g_, b_) in c if r_ < 110 and g_ < 110 and b_ < 110) >= 8
 
     def turn_off(r: int, nm: str, tries: int = 3) -> bool:
         """回傳最後是否仍勾選"""

@@ -299,6 +299,11 @@ def cmd_train(a) -> int:
         log(f'5 人第 {a.slot} 隻都 >= {a.target} 級，關原地遇敵')
         q.set_ass(encounter=False)
         q.wait_battle_end()
+        try:
+            qf.autoswap_off()                          # 練完把自動轉換戰寵關掉（使用者 2026-10-13：後面的階段不該帶著它）
+            log('自動轉換戰寵已全部取消勾選')
+        except Exception as e:
+            log(f'警告：關自動轉換戰寵沒成功（{getattr(e, "msg", e)}），後面階段開頭還會再關一次')
         return 0
     except Exception as e:
         code = getattr(e, 'code', 99)

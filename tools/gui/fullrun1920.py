@@ -59,7 +59,8 @@ def plan(client: str, stage: str) -> list:
     """純函式：階段要跑的外部指令 [(說明, argv)]；內建階段（wait131 / stopenc / rebirth）回傳空清單"""
     c = ['--client', client]
     if stage == 'train':
-        return [('練等到隊長 131 級（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal'))]
+        return [('確認 5 人自動轉換戰寵沒勾（卡坦 / 恐龍博士練寵後可能還開著）', py('autoswapoff1920.py', *c)),
+                ('練等到隊長 131 級（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal'))]
     if stage == 'prebag':
         return [('任務前整理背包', py('bag1920.py', *c, '--do'))]
     if stage == 'quests':
@@ -82,7 +83,8 @@ def plan(client: str, stage: str) -> list:
     if stage == 'prep':
         return [('抓格魯西斯 / 分寵 / 鎖定騎寵 / 領金飛 / 設戰寵', py('rebirthprep1920.py', *c, '--do', '--resume'))]
     if stage == 'grind':
-        return [('練等 1~131（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal'))]
+        return [('確認 5 人自動轉換戰寵沒勾（卡坦 / 恐龍博士練寵後可能還開著）', py('autoswapoff1920.py', *c)),
+                ('練等 1~131（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal'))]
     return []
 
 

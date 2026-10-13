@@ -111,6 +111,16 @@ PrimalSA-AI/
 - 紅區、背景操作、驗證視窗等規則與 WSL 相同。
 - 實測狀態：WSL 完整驗證；Windows 原生用 Windows 版 Python 驗過 `walk.py --plan`、`gui info / shot / pixel`、`stat.ps1`（Git Bash 環境本身未實測）。
 
+## 5.3 一條龍（fullrun）與看門狗
+一輪 = `train`（練到 131）→ `wait131` → `stopenc` → `ledger` → `prebag` → `quests` → `riddle` → `katan` → `dino` → `gate` → `rebirth` → `gift`（開 N 轉新手禮盒、吃 2 倍智慧果 / 離線水晶、安撫之素 / 誘餌存共用倉庫）→ `organize` → `clear` → `prep`（抓格魯西斯坐騎、鎖定騎寵、領 1 級金飛）→ `grind`（練 1~131）。
+```
+uv run --no-project python tools/gui/fullrun_watchdog.py --client kkfaq11111                      # 跑一輪，出錯自動重啟 / 卡住偵測
+uv run --no-project python tools/gui/fullrun_watchdog.py --client kkfaq11111 --loop --max-rounds 2 # 自動接下一輪（轉數到 --max-trans 5 或輪數到就停）
+```
+- 狀態檔 `tools/.cache/fullrun-<client>.json`（已完成階段）；停手旗標 `fullrun-flag-<client>.json`；`PAUSE-<client>` 暫停。
+- 恐龍博士只有「接任務」組隊，交任務單人；猜謎三兄弟、卡坦組隊交。龍王的守護沒了不停手。
+- 開背包 / 人物 / 寵物等面板一律「打開 → 偵測 → 沒成功 ESC 復原再重來」；道具浮窗按鈕與 OCR 做法見 PLAYBOOK 第 5 節。
+
 ## 5.1 怎麼查知識庫
 1. 先看 `knowledge/README.md` 的分類目錄。
 2. **用名稱 grep**（繁中、簡中、韓文都可；畫面上看到韓文就搜韓文）：

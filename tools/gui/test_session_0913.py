@@ -17,6 +17,7 @@ def check(name, got, want):
 import depotlvl1920 as dl  # noqa: E402
 import dino1920 as dino  # noqa: E402
 import fullrun1920 as fr  # noqa: E402
+import fullrun_watchdog as wd  # noqa: E402
 import newbiebox1920 as nb  # noqa: E402
 import petrest1920 as pr  # noqa: E402
 import petfetchimg1920 as pf  # noqa: E402
