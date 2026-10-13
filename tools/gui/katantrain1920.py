@@ -24,7 +24,7 @@ ROOT = HERE.parents[1]
 TRAIN_SPOT = '五兄弟洞窟'
 QUEST = '卡坦的願望'
 FIRST_POLL_S = 150            # 使用者：150 秒後第一次檢查
-POLL_S = 30                   # 每隻約 1.5 分鐘升到 25，輪詢要比這短才不會漏掉換寵
+POLL_S = 20                   # 使用者 2026-10-12：150 秒後第一次檢查，沒達標每 20 秒回來再看（只重看還沒達標的角色，從角色 1 到角色 5）
 SLOTS = 4                     # 任務寵在寵物欄 1~4 格（第 5 格不動）
 
 
@@ -117,6 +117,9 @@ def slot_levels(q, qf, roles, slot: int = 4) -> dict:
             other = 1 if r == 1 else 0
             q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[other]), wait_ms=450, note='katan 刷新')
             q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[r - 1]), wait_ms=800, note=f'katan 角色 {r}')
+            if slot != 1:                                  # 不明原因沒出戰：偵測再補出戰第 1 隻（使用者 2026-10-13）
+                if not qf.ensure_battle(0):
+                    log(f'警告：角色 {r} 第 1 隻沒有出戰（按了出戰仍沒變 / 空格）')
             q.click((qf.PET_SLOT_X, qf.PET_SLOT_Y[slot - 1]), wait_ms=800, note=f'katan 選第 {slot} 隻')
             lv = None
             for _ in range(3):
@@ -162,8 +165,8 @@ def battle_first(q, qf) -> None:
             other = 0 if r else 1
             q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[other]), wait_ms=500, note='katan 刷新')
             q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[r]), wait_ms=900, note=f'katan 角色 {r + 1}')
-            q.click((qf.PET_SLOT_X, qf.PET_SLOT_Y[0]), wait_ms=800, note='katan 選第 1 隻')
-            q.click(qf.PET_BATTLE_BTN, wait_ms=900, note='katan 第 1 隻出戰')
+            if not qf.ensure_battle(0):                  # 先看狀態，不是出戰才按，並驗證（不盲點）
+                log(f'警告：角色 {r + 1} 第 1 隻沒有出戰（按了出戰仍沒變 / 空格）')
     finally:
         qf.close_pet_panel()
 
@@ -267,6 +270,8 @@ def cmd_train(a) -> int:
         t0 = time.time()
         best, t_prog = sum(v for v in lv.values() if v), time.time()
         first = True
+        last = dict(lv)                  # 每個角色最近一次讀到的等級
+        pending = [r for r in roles if not ge_all(last, [r], a.target)]
         while True:
             pausegate.wait(log)
             q.sleep(FIRST_POLL_S if first else POLL_S)
@@ -276,13 +281,16 @@ def cmd_train(a) -> int:
                 if q.state() == 'OTHER':
                     raise q.Halt(q.EXIT_HALT, '練寵中連續看到不認得的畫面（疑似驗證視窗）：停手')
             try:
-                lv = slot_levels(q, qf, roles, slot=a.slot)
+                got = slot_levels(q, qf, pending, slot=a.slot)     # 只讀還沒達標的角色（依 1→5 順序）
             except q.Halt:
                 log('戰鬥中開不了寵物面板，下一輪再讀')
                 continue
+            last.update({r: v for r, v in got.items() if v is not None})
+            lv = last
+            pending = [r for r in roles if not ge_all(last, [r], a.target)]
             tot = sum(v for v in lv.values() if v)
-            log(f'練寵進度（{int(time.time() - t0)} 秒）：第 {a.slot} 隻 {lv}（目標 {a.target}）')
-            if ge_all(lv, roles, a.target):
+            log(f'練寵進度（{int(time.time() - t0)} 秒）：第 {a.slot} 隻 {lv}（目標 {a.target}）' + (f'；還沒達標：{pending}' if pending else ''))
+            if not pending:
                 break
             if tot > best:
                 best, t_prog = tot, time.time()
@@ -363,12 +371,16 @@ def cmd_dino_handin(a) -> int:
         if rc != 0:
             log(f'改休息失敗（退出碼 {rc}）→ 停手')
             return 4
-        ensure_team(q)
+        # 恐龍博士只有「接任務」要組隊（5 人一起傳到研究所），交任務一律單人（使用者 2026-10-13）。
+        # 已經接過（追蹤欄有）就不用再組隊：直接解散、單人交；重試時不會再白花 2~4 分鐘組隊。
+        q.preflight()
+        q.TRUST_TEAM = True
         if qf.find_track_row('恐龍博士', scroll=False, reveal=False) is None:
+            ensure_team(q)
             log('=== 接「恐龍博士」（5 人組隊，傳到研究所跟哈魯對話）===')
             qf.accept_top('恐龍博士')
         else:
-            log('追蹤欄已有恐龍博士，不重接')
+            log('追蹤欄已有恐龍博士，不重接、也不組隊（單人交任務）')
         log('=== 隊長解散，5 人逐一交 ===')
         q.disband()
         for r in (1, 2, 3, 4, 5):

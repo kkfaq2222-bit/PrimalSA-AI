@@ -64,13 +64,14 @@ def parse_level(s: dict) -> tuple[int, int] | None:
 
 
 def first_read_ok(s: dict) -> bool:
-    """啟動後第一次確認等級用：隊長等級要讀到；寵物等級也讀到時必須同轉生數、等級差 ≤ 2（不一致不採信）。
+    """啟動後第一次確認等級用：隊長等級要讀到；寵物等級也讀到時等級差 ≤ 2（不一致不採信；轉生數不比，寵物的轉數跟人物無關）。
     寵物等級讀不到（1920 的寵物欄常讀不到）就只靠隊長等級 + 後面「連續兩次相同」的確認。
     只升不降的保護要有「已確認的等級」才擋得住；第一次若兩次都漏讀同樣位數（112 讀成 2）就會傳錯地圖。"""
     a, b = _one_level(s.get('level')), _one_level(s.get('petLevel'))
     if not a:
         return False
-    return bool(not b or ((a[0] == b[0] or -1 in (a[0], b[0])) and abs(a[1] - b[1]) <= 2))
+    # 只比等級：寵物的轉生數跟人物無關（人 2 轉、寵 0 轉很正常；舊版要求同轉生數 → 轉生後永遠「不一致」、只觀察不傳送，2026-10-13）
+    return bool(not b or abs(a[1] - b[1]) <= 2)
 
 
 def target_for(level: int, stages=None) -> str | None:
@@ -126,6 +127,9 @@ def ensure_ass(dry_run: bool = False) -> bool:
     return r.returncode == 0
 
 
+ASS_AFTER_ARRIVE = True        # --no-ass 時關掉到點後的外掛勾選檢查
+
+
 def move_to(spot: str) -> None:
     sx, sy, spot_map = heal.SPOTS[spot]
     out = heal.gui('seq', heal.encounter_steps(False) + f'; waitpix 20000 {heal.SIG_NO_BATTLE} 40')
@@ -134,6 +138,12 @@ def move_to(spot: str) -> None:
     heal.teleport(heal.TAB_LEVEL, (sx, sy), spot_map, spot, want_xy=heal.SPOT_XY.get(spot_map))
     heal.set_encounter(True)
     log(f'已到 {spot}，原地遇敵開')
+    # 到練功區要檢查 5 人快速戰鬥 + 自動戰鬥有沒有勾（使用者 2026-10-13；傳送 / 換點後設定可能被洗掉，沒勾的補勾）
+    try:
+        if ASS_AFTER_ARRIVE:
+            ensure_ass()
+    except Exception as e:
+        log(f'到點後外掛勾選檢查失敗（{e!r}），之後換點 / 補血時會再檢查')
 
 
 def main() -> int:
@@ -156,6 +166,8 @@ def main() -> int:
     ap.add_argument('--stop-at-end', action='store_true', help=f'隊長達 {END_LEVEL} 級就結束監測（預設改成留在練功點繼續補血 / 檢查）')
     ap.add_argument('--dry-run', action='store_true', help='只印會做什麼，不傳送')
     a = ap.parse_args()
+    global ASS_AFTER_ARRIVE
+    ASS_AFTER_ARRIVE = not a.no_ass
     if layout.current() not in layout.SUPPORTED:
         log(f'不支援 {layout.current()} 版面，見 ui/layout-1920x1017.md')
         return 2

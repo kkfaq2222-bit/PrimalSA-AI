@@ -2,7 +2,7 @@
 """背包整理（1920×1017 專用）：5 個角色逐一把「存個人倉庫」與「刪除」名單處理掉。只用標準庫 + ass / uikit 同一套 gui 呼叫。
 
 規則來源（使用者 2026-10-10 / 11，見記憶 psa-quest-reward-handling）：
-  存個人倉庫：薩姆吉爾的首飾、薩頓家的秘藥、英雄的祝福、人龍隨機蛋、…（STORE）
+  存個人倉庫：薩頓家的秘藥、英雄的祝福、人龍隨機蛋、…（STORE）
   刪除（不可逆）：儀之兜、老爺爺的護身符、空想的衣服 / 帽子 / 豎琴、亞姆亞姆的斧頭、…（DELETE）
   名單外的道具一律不動，只列出來（回報使用者）。
 
@@ -37,15 +37,16 @@ SLOT_X = [500, 570, 635, 705, 770]
 SLOT_Y = [146, 212, 278]
 NAME_BOX = (470, 118, 345, 38)       # 背包第 1 列道具名（格子上方小字；「顯示道具名」開著時才讀得到）
 
-STORE = ['薩姆吉爾的首飾', '薩頓家的秘藥', '英雄的祝福', '人龍隨機蛋']
-PUBLIC_STORE = ['龍王的守護']      # 角色 2~5 的存公共倉庫；角色 1（序 0）一律留身上使用（使用者 2026-10-12，main 裡略過）
-DELETE = ['儀之兜', '老爺爺的護身符', '空想的衣服', '空想的帽子', '空想的豎琴', '亞姆亞姆的斧頭',
+STORE = ['薩頓家的秘藥', '英雄的祝福', '人龍隨機蛋']
+PUBLIC_STORE = ['龍王的守護', '誘餌']   # 誘餌 = 寵物誘餌（使用者 2026-10-13：存共用倉庫；OCR 常讀成「寵誘餌」，所以只用「誘餌」兩字）      # 角色 2~5 的存公共倉庫；角色 1（序 0）一律留身上使用（使用者 2026-10-12，main 裡略過）
+DELETE = ['精靈王之弓', '薩姆吉爾的首飾', '千年龜的殼',     # 使用者 2026-10-12 新增刪除（原本精靈王之弓留身上、首飾存個人倉庫）；千年龜的殼 使用者截圖確認：名稱就是「千年龜的殼」、數量 1、不堆疊（每個佔一格），開著「顯示道具名」時名稱在格子上方一行
+          '儀之兜', '老爺爺的護身符', '空想的衣服', '空想的帽子', '空想的豎琴', '亞姆亞姆的斧頭',
           '月光的手鐲', '馬祖的斧頭', '馬祖的矛', '馬祖的棍棒', '山賊的羽飾', '杉的手環',
           '龍之槍', '龍之鎧', '龍之衣', '不可思議的貝殼', '仙尼亞的花',
           '郵寄物', '切繩石',          # 馬祖快遞任務道具（使用者 2026-10-11 加入刪除名單）
           '巴巴洛的許可證', '龍的魅力之笛',
           '泰坦部隊的通行證', '米蘭達部隊的通行證', '愛麗兒部隊的通行證', '部隊的通行證']   # 英雄島後傳獎勵（使用者 2026-10-12 加入刪除名單；名稱在格子內折兩行，OCR 常只讀到後半）   # 礦工的比賽 / 龍的巢穴獎勵（使用者 2026-10-11 加入；等使用者說整理背包才一次刪）
-KEEP_FOREVER = ['大地的羈絆', '風的鎖', '水的戒指', '火的羽毛飾品', '精靈王之弓']   # 留在身上、絕不處理（使用者規定）
+KEEP_FOREVER = ['大地的羈絆', '風的鎖', '水的戒指', '火的羽毛飾品']   # 留在身上、絕不處理（使用者規定）
 
 sleep = time.sleep
 
@@ -79,10 +80,14 @@ def bag_open() -> bool:
 
 
 def open_bag() -> bool:
-    for _ in range(3):
+    """開背包並偵測；沒開成（畫面是別的面板 / 點擊被吃掉）→ ESC 復原再重新點（使用者規則 2026-10-13），最多 3 次"""
+    for k in range(3):
         if bag_open():
             return True
-        click(*BAG_BTN, wait=1500, note='bag1920 開背包')
+        if k > 0:
+            gui('key', '{ESC}', note='bag1920 背包沒開成 → ESC 復原')
+            time.sleep(0.8)
+        click(*BAG_BTN, wait=1500, note=f'bag1920 開背包（第 {k + 1}/3 次）')
     return bag_open()
 
 
@@ -133,6 +138,9 @@ def read_names() -> list:
     for y in (118, 184, 250):                 # 3 列 × 5 格；名字在格子上方小字，每列 y 差 66
         for x in SLOT_X:
             t = ocr((x - 32, y, 66, 36), '-Zooms', '3,4', '-Dark', '170').strip()
+            if not t or classify(t) in ('unknown', 'empty'):       # 讀不出來 / 認不得 → 換一組設定再讀，兩次結果串起來比對（使用者 2026-10-13：會漏存）
+                t2 = ocr((x - 32, y, 66, 36), '-Zooms', '2,3').strip()
+                t = (t + t2) if t2 else t
             out.append(t)
     return out
 
@@ -177,13 +185,14 @@ def show(res: dict) -> None:
 
 
 def do_store(i: int, slots: list, public: bool = False) -> None:
-    """存倉庫：倉庫分頁 → 個人 / 公共 → 雙擊背包格（右半）→ 回背包分頁"""
+    """存倉庫：倉庫分頁 → 個人 / 公共 → 單擊背包格 → 點「存入」→ 回背包分頁"""
     click(*TAB_DEPOT, wait=1200, note='bag1920 倉庫')
     click(*(DEPOT_PUBLIC if public else DEPOT_PERSONAL), wait=700, note='bag1920 公共倉庫' if public else 'bag1920 個人倉庫')
     for j in slots:
         x, y = SLOT_X[j % 5], SLOT_Y[j // 5]
-        # 雙擊後跳道具浮窗，要再按「存入」488,400（2026-10-11 實機量；有些道具雙擊就直接存，按到空處無害）
-        gui('seq', f'dclick {x} {y}; wait 1000; click 488 400; wait 1000', note=f'bag1920 角色{i + 1} 存個人倉庫 格{j}')
+        # 單擊道具格 → 跳出道具詳細介紹浮窗（藍色「存入」鈕在 488,400）→ 點存入（使用者 2026-10-13 改：雙擊快速法在更新後存不進去；
+        # 單擊 + 點存入 2026-10-13 實機驗證：人龍隨機蛋成功進個人倉庫）。外層仍有「存完重讀、最多 3 輪」防漏存。
+        gui('seq', f'click {x} {y}; wait 1000; click 488 400; wait 1200', note=f'bag1920 角色{i + 1} 存倉庫 格{j}（單擊 + 存入）')
     click(*TAB_BAG, wait=900, note='bag1920 回背包')
 
 
@@ -239,18 +248,40 @@ def main(argv=None) -> int:
         return 0
     for i in roles:
         select_role(i)
+
+        def plan_row():
+            names_ = read_names()
+            row_ = [(j, nm, classify(nm)) for j, nm in enumerate(names_)]
+            st = [j for j, nm, c in row_ if c == 'store']
+            pb = [j for j, nm, c in row_ if c == 'public']
+            if i == 0:    # 使用者 2026-10-12：角色 1 的龍王的守護不存公共倉庫，留在身上使用（誘餌等其他公共項目照存）
+                pb = [j for j in pb if not _hit(row_[j][1], '龍王的守護')]
+            return row_, st, pb
+
         row = res[i]
         store = [j for j, n, c in row if c == 'store']
         pub = [j for j, n, c in row if c == 'public']
         if i == 0:
-            pub = []          # 使用者 2026-10-12：角色 1 的龍王的守護不存公共倉庫，留在身上使用
+            pub = [j for j in pub if not _hit(row[j][1], '龍王的守護')]
+        if a.only != 'delete':
+            for rnd in range(3):                # 防漏存（使用者 2026-10-13）：存完重新讀一次，還有就再存，最多 3 輪
+                if rnd > 0:
+                    row, store, pub = plan_row()
+                if not store and not pub:
+                    break
+                if pub:
+                    log(f'角色{i + 1} 存公共倉庫（第 {rnd + 1} 輪）：{[row[j][1] for j in pub]}')
+                    do_store(i, pub, public=True)
+                if store:
+                    log(f'角色{i + 1} 存個人倉庫（第 {rnd + 1} 輪）：{[row[j][1] for j in store]}')
+                    do_store(i, store)
+            row, store, pub = plan_row()
+            if store or pub:
+                log(f'警告：角色{i + 1} 存倉庫 3 輪後仍有漏存：{[row[j][1] for j in store + pub]}（倉庫滿 / 鎖定 / 名稱讀錯？請看畫面）')
+            leftover_unknown = [row[j][1] for j, n, c in row if c == 'unknown']
+            if leftover_unknown:
+                log(f'提醒：角色{i + 1} 背包還有名單外 / 認不得的道具：{leftover_unknown}')
         dele = [j for j, n, c in row if c == 'delete']
-        if pub and a.only != 'delete':
-            log(f'角色{i + 1} 存公共倉庫：{[row[j][1] for j in pub]}')
-            do_store(i, pub, public=True)
-        if store and a.only != 'delete':
-            log(f'角色{i + 1} 存個人倉庫：{[row[j][1] for j in store]}')
-            do_store(i, store)
         if dele and a.only != 'store':
             names = [row[j][1] for j in dele]
             log(f'角色{i + 1} 刪除：{names}')

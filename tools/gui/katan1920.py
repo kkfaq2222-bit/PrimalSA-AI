@@ -40,7 +40,8 @@ FAMILY = {
 ALL_ROLES = [1, 2, 3, 4, 5]
 # 恐龍博士（任務 2016；使用者 2026-10-12）：5 人最後都是 寵物 1 = 魯尼帖斯、寵物 2 = 貝魯卡，不騎乘
 DINO_PHASES = ['setup', 'r1', 'r2', 'r3', 'train', 'handin', 'cleanup']
-BAIT_SOURCE = 'public'            # 誘餌全放共用倉庫（使用者 2026-10-12）；鯊魚（角色 2）背包已有誘餌 → 不再檢查；火雞（角色 3）只在 r1 檢查 / 取一次
+NAME_FIRST = 'WW'                 # 鯊魚（角色 2）/ 火雞（角色 3）每輪抓完第一隻改的名字（遊戲不收單字元；使用者 2026-10-13）
+BAIT_SOURCE = 'public'          # 誘餌全放共用倉庫（使用者 2026-10-12）；鯊魚（角色 2）背包已有誘餌 → 不再檢查；火雞（角色 3）只在 r1 檢查 / 取一次
 PHASES = ['setup', 'r1', 'r2', 'r3', 'r4', 'final', 'train', 'handin', 'cleanup']
 
 
@@ -56,6 +57,7 @@ def plan_dino(client: str, phase: str) -> list:
     if phase == 'setup':
         out.append(('解散隊伍（抓寵要單人）', py('q1920.py', *c, 'disband')))
         out.append(('5 人身上的寵物全部存個人倉庫（卡坦剩的 / 朵拉比斯，寵物欄要空才抓得滿）', py('petdepot1920.py', *c, '--do')))
+        out.append(('確認 5 人寵物欄全空（有寵物就停手，避免雜寵混入）', py('petdepot1920.py', *c, '--check-empty')))
         out.append(('角色 3 背包剩的寵物誘餌存回共用倉庫（火雞抓完還在它身上）', py('baitstore1920.py', *c, '--role', 3)))
         return out
     if phase == 'r1':
@@ -75,12 +77,13 @@ def plan_dino(client: str, phase: str) -> list:
                     py('petfetchimg1920.py', *c, 'storebar', '--role', 5, '--slots', '5', '--tab', 'public', '--do')))
         return out
     if phase == 'r3':
-        out.append(('角色 5 再抓 1 隻貝魯卡（拆分誘餌只留 1 個，抓 1 隻就停；補進空的第 5 格）',
-                    py('catchrun1920.py', *c, '--role', 5, '--system', '老虎系', '--pet', '貝魯卡', '--n', 1, '--split', '--source', BAIT_SOURCE)))
+        out.append(('角色 5 再抓 1 隻貝魯卡（只剩第 5 格空，抓 1 隻欄滿遊戲自己停（不拆分：2026-10-13 拆分把整疊誘餌存回倉庫 → 可抓捕數 0 → 空抓））',
+                    py('catchrun1920.py', *c, '--role', 5, '--system', '老虎系', '--pet', '貝魯卡', '--n', 1, '--source', BAIT_SOURCE)))
         out.append(('角色 5 存第 5、4、3 格到公共（公共現在 4 隻貝魯卡；第 2 格留下）',
                     py('petfetchimg1920.py', *c, 'storebar', '--role', 5, '--slots', '5,4,3', '--tab', 'public', '--do')))
         out.append(('貝魯卡分給角色 1、2、3、4（各領公共第 1 格）',
                     py('petgive1920.py', *c, '--first', '--plan', '1:貝魯卡;2:貝魯卡;3:貝魯卡;4:貝魯卡')))
+        out.append(('角色 5 剩餘寵物誘餌存回共用倉庫（抓完放回去）', py('baitstore1920.py', *c, '--role', 5)))
         return out
     if phase == 'train':
         out.append(('練寵：魯尼 18 級後換貝魯卡，5 人第 2 隻 >= 30 級才收（五兄弟洞窟；30 分鐘沒進展就停手）',
@@ -109,6 +112,7 @@ def plan(client: str, family: str, phase: str) -> list:
     if phase == 'setup':
         out.append(('解散隊伍', py('q1920.py', *c, 'disband')))
         out.append(('5 人寵物全部存個人倉庫（含騎寵）', py('petdepot1920.py', *c, '--do')))
+        out.append(('確認 5 人寵物欄全空（有寵物就停手，避免雜寵混入）', py('petdepot1920.py', *c, '--check-empty')))
         return out
     if phase in ('r1', 'r2', 'r3'):
         k = kinds[int(phase[1]) - 1]
@@ -118,7 +122,9 @@ def plan(client: str, family: str, phase: str) -> list:
         # 不勾自動存倉庫（使用者規定）：5 隻抓在寵物欄 → 手動 2~5 格存公共（4 隻）、第 1 格存個人（1 隻）
         out.append((f'抓 {k} ×5（不勾自動存倉庫，5 隻留在寵物欄）', py('catchrun1920.py', *c, '--role', catcher, '--system', system,
                                                               '--pet', k, '--n', 5, '--source', BAIT_SOURCE,
-                                                              *(['--no-bait-check'] if (family == 'shark' or phase != 'r1') else []))))
+                                                              *(['--no-bait-check'] if phase != 'r1' else []))))   # r1 一律檢查背包、沒誘餌就從公共倉庫領（鯊魚 2026-10-13 假設背包有而沒領 → 3.8 秒空抓）
+        # 第一隻改名 WW（使用者 2026-10-13）：之後從個人倉庫只領名字是 WW 的，不會領錯；遊戲名字至少 2 字所以不用 1
+        out.append((f'寵物欄第 1 格改名 {NAME_FIRST}（之後只領這個名字）', py('petname1_1920.py', *c, '--role', catcher, '--slots', '1', '--name', NAME_FIRST)))
         out.append(('寵物欄第 2~5 格存公共（4 隻）', py('petfetchimg1920.py', *c, 'storebar', '--role', catcher, '--slots', '2,3,4,5', '--tab', 'public', '--do')))
         out.append(('寵物欄第 1 格存個人倉庫（1 隻）', py('petfetchimg1920.py', *c, 'storebar', '--role', catcher, '--slots', '1', '--tab', 'personal', '--do')))
         # 公共倉庫永遠只放這一批同一種的 4 隻 → 一律固定領第 1 格（不認圖、不認顏色；火雞類彼此太像，樣板會混淆）
@@ -129,12 +135,12 @@ def plan(client: str, family: str, phase: str) -> list:
         k = kinds[3]
         out.append((f'抓 {k} ×5（不自動存，5 隻留在寵物欄）', py('catchrun1920.py', *c, '--role', catcher, '--system', system,
                                                         '--pet', k, '--n', 5, '--source', BAIT_SOURCE, '--no-bait-check')))
+        out.append((f'寵物欄第 1 格改名 {NAME_FIRST}（留在身上的第一隻也統一）', py('petname1_1920.py', *c, '--role', catcher, '--slots', '1', '--name', NAME_FIRST)))
         out.append(('寵物欄第 2~5 格存公共（第 1 格留著）', py('petfetchimg1920.py', *c, 'storebar', '--role', catcher, '--slots', '2,3,4,5', '--tab', 'public', '--do')))
         out.append((f'{k} 分給角色 ' + '、'.join(map(str, others)),
                     py('petgive1920.py', *c, '--first', '--plan', ';'.join(f'{r}:{k}' for r in others))))
-        if family == 'shark':
-            # 鯊魚抓完了：剩的寵物誘餌整疊存回共用倉庫道具（火雞組之後從公共倉庫取；使用者 2026-10-12）
-            out.append((f'角色 {catcher} 剩餘寵物誘餌存共用倉庫', py('baitstore1920.py', *c, '--role', catcher)))
+        # 抓完一律把剩的寵物誘餌整疊存回共用倉庫道具（鯊魚 / 火雞 / 恐龍博士都一樣；使用者 2026-10-12：抓完也要放回去）
+        out.append((f'角色 {catcher} 剩餘寵物誘餌存共用倉庫', py('baitstore1920.py', *c, '--role', catcher)))
         return out
     if phase == 'train':
         out.append(('練寵到 25 級（五兄弟洞窟；30 分鐘沒進展就停手）', py('katantrain1920.py', *c, 'train')))

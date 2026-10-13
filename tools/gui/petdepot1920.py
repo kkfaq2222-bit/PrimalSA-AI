@@ -77,10 +77,14 @@ def panel_open() -> bool:
 
 
 def open_panel() -> bool:
-    for _ in range(3):
+    """開寵物面板並偵測；沒開成 → ESC 復原再重新點（使用者規則 2026-10-13），最多 3 次"""
+    for k in range(3):
         if panel_open():
             return True
-        click(*PET_BTN, wait=1500, right=2, note='petdepot 開寵物面板')
+        if k > 0:
+            gui('key', '{ESC}', note='petdepot 寵物面板沒開成 → ESC 復原')
+            time.sleep(0.8)
+        click(*PET_BTN, wait=1500, right=2, note=f'petdepot 開寵物面板（第 {k + 1}/3 次）')
     return panel_open()
 
 
@@ -121,6 +125,7 @@ def main(argv=None) -> int:
     ap.add_argument('--client', default=os.environ.get('PSA_EXE_MATCH', 'kkfaq11111'))
     ap.add_argument('--do', action='store_true', help='真的存（預設只預覽名稱）')
     ap.add_argument('--roles', default='1,2,3,4,5')
+    ap.add_argument('--check-empty', action='store_true', help='只檢查：--roles 每個角色的寵物欄 5 格都要是空的（不存、不點寵物）；有寵物回傳 6')
     ap.add_argument('--public', action='store_true', help='存公共寵物倉庫（預設個人）；角色 4、5 的火雞用這個')
     a = ap.parse_args(argv)
     os.environ['PSA_EXE_MATCH'] = a.client
@@ -139,6 +144,19 @@ def main(argv=None) -> int:
         print('寵物面板打不開（戰鬥 / 對話中？）')
         return 3
     goto_depot()
+    if a.check_empty:                                  # 雜寵混入檢查：解任務前寵物欄必須全空（使用者 2026-10-12）
+        bad = {}
+        for r in [int(x) - 1 for x in a.roles.split(',') if x.strip()]:
+            click(ROLE_X, ROLE_Y[r], wait=1200, note=f'petdepot 檢查空欄：角色 {r + 1}')
+            left = [i + 1 for i in range(5) if not slot_empty(i)]
+            if left:
+                bad[r + 1] = left
+        click(*CLOSE_X, wait=600, note='petdepot 關面板')
+        if bad:
+            log('寵物欄不是空的（格號）：' + '；'.join(f'角色{r} 第 {",".join(map(str, v))} 格' for r, v in bad.items()))
+            return 6
+        log('5 人寵物欄全空')
+        return 0
     record = load_log()
     for r in [int(x) - 1 for x in a.roles.split(',') if x.strip()]:
         click(ROLE_X, ROLE_Y[r], wait=1200, note=f'petdepot 選角色 {r + 1}')

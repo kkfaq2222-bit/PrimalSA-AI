@@ -28,6 +28,7 @@ r"""用「頭像顏色樣板」從寵物倉庫領回指定的寵物（1920×1017
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -83,6 +84,10 @@ def best_match(vec: list, tpls: dict):
 def is_numeric_name(text: str) -> bool:
     """剛抓的寵物名稱是四圍數字（例 49/10/5/4）；本名都是中文。數字 >= 3 個且中文字 <= 1 個才算。"""
     t = str(text or '')
+    if re.match(r'^\s*\d{1,3}\s*/', t):          # 「31/7/3/9」名稱較長時 OCR 只讀到「31/」（2026-10-13 11111 火雞）
+        return True
+    if t.strip().upper() in ('11', 'WW'):        # 抓完第一隻改名 WW（遊戲名字至少 2 字；使用者 2026-10-13）：之後只領名字是 WW 的（舊的 11 也認）
+        return True
     digits = sum(ch.isdigit() for ch in t)
     cjk = sum('一' <= ch <= '鿿' for ch in t)
     return digits >= 3 and cjk <= 1
@@ -396,8 +401,51 @@ def cmd_move(a):
     return 0
 
 
+SHORT_INK = (10, 30)     # 名稱列白字取樣點數：「11」約 17~19、中文本名 54~77、空格 <= 17（所以要再排除空格）
+
+
+def name_ink_all() -> list:
+    """20 格名稱列的白字取樣點數 [int×20]（OCR 讀不出「11」這種短名，改看字的多寡；唯讀）"""
+    import uikit
+    pts, spans = [], []
+    for i in range(COLS * ROWS):
+        x0, y0, w, h = name_box(i)
+        p = [(x0 + dx, y0 + dy) for dy in range(0, h, 2) for dx in range(0, w, 2)]
+        spans.append((len(pts), len(pts) + len(p)))
+        pts += p
+    cols = uikit.px(pts) or []
+    if len(cols) != len(pts):
+        return [0] * (COLS * ROWS)
+    return [sum(1 for r, g, b in cols[s:e] if r > 215 and g > 215 and b > 215) for s, e in spans]
+
+
+def short_named_slots(names: list) -> list:
+    """名字是「11」的格（0 起算）：非空格 + 白字數在 SHORT_INK + OCR 沒讀出 2 個以上中文字"""
+    import uikit
+    ink = name_ink_all()
+    pts, spans = [], []
+    for i in range(COLS * ROWS):          # 非空格：卡片底部有綠色「0轉N級」字（空格只有腳印圖）
+        cx, cy = slot_center(i)
+        p = [(cx - 30 + dx, cy + 4 + dy) for dy in range(0, 28, 2) for dx in range(0, 61, 3)]
+        spans.append((len(pts), len(pts) + len(p)))
+        pts += p
+    cols = uikit.px(pts) or []
+    if len(cols) != len(pts):
+        return []
+    out = []
+    for i, (s, e) in enumerate(spans):
+        green = sum(1 for r, g, b in cols[s:e] if g > 150 and g - r > 50 and g - b > 90)
+        if green < 4:
+            continue
+        cjk = sum('一' <= ch <= '鿿' for ch in str(names[i]))
+        if SHORT_INK[0] <= ink[i] <= SHORT_INK[1] and cjk <= 1:
+            out.append(i)
+    return out
+
+
 def cmd_fetch_numeric(a):
-    """領「名稱是數字」的寵物 N 隻（別的寵物都是本名，不會錯亂）：每領一隻重新讀整頁名稱、重新定位"""
+    """領「名稱是數字」的寵物 N 隻（別的寵物都是本名，不會錯亂）：每領一隻重新讀整頁名稱、重新定位
+    數字名稱 = OCR 讀到的四圍數字（31/7/3/9），或名字被改成「11」的短名（OCR 讀不出來，改看字的多寡）"""
     import petdepot1920 as pd
     goto(a.role, a.tab)
     before = bar_filled()
@@ -409,7 +457,7 @@ def cmd_fetch_numeric(a):
     taken = 0
     for k in range(1, a.numeric + 1):
         names = read_names()
-        hits = [i for i, nm in enumerate(names) if is_numeric_name(nm)]
+        hits = sorted(set(i for i, nm in enumerate(names) if is_numeric_name(nm)) | set(short_named_slots(names)))
         if not hits:
             print(f'找不到數字名稱的寵物 → 停手（已領 {taken} 隻）')
             return 5

@@ -2,9 +2,10 @@
 # 用法：ocr.ps1 X Y W H [-Zoom 3] [-Dark 150]   → 輸出一行 JSON：{"ok":true,"lines":[{"text":"伐木證書","y":310,"x":205},...]}
 #   -Dark N：深色字二值化門檻（max(R,G,B) < N 視為字；0 = 不二值化直接放大）。任務追蹤標題是深棕字 → 預設 150。
 #   -Light N：亮字二值化門檻（min(R,G,B) > N 視為字；白色數字用，例 200；優先於 -Dark）。
+#   -Green N：綠字二值化（G > N 且 G-R > 50、G-B > 90 視為字；倉庫卡片底部「0轉N級」是綠字，min / max 門檻都抓不到）；優先於 -Light / -Dark。
 #   -Zooms "2,3,4,5,6"：同一張截圖用多個放大倍數各 OCR 一次，結果合併（Windows OCR 對同一圖換倍數結果差很多，任務追蹤標題用 2～6 倍才讀得全）。
 #   每行的 x / y = 該行文字在截圖座標的中心。
-param([int]$X, [int]$Y, [int]$Wd, [int]$Ht, [int]$Zoom = 3, [int]$Dark = 150, [string]$Zooms = "", [int]$Light = 0)
+param([int]$X, [int]$Y, [int]$Wd, [int]$Ht, [int]$Zoom = 3, [int]$Dark = 150, [string]$Zooms = "", [int]$Light = 0, [int]$Green = 0)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Drawing, System.Runtime.WindowsRuntime
 Add-Type @"
@@ -20,6 +21,14 @@ public class WO {
   // 只處理 Format32bppArgb（crop 新建的 Bitmap 預設就是），其他格式走舊的 GetPixel 版當保底。輸出每像素 B,G,R,A=255 與舊版逐位元組相同。
   public static void BinarizeLight(System.Drawing.Bitmap b, int light) { Bin(b, true, light); }
   public static void Binarize(System.Drawing.Bitmap b, int dark) { Bin(b, false, dark); }
+  // 綠字二值化：G > th 且 G-R > 50 且 G-B > 90 為字 → 黑字白底（倉庫卡片等級小字）
+  public static void BinarizeGreen(System.Drawing.Bitmap b, int th) {
+    for (int y = 0; y < b.Height; y++) for (int x = 0; x < b.Width; x++) {
+      var c = b.GetPixel(x, y);
+      bool ink = c.G > th && c.G - c.R > 50 && c.G - c.B > 90;
+      b.SetPixel(x, y, ink ? System.Drawing.Color.Black : System.Drawing.Color.White);
+    }
+  }
   // light=true：min(R,G,B) > th 為字；false：max(R,G,B) < th 為字。字 → 黑、其他 → 白
   static void Bin(System.Drawing.Bitmap b, bool light, int th) {
     if (b.PixelFormat != System.Drawing.Imaging.PixelFormat.Format32bppArgb) { BinSlow(b, light, th); return; }
@@ -77,7 +86,7 @@ function OcrZoom([int]$z) {
   $crop = New-Object System.Drawing.Bitmap ([int]($Wd * $z)), ([int]($Ht * $z))
   $g = [System.Drawing.Graphics]::FromImage($crop); $g.InterpolationMode = 'HighQualityBicubic'
   $g.DrawImage($full, (New-Object System.Drawing.Rectangle 0, 0, $crop.Width, $crop.Height), $px, $py, $pw, $ph, 'Pixel'); $g.Dispose()
-  if ($Light -gt 0) { [WO]::BinarizeLight($crop, $Light) } elseif ($Dark -gt 0) { [WO]::Binarize($crop, $Dark) }
+  if ($Green -gt 0) { [WO]::BinarizeGreen($crop, $Green) } elseif ($Light -gt 0) { [WO]::BinarizeLight($crop, $Light) } elseif ($Dark -gt 0) { [WO]::Binarize($crop, $Dark) }
   $pad = New-Object System.Drawing.Bitmap ($crop.Width + 80), ($crop.Height + 80)
   $g = [System.Drawing.Graphics]::FromImage($pad); $g.Clear([System.Drawing.Color]::White); $g.DrawImage($crop, 40, 40); $g.Dispose()
   $crop.Dispose(); $crop = $pad

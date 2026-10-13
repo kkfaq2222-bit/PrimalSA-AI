@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""外掛「一般設置 → 自動轉換戰寵」（1920×1017）：第 1~4 列轉換級數 = 25、第 5 列不動，並勾選「自動轉換戰寵」。
+"""外掛「一般設置 → 自動轉換戰寵」（1920×1017）。
+預設只檢查「自動轉換戰寵」有沒有打勾（沒勾就勾上），不開級數對話框、不改任何級數（使用者 2026-10-13：
+轉換級數只有剛開始的 0 轉新帳號第一次設定需要，之後帳號都是設好的；卡坦 / 恐龍博士練寵都走預設）。
+--setup 才做第一次設定：第 1~4 列轉換級數 = 25、第 5 列不動，並勾選。
 流程（2026-10-12 實測）：SET(835,270) 開對話框 → 每列：點數字框(578,y) → 該列 SET(626,y) 開鍵盤 → 2、5、確定（鍵盤位置隨列往下移 30）→ 確認(425,340)。
-用法：uv run --no-project python tools/gui/autoswap1920.py --client kkfaq11111 --roles 1,2,3,4,5 [--level 25]
+用法：uv run --no-project python tools/gui/autoswap1920.py --client kkfaq11111 --roles 1,2,3,4,5 [--setup [--level 25]]
 """
 import argparse, os, sys, time
 from pathlib import Path
@@ -20,7 +23,8 @@ def main():
     ap.add_argument('--client', default='kkfaq11111')
     ap.add_argument('--roles', default='1,2,3,4,5')
     ap.add_argument('--level', default='25')
-    ap.add_argument('--dry', action='store_true', help='只填數字、留圖、按取消')
+    ap.add_argument('--dry', action='store_true', help='只填數字、留圖、按取消（--setup 時）')
+    ap.add_argument('--setup', action='store_true', help='第一次設定（0 轉新帳號）：把第 1~4 列轉換級數設成 --level；預設只檢查勾選')
     a = ap.parse_args()
     os.environ['PSA_EXE_MATCH'] = a.client
     import winenv; winenv.enable_server()
@@ -33,6 +37,17 @@ def main():
             if not ass.select_role(names[r - 1]):
                 print(f'選不到角色 {r}'); return 4
             uikit.gui('click', '540', '127'); time.sleep(0.8)          # 一般設置分頁
+            if not a.setup:
+                # 只檢查勾選（預設）：沒勾就勾，勾完再驗證；不碰級數
+                cols = uikit.px([(439, 270)])
+                if cols and cols[0] == (255, 255, 255):
+                    uikit.gui('click', '439', '270'); time.sleep(0.8)
+                    cols = uikit.px([(439, 270)])
+                on = bool(cols) and cols[0] != (255, 255, 255)
+                print(f'角色{r} 自動轉換戰寵勾選={"開" if on else "關"}', flush=True)
+                if not on:
+                    print(f'角色{r} 自動轉換戰寵勾不起來 → 停手'); return 5
+                continue
             uikit.gui('click', '835', '270'); time.sleep(1.2)          # 自動轉換戰寵 SET
             def span(y):
                 """數字格亮點橫向跨度：「25」≈12、「0」≈4（2026-10-12 實測；黑底白字 OCR 讀不到）"""

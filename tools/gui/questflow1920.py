@@ -45,13 +45,21 @@ POTION = '龍王'
 POTION_MIN_S = 150               # 剩餘不到這麼多秒就吃（Buff 持續 10 分鐘）
 CHECK_GAP_S = 90                 # 長任務每步前檢查，但兩次檢查至少隔這麼久
 
+ADULT = ['成人儀式']                     # 主線第一個；轉生後追蹤欄會自動出現，完成才能接支線（儀的玉 ×15 會疊在一格，只要 1 格背包空位；背包滿 15 格獎勵會寄信箱，使用者 2026-10-12）
 FOUR_CAVES = ['琉璃洞窟', '玄黃洞窟', '碧青洞窟', '深紅洞窟']
-HERO_ISLAND = ['英雄島前傳', '英雄島後傳']   # 後傳：使用者 2026-10-12 要求一併解完（含三段練寵）
+HERO_ISLAND = ['英雄島前傳']                 # 後傳不解（使用者 2026-10-12：腳本還處理不好、會錯亂）
+HERO_ISLAND_AFTER = ['英雄島後傳']          # 不在 plan 裡，--only 也不會跑（要解請自行加回 HERO_ISLAND）
+# 遊戲實際的對話次數比知識庫任務表多（表把「接任務」併進步 1）：成人儀式 = 接受(14,6) → 差使領勾玉(188,13) → 護送交(14,6) = 3 次
+# 值 = 步 1 要多做幾次（使用者 2026-10-13；彌生和日美子的接受由 accept_top 處理，不在這裡）
+STEP_REPEAT_FIRST = {'成人儀式': 1}
+NO_POTION_QUESTS = ('彌生和日美子', '猜謎三兄弟')   # 這兩個任務起不用吃龍王的守護（使用者 2026-10-13）
+CONFIRM_ACCEPT = ('猜謎三兄弟',)               # 接任務時「進入裏面嗎？」確認要按接受的任務
+RIDDLE = ['猜謎三兄弟']                    # 不在預設 plan；--only riddle 才做（fullrun 的 riddle 階段，排在卡坦的願望前面；要先練金布伊 77 級）
 GROUP_A = ['解救老爺爺', '夢幻洞窟', '亞姆的斧頭', '五兄弟之謎', '強盜的洞穴']
 GROUP_B = ['小豬愛情故事', '四寶玉之謎', '馬祖快遞', '礦工的比賽', '夢德洞窟', '強恩一族', '伐木證書', '黃金羚羊之謎',
            '龍的巢穴', '彌生和日美子']
 ALIAS = {'謎生和美日子': '彌生和日美子', '五兄弟隻謎': '五兄弟之謎', '五兄弟之迷': '五兄弟之謎',
-         'hero2': '英雄島後傳', 'dreamcave': '夢幻洞窟', 'fiveb': '五兄弟之謎', 'fourjade': '四寶玉之謎', 'mazu': '馬祖快遞',
+         'hero2': '英雄島後傳', 'adult': '成人儀式', 'riddle': '猜謎三兄弟', 'dreamcave': '夢幻洞窟', 'fiveb': '五兄弟之謎', 'fourjade': '四寶玉之謎', 'mazu': '馬祖快遞',
          # 其餘任務的英文別名（run_questflow_task.cmd 用；終端機批次檔只能放 ASCII）
          'liuli': '琉璃洞窟', 'xuanhuang': '玄黃洞窟', 'biqing': '碧青洞窟', 'shenhong': '深紅洞窟', 'hero1': '英雄島前傳',
          'rescue': '解救老爺爺', 'axe': '亞姆的斧頭', 'robber': '強盜的洞穴', 'piglove': '小豬愛情故事', 'miner': '礦工的比賽',
@@ -178,43 +186,168 @@ def eat_potion() -> bool:
         close_bag()
         if attempt == 0 and not take_from_depot():
             break
-    raise q.Halt(q.EXIT_USAGE, '背包和公共倉庫都沒有龍王的守護：停手（請補貨或加 --no-potion）')
+    # 沒有龍王的守護不停手（使用者 2026-10-13）：照樣往下跑，只是路上會遇到野怪、比較花時間。30 分鐘內不再重找（避免每步都開背包 / 倉庫）
+    global _POTION_EMPTY_AT
+    _POTION_EMPTY_AT = time.time()
+    log('警告：背包和公共倉庫都沒有龍王的守護 → 不停手，沒有 Buff 繼續跑（會遇到野怪、較慢）；30 分鐘內不再重找')
+    return False
+
+
+_POTION_EMPTY_AT = 0.0
+
+
+POTION_COOLDOWN_S = 480         # 上次吃之後這麼久內一律視為還有效（Buff 持續 10 分鐘），不重讀也不再吃（使用者 2026-10-13：有經驗加倍等其他 Buff，圖示位置 / 時間會讀錯 → 一直吃）
+POTION_HARD_GAP_S = 120         # 就算讀到剩餘時間很短，兩次吃之間至少隔這麼久
+POTION_MAX_PER_30MIN = 4        # 30 分鐘內最多吃幾顆，超過就不吃並提醒（異常保險絲）
+POTION_STATE_NAME = 'potion-{client}.json'
+
+
+def _potion_state_path():
+    return q.STATE_DIR / POTION_STATE_NAME.format(client=q.CLIENT)
+
+
+def _potion_eats() -> list:
+    """這個帳號最近吃藥的時間戳（epoch 秒，只留 2 小時內）；存檔，重啟腳本也記得"""
+    import json
+    try:
+        d = json.loads(_potion_state_path().read_text(encoding='utf-8'))
+        return [t for t in d.get('eats', []) if time.time() - t < 7200]
+    except (OSError, ValueError):
+        return []
+
+
+def _potion_record() -> None:
+    import json
+    eats = _potion_eats() + [time.time()]
+    try:
+        _potion_state_path().write_text(json.dumps({'eats': eats}), encoding='utf-8')
+    except OSError:
+        pass
+
+
+q.LIST_OCR = (120, 140, 160, 330)       # 任務詳情只讀左邊清單欄（2026-10-13：右邊任務描述被當成任務名稱列，進行中的任務被誤判已完成）
+BUFF_PANEL = (270, 120, 440, 300)   # 點開 Buff 圖示後的清單區（2026-10-13 實機：每個 Buff 一列，名稱 x≈390、剩餘時間 x≈607，列距約 62）
+BUFF_SCROLL = 'drag 480 290 480 215; wait 900'   # 清單看不到時在中間往下滑
+
+
+def _buff_lines(zoom_pairs=('2,3', '3,4')) -> list:
+    import json
+    out = []
+    for z in zoom_pairs:
+        r = winenv_run('ocr.ps1', *map(str, BUFF_PANEL), '-Zooms', z)
+        try:
+            d = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            continue
+        if d.get('ok'):
+            out += [(ln['text'], ln['x'], ln['y']) for ln in d.get('lines', [])]
+    return out
+
+
+def parse_buff_rows(lines):
+    """OCR 行 [(text, x, y)] → ('ok', 秒) / ('absent', 0) / ('unknown', None)
+    每個 Buff 一列：時間在右側（x >= 540），名稱在左側同一列（y 差 <= 12）。
+    - 找到名稱含「龍王 / 守護」的列 → 取該列時間（多組 OCR 取中位數）
+    - 沒找到龍王列：只有「所有列的名稱都明確是別的 Buff（智慧果 / 經驗 / 倍）」才算確定沒有（absent）；
+      有任何一列名稱讀不出來就是 unknown（不能當成沒有 Buff，2026-10-13 曾因此多吃一顆）"""
+    times = sorted(((y, t) for t, x, y in lines if x >= 540 and any(c in t for c in '時分秒')))
+    rows = []                                   # [(y, [time texts])]
+    for y, t in times:
+        if rows and abs(rows[-1][0] - y) <= 10:
+            rows[-1][1].append(t)
+        else:
+            rows.append((y, [t]))
+    if not rows:
+        return 'unknown', None
+    dragon, others, unknown = [], 0, 0
+    for y, ts in rows:
+        name = ''.join(t for t, x, yy in lines if x < 540 and abs(yy - y) <= 12)
+        if any(k in name for k in ('龍王', '守護', '守护', '龍', '護')):
+            vals = sorted(v for v in (parse_remaining(t) for t in ts) if v is not None)
+            if vals:
+                dragon.append(vals[len(vals) // 2])
+        elif any(k in name for k in ('智慧', '經驗', '经验', '果', 'EXP', '倍')):
+            others += 1
+        else:
+            unknown += 1
+    if dragon:
+        return 'ok', dragon[0]
+    if unknown == 0 and others == len(rows):
+        return 'absent', 0
+    return 'unknown', None
 
 
 def buff_remaining():
-    """龍王守護 Buff 剩餘秒數；沒有 Buff 回 0；有圖示但讀不到時間回 None"""
-    c = q.px([BUFF_SIG[:2]])
-    if not c or not q.near(c[0], BUFF_SIG[2:], 40):
-        return 0
-    q.click(BUFF_ICON, wait_ms=800, note='questflow 看 Buff 剩餘時間')
-    r = None
-    for opts in (('-Zooms', '3,4'), ('-Zooms', '2,3'), ('-Zooms', '4,5')):   # 提示視窗位置 / 字體偶有差異：換倍率多讀幾次
-        r = parse_remaining(_ocr(BUFF_TIME_BOX, *opts))
-        if r is not None:
+    """龍王守護（圖示是深藍色人形「不遇敵」，清單裡名稱「龍王守護」）剩餘秒數。
+    點 Buff 圖示（HUD 左上，第一格是 2倍智慧果、龍王守護在第二格；點哪一格都會跳同一份清單，約 x300~660 的半透明視窗）→
+    OCR 整份清單（範圍 2026-10-13 放大：有第三個 Buff 時視窗會變長 / 要在中間往下滑）→ parse_buff_rows。
+    清單沒開成（完全沒有時間列）就 ESC ×1 再點，最多 3 輪；看不到龍王列就往下滑再找（最多 2 次）。
+    回傳：秒數 / 0（確定沒有）/ None（讀不準，不能判斷）"""
+    res = ('unknown', None)
+    for open_try in range(3):
+        q.click(BUFF_ICON, wait_ms=1200, note=f'questflow 開 Buff 清單（第 {open_try + 1}/3 次）')
+        try:
+            for attempt in range(3):
+                lines = _buff_lines()
+                res = parse_buff_rows(lines)
+                if res[0] == 'ok':
+                    break
+                has_time = any(x >= 540 and any(c in t for c in '時分秒') for t, x, y in lines)
+                if not has_time:
+                    break                       # 清單根本沒開：不要拖曳，交給外層 ESC 重開
+                if attempt < 2:
+                    q.seq(BUFF_SCROLL, note='questflow Buff 清單往下滑')
+        finally:
+            q.key('{ESC}')
+            q.sleep(0.8)
+        if res[0] in ('ok', 'absent'):
             break
-    q.key('{ESC}')
-    q.sleep(0.5)
-    return r
+    return res[1]
 
 
 def potion_check(force: bool = False) -> None:
+    """不會無限吃：①上次吃後 POTION_COOLDOWN_S 內直接略過（存檔，重啟也記得）②讀不到 / 讀到別的 Buff 時只看時間戳
+    ③兩次吃間隔 >= POTION_HARD_GAP_S ④30 分鐘最多 POTION_MAX_PER_30MIN 顆"""
     global _last_check
+    now = time.time()
+    if _POTION_EMPTY_AT and now - _POTION_EMPTY_AT < 1800:
+        return                                   # 剛確認過背包與公共倉庫都沒有：30 分鐘內不再找
+    eats = _potion_eats()
+    last = max(eats) if eats else 0
+    since = now - last if last else None
+    if since is not None and since < POTION_COOLDOWN_S:
+        if force:
+            log(f'龍王的守護：上次吃在 {int(since)} 秒前（< {POTION_COOLDOWN_S}），視為還有效，略過')
+        return
     if not force and q.clock() - _last_check < CHECK_GAP_S:
         return
     r = buff_remaining()
     _last_check = q.clock()
-    if r is None:
-        log('Buff 圖示在但剩餘時間讀不到，先不吃')
+    if r is not None and r >= POTION_MIN_S:
+        log(f'龍王的守護剩餘 {r} 秒，夠用')
         return
-    log(f'龍王的守護剩餘 {r} 秒')
-    if r < POTION_MIN_S:
-        eat_potion()
+    if r is None:
+        # 讀不準（例：畫面上方 NEW 圖示的星星柱蓋住 Buff 名稱）：距離上次吃已久才補一顆，避免 Buff 過期後永遠不補（使用者 2026-10-13）
+        if since is not None and since < 1200:
+            log(f'Buff 清單讀不準 → 這次不吃（上次吃在 {int(since)} 秒前，未滿 1200 秒）')
+            return
+        log('Buff 清單讀不準，且距離上次吃已超過 20 分鐘（或沒有紀錄）→ 保險補吃一顆')
+    recent = [t for t in eats if now - t < 1800]
+    if len(recent) >= POTION_MAX_PER_30MIN:
+        log(f'龍王的守護：30 分鐘內已吃 {len(recent)} 顆（上限 {POTION_MAX_PER_30MIN}）→ 不吃，請檢查 Buff 偵測')
+        return
+    if since is not None and since < POTION_HARD_GAP_S:
+        return
+    log(f'龍王的守護剩餘 {r} 秒 → 吃一顆')
+    if eat_potion():
+        _potion_record()
         _last_check = q.clock()
 
 
 # ---- 追蹤欄 / 接任務 ----
 TRACK_BOX = (40, 150, 190, 150)  # 左側追蹤欄可見範圍（x, y, w, h；下方被聊天按鈕列遮住）
 TRACK_SCROLL = 'drag 130 255 130 215; wait 1200'     # 往下拉一點點（約 40 px）
+TRACK_SCROLL_UP = 'drag 130 215 130 255; wait 1200'   # 往上滑一點點（猜謎三兄弟接完後追蹤欄要「小幅往上滑」才出現：2026-10-11 22222 實測）
 
 
 def _track_lines():
@@ -250,11 +383,19 @@ def find_track_row(name: str, scroll: bool = True, reveal: bool = True):
     q.TRACK_Y_OVERRIDE = None
 
     def locate():
-        for text, y in _track_lines():
+        lines = _track_lines()
+        for text, y in lines:
             if any(k in text for k in skip):
                 continue
             if any(k in text for k in keys):
                 return max(y, q.TRACK[1] - 20)
+        # 保底（2026-10-13 猜謎三兄弟：標題在深色橫幅上，OCR 讀成 '4--0' / '兄' 這種碎字，完整名稱和關鍵字都比對不到）：
+        # 剛接的新任務會排在追蹤欄最上面那一格；那一格有字、不是漆黑、且含任務名稱的任一個字 → 當作它
+        first_y = q.TRACK[1]
+        if not name.startswith('漆黑'):
+            for text, y in lines:
+                if abs(y - first_y) <= 14 and not any(k in text for k in skip) and any(ch in text for ch in set(name) if ch not in '之的'):
+                    return max(y, q.TRACK[1] - 20)
         return None
 
     y = None
@@ -265,6 +406,12 @@ def find_track_row(name: str, scroll: bool = True, reveal: bool = True):
             break
         if rnd < rounds - 1:
             q.seq(TRACK_SCROLL, 'questflow 追蹤欄往下拉一點點')
+    if y is None and scroll:                 # 往下拉都找不到：追蹤欄可能被拉過頭 / 新任務排在上面 → 往上滑再找（最多 4 次）
+        for k in range(4):
+            q.seq(TRACK_SCROLL_UP, 'questflow 追蹤欄往上滑一點點')
+            y = locate()
+            if y is not None:
+                break
     if y is None:
         q.TRACK_Y_OVERRIDE = prev
         return None
@@ -280,6 +427,127 @@ def find_track_row(name: str, scroll: bool = True, reveal: bool = True):
     return y
 
 
+def detail_status(name: str, side: bool = True):
+    """任務詳情清單判斷任務狀態（使用者 2026-10-13 教的規則；不往下拉，只看第一頁）：
+    每列有標籤「進行中」（黃字＋箭頭）/「待接取」（灰）/「已完成」（綠＋勾，OCR 讀不到）；
+    排序 = 進行中在最上、待接取在其下、已完成在最下。
+    - 找得到名稱那一列：讀它正下方標籤；標籤讀不到 → 它下面沒有進行中 / 待接取 = 已完成
+    - 支線找不到名稱：待接取依固定順序（SIDE_ORDER），排在「最後一個可見待接取」之前卻沒出現 = 已完成；
+      排在後面 = None（第一頁看不到，不判斷）
+    回傳 '進行中' / '待接取' / '已完成' / None。讀完 ESC 關閉。"""
+    keys = track_keys(name)
+    result = None
+    rows = []
+    try:
+        if open_detail(side):
+            rows = sorted(q._list_rows(), key=lambda r: r[1])
+    finally:
+        q.key('{ESC}')
+        q.sleep(0.6)
+    LAB = ('進行', '待接', '接取', '完成')
+    names = [(t, y) for t, y in rows if not any(k in t for k in LAB)]       # 任務名稱列
+
+    def status_of(ny):
+        lab = ''.join(r[0] for r in rows if ny + 4 <= r[1] <= ny + 40)
+        for key_, st in (('完成', '已完成'), ('進行', '進行中'), ('待接', '待接取'), ('接取', '待接取')):
+            if key_ in lab:
+                return st
+        return None
+
+    # 名稱比對：先要求完整名稱（漆黑洞窟(二轉) / (三轉) 都含「漆黑」，不能用短關鍵字）；完整名稱讀不到才退到關鍵字
+    exact = [(t, y) for t, y in names if name in t]
+    target = exact[0] if exact else next(((t, y) for t, y in names if any(k in t for k in keys) and not name.startswith('漆黑')), None)
+    if target:
+        y = target[1]
+        result = status_of(y)
+        if not result:
+            above_active = [ny for _, ny in names if ny < y - 10 and status_of(ny) in ('進行中', '待接取')]
+            below_active = [ny for _, ny in names if ny > y + 10 and status_of(ny) in ('進行中', '待接取')]
+            if above_active and not below_active:
+                result = '已完成'
+            elif y <= min(ny for _, ny in names) + 6:
+                result = '進行中'                  # 最上面那列標籤讀不到 = 進行中（排序規則）
+        return result
+    if side and name in q.SIDE_ORDER:
+        pend = [n for n in q.SIDE_ORDER if any(n in t and status_of(y) == '待接取' for t, y in names)]
+        if pend and q.SIDE_ORDER.index(name) < max(q.SIDE_ORDER.index(n) for n in pend):
+            return '已完成'
+    return None
+
+
+DETAIL_X = (882, 45)               # 任務詳情面板右上角 ✕（開著 ≈ (192,75,51)，關著是地圖 / 米色）
+
+
+def detail_panel_open() -> bool:
+    c = q.px([DETAIL_X])
+    return bool(c) and q.near(c[0], (192, 75, 51), 30)
+
+
+def open_detail(side: bool = True) -> bool:
+    """開任務詳情並切到支線 / 主線分頁，用像素確認面板真的開了（使用者 2026-10-13：沒開成時往下拖會拖到聊天室）。
+    沒開成：ESC ×1 → 再點「詳情」，最多 3 輪；仍沒開回 False（呼叫端不得拖曳、不得讀清單）"""
+    for k in range(3):
+        if not detail_panel_open():
+            q.click(q.DETAIL_BTN, right=2, wait_ms=1000, note=f'questflow 開任務詳情（第 {k + 1}/3 次）')
+        if detail_panel_open():
+            q.click(q.TAB_SIDE if side else q.TAB_MAIN, wait_ms=800, note='questflow ' + ('支線' if side else '主線') + '分頁')
+            return True
+        q.key('{ESC}')
+        q.sleep(1.2)
+    return False
+
+
+def side_snapshot() -> dict:
+    """只看任務詳情「支線」第一頁（不往下拉），用排序規則推出各任務狀態（使用者 2026-10-13）：
+    進行中在最上、待接取在其下、已完成沉到最下。待接取保持遊戲固定順序（q.SIDE_ORDER），
+    所以「排在最後一個可見待接取之前、卻沒出現在畫面上」的任務 = 已完成。
+    回傳 {'active': [...], 'pending': [...], 'done': [...]}；沒有可見的待接取就不推定 done（保守）。"""
+    rows = []
+    if open_detail(True):
+        rows = sorted(q._list_rows(), key=lambda r: r[1])
+    q.key('{ESC}')
+    q.sleep(0.6)
+    LAB = ('進行', '待接', '接取', '完成')
+    names = [(t, y) for t, y in rows if not any(k in t for k in LAB)]
+
+    def lab_of(ny):
+        return ''.join(r[0] for r in rows if ny + 4 <= r[1] <= ny + 40)
+
+    active, pending, visible = [], [], []
+    for n in q.SIDE_ORDER:
+        hit = next(((t, y) for t, y in names if n in t), None)
+        if not hit:
+            continue
+        visible.append(n)                        # 名稱在畫面上 = 一定還沒完成（已完成的會沉到最下面、第一頁看不到）
+        lab = lab_of(hit[1])
+        if '進行' in lab:
+            active.append(n)
+        elif '待接' in lab or '接取' in lab:
+            pending.append(n)
+        elif hit[1] <= min(y for _, y in names) + 6:
+            active.append(n)                     # 最上面那列、標籤（黃字壓在橫幅上）讀不到：進行中排最上
+    done = []
+    if pending and len(names) >= 3:              # 名稱列太少（OCR 沒讀好）不推定，寧可不判斷
+        last = max(q.SIDE_ORDER.index(n) for n in pending)
+        done = [n for i, n in enumerate(q.SIDE_ORDER) if i < last and n not in visible]
+    return {'active': active, 'pending': pending, 'done': done, 'visible': visible}
+
+
+def sync_ledger_with_game(snap: dict) -> None:
+    """帳本以遊戲畫面為準：推定已完成 → 補標 done；畫面上還看得到（進行中 / 待接取）卻標 done → 改回 todo（轉生重置後的舊紀錄）"""
+    led = q.ledger_load().get(q.CLIENT, {})
+    for n in snap['done']:
+        if n in snap.get('visible', []) or led.get(n, {}).get('status') in ('doing', 'paused'):
+            continue                             # 畫面上看得到 / 正在做的不補標 done
+        if led.get(n, {}).get('status') != 'done':
+            q.ledger_mark(n, 'done', 'questflow：任務詳情第一頁推定已完成（排序規則）')
+            log(f'帳本補標 done：{n}')
+    for n in snap.get('visible', snap['active'] + snap['pending']):
+        if led.get(n, {}).get('status') == 'done':
+            q.ledger_mark(n, 'todo', 'questflow：任務詳情顯示尚未完成，帳本舊紀錄更正')
+            log(f'帳本更正 todo：{n}（任務詳情顯示還沒完成）')
+
+
 def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
     """任務詳情 → 支線（side=False 時主線）→ **依任務名稱找那一列** → 傳送 → NPC 對話（5 人組隊狀態接受）。
     清單裡有你沒排進去的任務（例：英雄島後傳）時，絕不能無腦點最上排：對不到名稱就捲動找，找不到就停手。
@@ -288,15 +556,13 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
     if not q.TRUST_TEAM:
         q.require_team()
     keys = track_keys(name)
-    q.click(q.DETAIL_BTN, right=2, wait_ms=900, note='questflow 開任務詳情')
-    q.click(q.TAB_SIDE if side else q.TAB_MAIN, wait_ms=800, note='questflow ' + ('支線' if side else '主線') + '分頁')
-    hit, rows = [], []                           # 不再先把清單拉回頂端（使用者 2026-10-12：多餘；開面板就是從頂端開始）
-    for attempt in range(8):
-        rows = sorted(q._list_rows(), key=lambda r: r[1])
-        hit = [r for r in rows if name in r[0] or any(k in r[0] for k in keys)]
-        if len(hit) > nth:
-            break
-        q.seq('drag 200 400 200 170; wait 1200', 'questflow 清單往下捲')
+    if not open_detail(side):
+        q.key('{ESC}')
+        raise q.Halt(q.EXIT_TIMEOUT, '任務詳情面板開不起來（3 輪 ESC 重開都失敗）：不拖曳、停手，等看門狗重啟再試')
+    hit, rows = [], []
+    # 任務詳情不上下拉（使用者 2026-10-13：沒有就是沒有了）：只讀第一頁一次；找不到就視為這個任務不在（已完成 / 還沒解鎖）
+    rows = sorted(q._list_rows(), key=lambda r: r[1])
+    hit = [r for r in rows if name in r[0] or any(k in r[0] for k in keys)]
     if len(hit) <= nth:
         q.key('{ESC}')
         raise q.Halt(q.EXIT_NOQUEST, f'任務詳情「{"支線" if side else "主線"}」清單找不到「{name}」（讀到：{[r[0] for r in rows][:6]}）：停手，不接其他任務')
@@ -312,14 +578,19 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
     s = q.wait_state(('DIALOG', 'REWARD'), timeout=15)
     if s != 'DIALOG':
         raise q.Halt(q.EXIT_TIMEOUT, '傳送後沒出現 NPC 對話窗')
-    res = q.talk(allow_confirm=False)
+    # 猜謎三兄弟：點「接藍暴任務」後會跳「進入裏面嗎？」確認框，必須按「接受」任務才算接下（22222 2026-10-11 實測：按接受只是進 811:29,15、任務已承接）；
+    # 先前 ESC 掉它 → 任務詳情仍是「待接取」→ 追蹤欄找不到（2026-10-13 一條龍停手原因）。其他任務維持不自動按（避免誤進副本）。
+    res = q.talk(allow_confirm=name in CONFIRM_ACCEPT)
     log(f'接任務對話結束：{res}')
     q.note(f'questflow 接「{name}」（{"支線" if side else "主線"}列 {top[0]!r}）：對話 {res}')
     return True
 
 
 # ---- 練寵（英雄島後傳：魯烏 / 迪歐 30 級、加美 33 級；使用者 2026-10-12：去五兄弟洞窟練）----
-TRAIN_STEPS = {'英雄島後傳': {7: ('魯烏', 30), 10: ('迪歐', 30), 14: ('加美', 33)}}
+# 猜謎三兄弟（使用者 2026-10-12）：步 2 之前練「金布伊」（遊戲內正確名稱；任務文字寫金豬）到 77 級；寵物欄 戰寵·坐騎 / 戰寵·坐騎 / 紅暴 / 金羊 / 空 → 金布伊在第 5 格；
+# 去波拉島（120 級點）練，預設 5 分鐘後第一次檢查、之後每 30 秒；先看角色 1，達標才看角色 2~5；檢查 = 點第 5 格讀中間下方「0轉N」。
+TRAIN_STEPS = {'英雄島後傳': {7: ('魯烏', 30), 10: ('迪歐', 30), 14: ('加美', 33)},
+               '猜謎三兄弟': {2: ('金布伊', 77, {'spot': '波拉島', 'first_s': 300, 'poll_s': 30, 'slot': 5})}}
 TRAIN_SPOT = '五兄弟洞窟'
 PET_BTN, PET_CLOSE = (202, 40), (851, 63)
 PET_ROLE_X, PET_ROLE_Y = 52, [110, 205, 290, 375, 440]
@@ -337,9 +608,12 @@ def pet_panel_open() -> bool:
 
 
 def open_pet_panel() -> None:
-    for _ in range(6):
+    for k in range(6):
         if pet_panel_open():
             return
+        if k in (2, 4):                  # 開不成多半是別的視窗（外掛的轉換設定 / 提示窗）蓋著：ESC ×1 再開（使用者 2026-10-13：卡住要按 ESC 才退得出來）
+            q.key('{ESC}')
+            q.sleep(0.7)
         q.click(PET_BTN, right=2, wait_ms=1500, note='questflow 開寵物面板')
     raise q.Halt(q.EXIT_HALT, '寵物面板打不開（戰鬥 / 對話中？）')
 
@@ -362,6 +636,34 @@ def pet_slot_filled(i: int) -> bool:
     return not (bool(c) and c[0][0] > 120 and c[0][1] > 90)
 
 
+MODE_PTS = (('battle', (272, 423)), ('ride', (362, 423)), ('rest', (452, 423)))   # 面板下方 出戰 / 騎乘 / 休息 鈕；選中的那顆上緣內側是橘金色（約 190,125,60），沒選中是米色（225,200,167）
+
+
+def pet_mode(cols=None) -> str | None:
+    """目前選中的寵物是 'battle' 出戰 / 'ride' 騎乘 / 'rest' 休息；讀不到 / 沒有寵物回 None（2026-10-13 實測 3 種狀態的顏色）"""
+    cols = cols if cols is not None else q.px([p for _, p in MODE_PTS])
+    if not cols or len(cols) != len(MODE_PTS):
+        return None
+    for (name, _), (r, g, b) in zip(MODE_PTS, cols):
+        if r > 150 and g < 190 and b < 100:
+            return name
+    return None
+
+
+def ensure_battle(slot: int, tries: int = 3) -> bool:
+    """寵物面板開著、角色已選：選第 slot 格（0 起算）→ 不是「出戰」就按出戰並驗證，最多 tries 次。
+    使用者 2026-10-13：不明原因沒出戰到寵物 → 偵測再補出戰。空格回 False（不亂點）。"""
+    for k in range(tries):
+        q.click((PET_SLOT_X, PET_SLOT_Y[slot]), wait_ms=800, note=f'questflow 確認第 {slot + 1} 格出戰（第 {k + 1}/{tries} 次）')
+        if pet_mode() == 'battle':
+            return True
+        if not pet_slot_filled(slot):
+            return False
+        q.click(PET_BATTLE_BTN, wait_ms=1000, note=f'questflow 第 {slot + 1} 格出戰')
+    q.click((PET_SLOT_X, PET_SLOT_Y[slot]), wait_ms=800, note='questflow 最後驗證出戰')
+    return pet_mode() == 'battle'
+
+
 def read_level_text() -> int | None:
     """面板右下「0轉133」：-Dark 170 最穩；各倍率結果分開解析（直接串接會變成 '0轉10轉1' → 10 級），取出現最多的值"""
     import collections
@@ -382,9 +684,13 @@ def read_pet(i: int):
 
 
 # 任務給的寵物名會帶部隊名前綴（例：「愛麗兒隊的加美」），名稱框放不下時 OCR 只讀到片段 → 別名含前綴片段（2026-10-12 實測）
-PET_ALIAS = {'魯烏': ('魯烏', '魯鳥', '魯焉', '泰坦隊的', '坦隊的魯'),
+PET_ALIAS = {'金布伊': ('金布伊', '金布衣', '金布依', '金豬', '金布'),
+             '魯烏': ('魯烏', '魯鳥', '魯焉', '泰坦隊的', '坦隊的魯'),
              '迪歐': ('迪歐', '迪毆', '迪欧', '迪區', '米蘭達隊的', '蘭達隊的迪', '達隊的迪'),
              '加美': ('加美', '佳美', '加羙', '愛麗兒隊', '麗兒隊的', '兒隊的加', '隊的加美')}
+
+
+PET_SLOT_HINT = {'金布伊': 4}     # 猜謎三兄弟：寵物欄第 5 格是金布伊（使用者 2026-10-13：指定出戰金布伊）
 
 
 def name_match(name: str, keyword: str) -> bool:
@@ -396,7 +702,11 @@ def name_match(name: str, keyword: str) -> bool:
 def find_pet(keyword: str):
     """目前這個角色的寵物欄找名稱含 keyword 的寵物 → (格, 等級)；找不到回 None。
     不靠「空格像素」判斷（亮色頭像會被誤當空格：魯烏曾因此被跳過）：5 格逐一點選讀名稱，新領的通常在最後所以由後往前讀。"""
-    for i in (4, 3, 2, 1, 0):
+    order = [4, 3, 2, 1, 0]
+    hint = PET_SLOT_HINT.get(keyword)          # 已知位置先看（猜謎三兄弟：金布伊在第 5 格）
+    if hint is not None:
+        order = [hint] + [i for i in order if i != hint]
+    for i in order:
         name, lvl = read_pet(i)
         if name_match(name, keyword):
             return i, lvl
@@ -412,9 +722,8 @@ def set_battle_all(keyword: str) -> None:
             close_pet_panel()
             raise q.Halt(q.EXIT_USAGE, f'角色 {r + 1} 寵物欄找不到「{keyword}」')
         i, lvl = hit
-        q.click((PET_SLOT_X, PET_SLOT_Y[i]), wait_ms=800, note=f'questflow 選「{keyword}」')
-        q.click(PET_BATTLE_BTN, wait_ms=1000, note=f'questflow 「{keyword}」出戰')
-        log(f'角色 {r + 1}：「{keyword}」在第 {i + 1} 格（Lv{lvl}）→ 已設出戰')
+        ok = ensure_battle(i)
+        log(f'角色 {r + 1}：「{keyword}」在第 {i + 1} 格（Lv{lvl}）→ ' + ('已出戰（已驗證）' if ok else '警告：按了出戰仍沒看到出戰狀態'))
     close_pet_panel()
 
 
@@ -433,12 +742,14 @@ def rest_quest_pets(keyword: str) -> None:
     log(f'5 人「{keyword}」已改休息（取消出戰）')
 
 
-def levels(keyword: str) -> list:
+def levels(keyword: str, fix_battle: bool = False) -> list:
     open_pet_panel()
     out = []
     for r in range(5):
         q.click((PET_ROLE_X, PET_ROLE_Y[r]), wait_ms=900, note=f'questflow 讀等級：角色 {r + 1}')
         hit = find_pet(keyword)
+        if fix_battle and hit and not ensure_battle(hit[0]):    # 練寵中順便確認它真的出戰（不然拿不到經驗）
+            log(f'警告：角色 {r + 1}「{keyword}」不是出戰狀態，按了出戰仍沒變')
         out.append(hit[1] if hit else None)
     close_pet_panel()
     return out
@@ -449,30 +760,140 @@ ROLE_NAMES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
 
 
 def autoswap_off() -> None:
-    """5 人外掛「自動轉換戰寵」全部取消勾選：練任務寵時不能讓它在門檻（25 級）把戰寵換掉（使用者 2026-10-12：中間會跳）"""
+    """5 人外掛「自動轉換戰寵」全部取消勾選：練任務寵時不能讓它在門檻（25 級）把戰寵換掉（使用者 2026-10-12：中間會跳）。
+    2026-10-13：每個角色最多重試 3 次（點 → 等 → 讀，讀到沒勾才算過）；5 人做完再整體重掃一輪，仍勾著的重關；最後還有勾才停手"""
     import ass
     close_pet_panel()
     if not ass.open_panel(timeout=20):
         raise q.Halt(q.EXIT_ASS, '外掛面板打不開（戰鬥中？）')
+
+    def is_checked() -> bool:
+        c = q.px([AUTOSWAP_CHK])
+        return bool(c) and tuple(c[0]) != (255, 255, 255)
+
+    def turn_off(r: int, nm: str, tries: int = 3) -> bool:
+        """回傳最後是否仍勾選"""
+        if not ass.select_role(nm):
+            raise q.Halt(q.EXIT_ASS, f'外掛選不到角色 {r}')
+        q.click(AUTOSWAP_TAB, wait_ms=800, note='questflow 外掛一般設置分頁')
+        checked = is_checked()
+        for k in range(tries):
+            if not checked:
+                break
+            q.click(AUTOSWAP_CHK, wait_ms=900, note=f'questflow 角色 {r} 取消自動轉換戰寵（第 {k + 1}/{tries} 次）')
+            checked = is_checked()
+        return checked
+
     try:
-        for r, nm in enumerate(ROLE_NAMES, 1):
-            if not ass.select_role(nm):
-                raise q.Halt(q.EXIT_ASS, f'外掛選不到角色 {r}')
-            q.click(AUTOSWAP_TAB, wait_ms=800, note='questflow 外掛一般設置分頁')
-            c = q.px([AUTOSWAP_CHK])
-            checked = bool(c) and tuple(c[0]) != (255, 255, 255)
-            if checked:
-                q.click(AUTOSWAP_CHK, wait_ms=700, note=f'questflow 角色 {r} 取消自動轉換戰寵')
-                c = q.px([AUTOSWAP_CHK])
-                checked = bool(c) and tuple(c[0]) != (255, 255, 255)
-            log(f'角色 {r} 自動轉換戰寵：{"仍勾選（取消失敗）" if checked else "關"}')
-            if checked:
-                raise q.Halt(q.EXIT_ASS, f'角色 {r} 自動轉換戰寵取消不掉：停手（會把任務寵換掉）')
+        for sweep in (1, 2):                     # 第 1 輪逐人處理；第 2 輪整體重掃（只看 / 補關，不放過任何一個）
+            still = []
+            for r, nm in enumerate(ROLE_NAMES, 1):
+                if turn_off(r, nm):
+                    still.append(r)
+                if sweep == 1:
+                    log(f'角色 {r} 自動轉換戰寵：{"仍勾選" if r in still else "關"}')
+            if not still:
+                if sweep == 2:
+                    log('5 人自動轉換戰寵重掃確認：全部關')
+                break
+            log(f'第 {sweep} 輪後仍勾選的角色：{still}' + ('，整體重掃一次' if sweep == 1 else ''))
+        if still:
+            raise q.Halt(q.EXIT_ASS, f'角色 {still} 自動轉換戰寵重試 3 次 + 重掃後仍取消不掉：停手（會把任務寵換掉）')
     finally:
         ass.close_panel()
 
 
-def train_pets(keyword: str, target: int) -> None:
+def levels_at(keyword: str, slot: int, roles, fix_battle: bool = False) -> dict:
+    """面板只開一次，依序點各角色的第 slot 格 → 讀名稱 + 中間下方「0轉N」→ {角色: 等級 or None}；
+    名稱對不上 keyword 就當沒讀到（寧可不達標，不能誤判）"""
+    open_pet_panel()
+    out = {}
+    try:
+        for r in roles:
+            q.click((PET_ROLE_X, PET_ROLE_Y[r - 1]), wait_ms=900, note=f'questflow 讀第 {slot} 格：角色 {r}')
+            name, lvl = read_pet(slot - 1)
+            if not name_match(name, keyword):
+                log(f'角色 {r} 第 {slot} 格名稱讀到「{name}」，不是「{keyword}」→ 當作沒讀到')
+                lvl = None
+            elif fix_battle and not ensure_battle(slot - 1):    # 名稱對上才補出戰（猜謎三兄弟金布伊在第 5 格，使用者 2026-10-13）
+                log(f'警告：角色 {r}「{keyword}」不是出戰狀態，按了出戰仍沒變')
+            out[r] = lvl
+    finally:
+        close_pet_panel()
+    return out
+
+
+def ensure_battle_roles(slot: int, roles) -> dict:
+    """面板開一次，逐個角色確認第 slot 格（0 起算）出戰，沒出戰就補 → {角色: 是否出戰}（出戰檢查不靠等級讀取，所以 2~5 號不會漏）"""
+    open_pet_panel()
+    out = {}
+    try:
+        for r in roles:
+            q.click((PET_ROLE_X, PET_ROLE_Y[r - 1]), wait_ms=900, note=f'questflow 確認出戰：角色 {r}')
+            out[r] = ensure_battle(slot)
+            if not out[r]:
+                log(f'警告：角色 {r} 第 {slot + 1} 格沒有出戰（空格 / 按了出戰仍沒變）')
+    finally:
+        close_pet_panel()
+    return out
+
+
+def train_pets_slot(keyword: str, target: int, opts: dict) -> None:
+    """固定第 slot 格的任務寵（猜謎三兄弟金布衣在第 5 格）：先看角色 1，達標才逐個看角色 2~5（使用者 2026-10-12）。
+    傳去 opts['spot']、第一次檢查等 opts['first_s'] 秒、之後每 opts['poll_s'] 秒；不設時間上限。"""
+    slot, spot = opts['slot'], opts.get('spot', TRAIN_SPOT)
+    first_s, poll_s = opts.get('first_s', TRAIN_POLL_S), opts.get('poll_s', TRAIN_POLL_NEXT_S)
+    roles = [1, 2, 3, 4, 5]
+    log(f'--- 練寵：「{keyword}」第 {slot} 格 → {target} 級（5 人），地點 {spot}，首次 {first_s} 秒、之後每 {poll_s} 秒 ---')
+    lv0 = levels_at(keyword, slot, roles)
+    if all(lv0.get(r) is not None and lv0[r] >= target for r in roles):
+        log(f'「{keyword}」5 隻已是 {lv0}，不用再練')
+        rest_quest_pets(keyword)
+        return
+    set_battle_all(keyword)
+    autoswap_off()
+    q.grind(spot)
+    t0, first = q.clock(), True
+    last = {}
+    polls = 0
+    while True:
+        q.sleep(first_s if first else poll_s)
+        first = False
+        polls += 1
+        if polls % 5 == 0:                            # 每 5 輪全員確認一次出戰（不明原因沒出戰就補；平常只讀角色 1）
+            try:
+                ensure_battle_roles(slot - 1, roles)
+            except q.Halt:
+                pass
+        if q.state() == 'OTHER':
+            q.sleep(5)
+            if q.state() == 'OTHER':
+                raise q.Halt(q.EXIT_HALT, '練寵中連續看到不認得的畫面（疑似驗證視窗）：停手')
+        try:
+            got = levels_at(keyword, slot, [1], fix_battle=True)
+        except q.Halt:
+            continue                                  # 戰鬥中開不了面板：下一輪再讀
+        last.update(got)
+        log(f'練寵進度（{int(q.clock() - t0)} 秒）：角色 1 = {got.get(1)}（目標 {target}）')
+        if got.get(1) is None or got[1] < target:
+            continue
+        try:
+            rest = levels_at(keyword, slot, roles[1:], fix_battle=True)   # 角色 1 達標 → 檢查角色 2~5
+        except q.Halt:
+            continue
+        last.update(rest)
+        log(f'角色 1 達標，檢查角色 2~5：{rest}')
+        if all(last.get(r) is not None and last[r] >= target for r in roles):
+            break
+    q.set_ass(encounter=False)
+    q.wait_battle_end()
+    log(f'「{keyword}」5 隻都到 {target} 級，已關原地遇敵')
+    rest_quest_pets(keyword)
+
+
+def train_pets(keyword: str, target: int, opts: dict | None = None) -> None:
+    if opts and opts.get('slot'):
+        return train_pets_slot(keyword, target, opts)
     """5 人把「keyword」設出戰 → 傳去五兄弟洞窟（組隊、快速 + 自動戰鬥、原地遇敵開）→ 每分鐘讀等級，
     5 隻都 >= target 才收（不設時間上限）→ 關原地遇敵、等戰鬥結束。畫面連續不認得會由 q.wait_battle_end / 導航停手。"""
     log(f'--- 練寵：「{keyword}」→ {target} 級（5 人），地點 {TRAIN_SPOT} ---')
@@ -494,7 +915,7 @@ def train_pets(keyword: str, target: int) -> None:
             if q.state() == 'OTHER':
                 raise q.Halt(q.EXIT_HALT, '練寵中連續看到不認得的畫面（疑似驗證視窗）：停手')
         try:
-            lv = levels(keyword)
+            lv = levels(keyword, fix_battle=True)
         except q.Halt:
             continue                                  # 戰鬥中開不了面板：下一輪再讀
         log(f'練寵進度（{int(q.clock() - t0)} 秒）：{lv}')
@@ -529,6 +950,9 @@ def pick_start_step(state: dict, name: str, all_steps: list, fresh: bool, given)
 def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potion: bool = True,
               dry: bool = False, from_step=None, _retry: int = 0, to_step=None) -> None:
     key = key or name
+    if name in NO_POTION_QUESTS:
+        use_potion = False
+    q.NAV_ADJUST = lambda: find_track_row(name, scroll=True, reveal=False) is not None   # 導覽沒反應 3 次後往下拉重新定位（使用者規則）
     led = q.ledger_load().get(q.CLIENT, {}).get(name, {})
     if led.get('status') == 'done':
         log(f'「{name}」帳本已完成，跳過')
@@ -557,7 +981,7 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
             row = find_track_row(name, scroll=False, reveal=False)
     fresh = False
     if row is None:
-        accept_top(name)
+        accept_top(name, side=name not in ADULT)    # 成人儀式在任務詳情「主線」分頁
         fresh = True
         row = find_track_row(name, reveal=name in TRAIN_STEPS)
         if row is None:
@@ -572,6 +996,8 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
         log('提醒：沒有 --from-step，起始步由追蹤欄副標題 OCR 猜測（不一定準）')
         find_track_row(name)                     # 只有要猜起始步才需要把副標題拉到看得見
     _, steps = q.plan_steps(key, from_step)
+    if STEP_REPEAT_FIRST.get(name) and steps and steps[0][0] == 1 and from_step in (None, 1):
+        steps = [steps[0]] * STEP_REPEAT_FIRST[name] + list(steps)
     if to_step is not None:                      # 只做到第 to_step 步（卡坦的願望步 1 / 步 2 分兩次交）
         steps = [s for s in steps if s[0] <= to_step]
     if stop_after_last_boss:
@@ -581,15 +1007,16 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
     for j, (st, kind, desc, _) in enumerate(steps, 1):
         pausegate.wait(log)                      # 步與步之間的安全點：有暫停檔就停在這裡
         if st in TRAIN_STEPS.get(name, {}):
-            kw, tgt = TRAIN_STEPS[name][st]
+            kw, tgt, *_o = TRAIN_STEPS[name][st]
+            opts = _o[0] if _o else None
             try:
-                train_pets(kw, tgt)
+                train_pets(kw, tgt, opts)
             except q.Halt as h:
                 # 寵物要到這一步跟 NPC 對話時才領到（使用者 2026-10-12）：還沒有 → 先對話一次領取，再練，練完再對話交
                 if h.code == q.EXIT_USAGE and '找不到' in h.msg:
                     log(f'還沒領到「{kw}」→ 先對話一次領取')
                     q.step_team(fight=False)
-                    train_pets(kw, tgt)
+                    train_pets(kw, tgt, opts)
                 else:
                     raise
         if use_potion:
@@ -632,11 +1059,28 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
         if still is not None:                    # 剛做完可能還在演出：隔幾秒再讀一次
             time.sleep(3)
             still = find_track_row(name, scroll=False, reveal=False)
-        if still is not None and _retry < 1 and steps and steps[-1][0] < max(s[0] for s in all_steps):
-            nxt = next(s[0] for s in sorted(all_steps) if s[0] > steps[-1][0])
-            log(f'殘留且後面還有步驟 → 自己從第 {nxt} 步再做一次（只試一次）')
+        if still is not None and not name.startswith('漆黑'):
+            st = detail_status(name, side=name not in ADULT)
+            log(f'追蹤欄仍有「{name}」→ 任務詳情狀態：{st}')
+            if st == '已完成':                   # 以任務詳情為準（排在最下 + 已完成標籤）；追蹤欄殘留只是顯示延遲
+                still = None
+        if still is not None and _retry < 3 and steps:
+            # 追蹤欄還看得到任務（使用者 2026-10-13 成人儀式：做完所列步驟仍殘留）→ 不直接停手：還有後面的步驟就接著做，
+            # 沒有後面的步驟就把最後一步再做一次（再點追蹤欄 / 再對話），最多 3 輪；仍殘留才走下面的 paused + 停手
+            later = [s[0] for s in sorted(all_steps) if s[0] > steps[-1][0]]
+            nxt = later[0] if later else steps[-1][0]
+            try:                                 # 追蹤欄副標題比對出「更前面的步驟」（上一個 BOSS 沒算贏，例：四寶玉之謎步 4 沒過卻去交步 5）→ 退回那一步重做
+                _, gsteps = q.plan_steps(key, None)
+                g = gsteps[0][0] if gsteps else None
+                if g is not None and g < steps[-1][0]:
+                    log(f'追蹤欄副標題對應第 {g} 步（比剛做的第 {steps[-1][0]} 步前面）→ 退回第 {g} 步重做')
+                    nxt = g
+            except Exception as e:
+                log(f'副標題比對步驟失敗（{e}），沿用 {nxt}')
+            log(f'殘留 → 自己從第 {nxt} 步再做一次（第 {_retry + 1}/3 輪）')
+            time.sleep(3)
             return run_quest(name, key=key, stop_after_last_boss=stop_after_last_boss, use_potion=use_potion,
-                             dry=dry, from_step=nxt, _retry=_retry + 1)
+                             dry=dry, from_step=nxt, to_step=to_step, _retry=_retry + 1)
     if stop_after_last_boss:
         q.ledger_mark(name, 'done', detail + '；只解到打完機暴（使用者規定，不跟守門員講話）')
     else:
@@ -656,12 +1100,47 @@ def dark_cave_name(trans: int):
     return f'漆黑洞窟({CN_NUM[trans]}轉)', 2004 + trans
 
 
+INFO_BTN, INFO_X, INFO_LV = (75, 45), (866, 65), (140, 410, 275, 24)   # HUD 左上頭像 → 人物資訊面板 / 右上 ✕ / 面板左下綠字「N轉M級(ID)」（960×508）
+
+
+def trans_from_info_panel():
+    """從人物資訊面板讀目前轉數（綠字「N轉M級」字大，實測很準；HUD 的 stat 會把 1 轉讀成 0，2026-10-13）。
+    開面板後偵測 ✕ 紅圓有出現才讀；沒開成功 → ESC 復原再重新點，最多 3 次。讀不到回 None。"""
+    def opened() -> bool:
+        c = q.px([INFO_X])
+        return bool(c) and c[0][0] > 170 and c[0][1] < 120 and c[0][2] < 110
+
+    ok = False
+    for _ in range(3):
+        q.click(INFO_BTN, wait_ms=1500, note='questflow 開人物資訊（讀轉數）')
+        if opened():
+            ok = True
+            break
+        q.key('{ESC}')
+        q.sleep(0.9)
+    if not ok:
+        return None
+    try:
+        votes = {}
+        for opts in (('-Zooms', '3,4'), ('-Zooms', '2,3', '-Dark', '200')):
+            for t in q.uk().ocr(INFO_LV, *opts):
+                m = re.search(r'(\d)\s*轉\s*\d{1,3}\s*級', str(t))
+                if m:
+                    votes[int(m.group(1))] = votes.get(int(m.group(1)), 0) + 1
+        return max(votes.items(), key=lambda kv: kv[1])[0] if votes else None
+    finally:
+        q.click(INFO_X, wait_ms=800, note='questflow 關人物資訊')
+
+
 def current_trans() -> int:
-    import walk
+    n = trans_from_info_panel()
+    if n is not None:
+        return n
+    import walk                                   # 保底：HUD stat（會把 1 轉讀成 0，只在面板讀不到時才用）
     s = walk.stat()
     m = re.match(r'(\d+)轉', str(s.get('level') or ''))
     if not m:
-        raise q.Halt(q.EXIT_USAGE, f'讀不到轉生數（HUD level={s.get("level")!r}），請用 --trans 指定')
+        raise q.Halt(q.EXIT_USAGE, f'讀不到轉生數（人物資訊面板與 HUD 都讀不到，HUD level={s.get("level")!r}），請用 --trans 指定')
     return int(m[1])
 
 
@@ -687,6 +1166,8 @@ def main(argv=None) -> int:
     ap.add_argument('--skip-bag', action='store_true', help='跳過整理背包階段')
     ap.add_argument('--from-step', type=int, help='搭配 --only：該任務從第幾步開始（不用 OCR 猜）')
     ap.add_argument('--ledger', action='store_true', help='只列出這個客戶端的帳本（各任務狀態）後結束')
+    ap.add_argument('--dark-gate', action='store_true', help='只做漆黑洞窟步 5「通過守護人」（跟守門人講話領守護獸；轉生前要做，之後追蹤欄變成覲見精靈王）')
+    ap.add_argument('--solo', action='store_true', help='單人模式（搭配 --dark-gate）：不組隊，目前這個角色自己去跟守門人講話；5 人要各跑一次（gatesolo1920）')
     ap.add_argument('--limit', type=int, default=0, help='最多實際做幾個任務就停（0 = 不限；已完成跳過的不算）')
     a = ap.parse_args(argv)
     q.CLIENT = a.client
@@ -709,21 +1190,44 @@ def main(argv=None) -> int:
     use_potion = not a.no_potion
     try:
         q.preflight()
-        if not a.dry:
+        if not a.dry and a.solo:
+            # 單人模式（使用者 2026-10-13：守門人要 5 個角色各自單人去講才領得到守護獸）：不組隊、自動逃跑開 / 自動戰鬥關
+            q.TRUST_TEAM = True
+            q.set_ass(flee=True, auto=False)
+            log('單人模式：不組隊、自動逃跑開；不做支線快照')
+        elif not a.dry:
             if not q.team_ok():
                 q.form_team()
             q.require_team()
             q.set_ass(flee=False, auto=True)
             q.TRUST_TEAM = True
             log('開頭驗證完成：5 人隊 + 自動戰鬥開 / 自動逃跑關；之後不再逐步驗證')
+            try:
+                snap = side_snapshot()
+                log(f'任務詳情支線第一頁：進行中 {snap["active"]}；待接取 {snap["pending"]}；推定已完成 {snap["done"]}')
+                sync_ledger_with_game(snap)
+            except q.Halt:
+                raise
+            except Exception as e:
+                log(f'支線快照失敗（{e}），沿用帳本')
         trans = a.trans if a.trans is not None else (0 if a.dry else current_trans())
         dark = dark_cave_name(trans)
+        if a.dark_gate:
+            if not dark:
+                raise q.Halt(q.EXIT_USAGE, '5 轉以上沒有漆黑洞窟可做')
+            log(f'=== {dark[0]} 步 5 守門人（領守護獸；轉生前）===')
+            if a.solo:                                # 帳本是以帳號為單位：前一個角色做完會標 done，這裡每個角色都要重講一次
+                q.ledger_mark(dark[0], 'doing', 'gate solo')
+            run_quest(dark[0], key=str(dark[1]), use_potion=use_potion, from_step=5, to_step=5)
+            return q.EXIT_OK
 
         ran = 0
-        plan = [(n, n, False) for n in FOUR_CAVES]
+        plan = [(n, n, False) for n in ADULT + FOUR_CAVES]
         if dark:
             plan.append((dark[0], str(dark[1]), True))
         plan += [(n, n, False) for n in HERO_ISLAND + GROUP_A] + [('__BAG__', None, False)] + [(n, n, False) for n in GROUP_B] + [('__BAG2__', None, False)]
+        if only:                                  # 預設不做、點名才做的任務（猜謎三兄弟）
+            plan += [(n, n, False) for n in RIDDLE if n in only]
 
         led = q.ledger_load().get(q.CLIENT, {})
         names = [n for n, _, _ in plan if not n.startswith('__BAG')]
@@ -757,6 +1261,9 @@ def main(argv=None) -> int:
                 q.ledger_mark(label, 'done', 'questflow：bag1920 --do')
                 continue
             pausegate.wait(log)                  # 任務與任務之間的安全點
+            if name in ADULT and not a.dry and q.ledger_load().get(q.CLIENT, {}).get(name, {}).get('status') != 'done':
+                log('成人儀式開始前：檢查 5 人外掛「自動轉換戰寵」要是不打勾（打勾的就取消）')
+                autoswap_off()                   # 使用者 2026-10-13：解成人儀式前先確認自動轉換戰寵沒打勾
             if a.limit and ran >= a.limit:
                 log(f'已做滿 --limit {a.limit} 個任務，停止')
                 break

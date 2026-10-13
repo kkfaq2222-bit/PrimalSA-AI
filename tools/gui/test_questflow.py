@@ -26,7 +26,7 @@ def check(name, got, want):
 # 別名
 check('別名 mazu', qf.ALIAS['mazu'], '馬祖快遞')
 check('別名 fourjade', qf.ALIAS['fourjade'], '四寶玉之謎')
-check('英文別名都指到任務', all(v in qf.FOUR_CAVES + qf.HERO_ISLAND + qf.GROUP_A + qf.GROUP_B for k, v in qf.ALIAS.items() if k.isascii()), True)
+check('英文別名都指到任務', all(v in qf.ADULT + qf.FOUR_CAVES + qf.HERO_ISLAND + qf.HERO_ISLAND_AFTER + qf.RIDDLE + qf.GROUP_A + qf.GROUP_B for k, v in qf.ALIAS.items() if k.isascii()), True)
 check('別名涵蓋全部任務', all(n in qf.ALIAS.values() for n in qf.FOUR_CAVES + qf.GROUP_A + qf.GROUP_B), True)
 
 # 起始步

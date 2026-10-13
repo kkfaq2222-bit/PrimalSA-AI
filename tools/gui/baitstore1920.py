@@ -8,7 +8,7 @@ r"""把角色背包裡剩下的「寵物誘餌」整疊存進共用倉庫（道�
 
 用法（專案根目錄）：
   uv run --no-project python tools/gui/baitstore1920.py --client kkfaq22222 --role 2 [--dry]
-退出碼：0 成功（含「背包沒有誘餌」）；2 版面不符；4 找不到誘餌格以外的錯誤 / 存入後仍在；11 背包面板不在。
+退出碼：0 成功（存完或背包沒有誘餌，且共用倉庫確認有誘餌）；2 版面不符；4 找不到誘餌格以外的錯誤 / 存入後仍在；11 背包面板不在。
 """
 import argparse
 import os
@@ -18,6 +18,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+
+
+def depot_has_bait(cr) -> bool:
+    """開倉庫分頁 → 公共，看有沒有誘餌格（剛切角色 / 剛存入頁面偶爾沒畫好，最多讀 3 次）"""
+    for _ in range(3):
+        cr.click(*cr.TAB_DEPOT, wait=1300, note='baitstore 倉庫分頁（確認）')
+        cr.click(*cr.DEPOT_PUBLIC, wait=1100, note='baitstore 公共倉庫（確認）')
+        if cr.find_bait(cr.depot_slots()) is not None:
+            return True
+        time.sleep(1.0)
+    return False
 
 
 def main(argv=None) -> int:
@@ -46,8 +57,12 @@ def main(argv=None) -> int:
     cr.click(*cr.TAB_BAG, wait=900, note='baitstore 背包分頁')
     pos = cr.find_bait(cr.bag_slots())
     if pos is None:
-        cr.log(f'角色 {a.role} 背包沒有誘餌，不用存')
+        cr.log(f'角色 {a.role} 背包沒有誘餌，不用存；確認共用倉庫有誘餌')
+        ok = depot_has_bait(cr)
+        cr.gui('key', '{ESC}', note='baitstore 關浮窗')
         cr.click(*cr.CLOSE_BAG, wait=500, note='baitstore 關背包')
+        if not ok:
+            cr.log('警告：背包沒有誘餌、共用倉庫也沒有（誘餌已用完？）→ 不停手；下一個要抓寵的角色領不到時會自己示警')
         return 0
     cr.gui('key', '{ESC}', note='baitstore 關浮窗')
     time.sleep(0.5)
@@ -72,8 +87,14 @@ def main(argv=None) -> int:
         print('存入後該格仍是誘餌 → 停手（倉庫滿 / 沒按到？）')
         cr.click(*cr.CLOSE_BAG, wait=500, note='baitstore 關背包')
         return 4
-    cr.log(f'角色 {a.role} 剩餘誘餌已存進共用倉庫')
+    # 存完一定要在共用倉庫看到誘餌，下一個抓寵的角色才領得到（使用者 2026-10-13）
+    ok = depot_has_bait(cr)
+    cr.gui('key', '{ESC}', note='baitstore 關浮窗')
     cr.click(*cr.CLOSE_BAG, wait=700, note='baitstore 關背包')
+    if not ok:
+        print('存入後共用倉庫找不到誘餌 → 停手')
+        return 4
+    cr.log(f'角色 {a.role} 剩餘誘餌已存進共用倉庫（已在共用倉庫確認）')
     return 0
 
 
