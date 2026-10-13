@@ -72,7 +72,7 @@ def plan(client: str, phase: str) -> list:
                     py('catchrun1920.py', *c, '--role', CATCHER, '--system', SYSTEM, '--pet', PET, '--n', 5, '--source', 'public')))
         out.append((f'角色 {CATCHER} 剩餘寵物誘餌存回共用倉庫（抓完放回去）', py('baitstore1920.py', *c, '--role', CATCHER)))
     elif phase == 'rename':
-        out.append((f'角色 {CATCHER} 寵物暱稱改回原本種類名', py('petrename1920.py', *c, '--roles', CATCHER)))
+        out.append((f'角色 {CATCHER} 寵物暱稱改回原本種類名', py('petrename1920.py', *c, '--expect', ','.join(PET_KEYS), '--count', 5, '--roles', CATCHER)))
     elif phase == 'store':
         out.append((f'角色 {CATCHER} 寵物欄第 2~5 格存公共倉庫（4 隻；第 1 格留自己）',
                     py('petfetchimg1920.py', *c, 'storebar', '--role', CATCHER, '--slots', '2,3,4,5', '--tab', 'public', '--do')))
