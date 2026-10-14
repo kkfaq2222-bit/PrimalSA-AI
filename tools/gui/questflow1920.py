@@ -393,6 +393,12 @@ def _track_lines():
     return [(ln['text'], ln['y']) for ln in d.get('lines', [])] if d.get('ok') else []
 
 
+def track_row_is_dark(y: int) -> bool:
+    """追蹤欄 y 那一列（±14px）的字含「漆黑」→ True。OCR 讀不到字 → False（不擋；讀不到不代表是漆黑）"""
+    near = [t for t, ly in _track_lines() if abs(ly - y) <= 14]
+    return any('漆黑' in t or '漆' in t and '黑' in t for t in near)
+
+
 def winenv_run(*a):
     import winenv
     return winenv.run_ps(*a)
@@ -1095,6 +1101,7 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
     if name in NO_POTION_QUESTS:
         use_potion = False
     q.NAV_ADJUST = lambda: find_track_row(name, scroll=True, reveal=False) is not None   # 導覽沒反應 3 次後往下拉重新定位（使用者規則）
+    q.TRACK_GUARD = (lambda: not track_row_is_dark(q.track_xy()[1])) if not name.startswith('漆黑') else None   # 點之前確認不是漆黑那一列
     led = q.ledger_load().get(q.CLIENT, {}).get(name, {})
     if led.get('status') == 'done':
         log(f'「{name}」帳本已完成，跳過')

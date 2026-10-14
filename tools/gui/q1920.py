@@ -538,13 +538,33 @@ def adjust_tracker() -> bool:
     return True
 
 
+TRACK_GUARD = None               # questflow 設：點追蹤欄前檢查那一列不是漆黑（回 False = 會點錯）；None = 不檢查
+
+
+def track_click(right: int = 0, note: str = 'q1920 點追蹤欄') -> None:
+    """點追蹤欄前先確認不會點到漆黑（使用者 2026-10-15：解其他任務時漆黑本來在第 2 格只露一半，
+    登出再登入後漆黑跑回第 1 格，照舊位置點就點到漆黑 → 導航去守門人）。會點錯 → 先依任務名稱重新定位再檢查，還是不對就停手、絕不點。"""
+    if TRACK_GUARD is not None and not TRACK_GUARD():
+        log(f'追蹤欄要點的那一列是漆黑（y={track_xy()[1]}，可能登出後順序變了）→ 不點，依任務名稱重新定位')
+        ok = False
+        if NAV_ADJUST is not None:
+            try:
+                ok = bool(NAV_ADJUST()) and TRACK_GUARD()
+            except Exception as e:
+                log(f'重新定位出錯：{e}')
+        if not ok:
+            raise Halt(EXIT_TIMEOUT, '追蹤欄重新定位後要點的還是漆黑（或找不到任務）：不點、停手，避免導航去守門人')
+        log(f'重新定位完成 → 改點 y={track_xy()[1]}')
+    click(track_xy(), right=right, wait_ms=500, note=note)
+
+
 def navigate(max_s: float = NAV_TIMEOUT_S) -> str:
     """點追蹤欄自動導航；每 FAST_S 秒一次像素讀取：DIALOG / REWARD → 立刻回傳；戰鬥 / 畫面在捲動（導覽中）→ 等；
     以上都不是（連續 STILL_POLLS 次）→ 重點追蹤欄任務，連續 3 次都沒用 → 追蹤欄往下拉重新定位，再 3 次還是沒用 → 停手（使用者規則）。
     連續不認得的畫面超過 HALT_OTHER_S → Halt（疑似驗證視窗）"""
     t0, other_since, clicks, still, prev = clock(), None, 0, 0, None
     fails, adjusted = 0, False
-    click(track_xy(), right=2, wait_ms=500, note='q1920 點追蹤欄導航')
+    track_click(right=2, note='q1920 點追蹤欄導航')
     sleep(FAST_S)
     _, prev = scan()                                   # 點完先取一張基準，之後每秒比較：2 秒內沒導航 / 對話 / 戰鬥 → 再點一次
     while clock() - t0 < max_s:
@@ -572,14 +592,14 @@ def navigate(max_s: float = NAV_TIMEOUT_S) -> str:
                 clicks += 1
                 log(f'畫面沒在動（沒有導覽 / 戰鬥 / 對話）→ 重新點追蹤欄（本輪第 {fails}/{RECLICK_BEFORE_ADJUST} 次）')
                 seq('key {ESC}; wait 600', note='q1920 重點前先 ESC（使用者 2026-10-13：沒反應 → ESC ×1 再點，最多 3 輪）')
-                click(track_xy(), wait_ms=500, note='q1920 重點追蹤欄')
+                track_click(note='q1920 重點追蹤欄')
                 still = 0
             elif act == 'adjust':
                 log(f'重點 {RECLICK_BEFORE_ADJUST} 次都沒反應 → 追蹤欄往下拉重新定位')
                 adjusted = adjust_tracker()
                 fails, still = 0, 0
                 if adjusted:
-                    click(track_xy(), right=2, wait_ms=500, note='q1920 調整後點追蹤欄')
+                    track_click(right=2, note='q1920 調整後點追蹤欄')
                 else:
                     raise Halt(EXIT_TIMEOUT, '導覽沒反應，追蹤欄往下拉也找不到任務：停手（請看畫面；可能是道具滿了漏道具）')
             elif act == 'halt':
