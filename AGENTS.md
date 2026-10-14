@@ -111,6 +111,18 @@ PrimalSA-AI/
 - 紅區、背景操作、驗證視窗等規則與 WSL 相同。
 - 實測狀態：WSL 完整驗證；Windows 原生用 Windows 版 Python 驗過 `walk.py --plan`、`gui info / shot / pixel`、`stat.ps1`（Git Bash 環境本身未實測）。
 
+## 5.4 每日任務（委託接取）
+醫院（1005）委託接取 NPC：5 頁 × 2 項，全部合成提交（5/5）拿「裝備升級石」。材料在薩村 1009、漁村 2009 的 24 小時店買（每個 500 石幣，合成 1000）。
+```
+uv run --no-project python tools/gui/dailyrun1920.py --client kkfaq11111 --role 1          # 目前角色跑一輪
+uv run --no-project python tools/gui/dailyrun1920.py --client kkfaq22222 --roles 2,3,4,5   # 自動切角色接力
+```
+- 前置：該角色背包 15 格、公共倉庫 20 格清空；先停掉同一個客戶端的一條龍 / 練等（會搶畫面）。
+- 流程：讀 5 頁 → 查配方 → 先買要存倉的（存公共倉庫）、再買留身上的（最多 13 種，留 2 格放成品；第 1 頁材料一律留身上）→ 回醫院逐頁領料 / 合成 / 提交。
+- 防呆：兩項都是綠色 1/1 才提交；第 5 頁後用「合成鈕消失 / 計數 5/5 / 背包有裝備升級石」三訊號至少 2 個成立才算完成；存取前核對浮窗名稱；公共分頁亮黃才存取。
+- 記錄：`tools/.cache/daily-live.log`（每角色耗時）、`daily-done-<client>-r<N>.json`（已買、格位，重跑不重買）。不停手時一個角色約 13~15 分。
+- 24 小時店沒賣的材料（合成品、胡椒 1~3 等遠程店）目前不支援，規劃會標「？」，合成時防呆停手。
+
 ## 5.3 一條龍（fullrun）與看門狗
 一輪 = `train`（練到 131）→ `wait131` → `stopenc` → `ledger` → `prebag` → `quests` → `riddle` → `katan` → `dino` → `gate` → `rebirth` → `gift`（開 N 轉新手禮盒、吃 2 倍智慧果 / 離線水晶、安撫之素 / 誘餌存共用倉庫）→ `organize` → `clear` → `prep`（抓格魯西斯坐騎、鎖定騎寵、領個人倉庫第 1 隻當戰寵）→ `grind`（練 1~131）。
 ```
