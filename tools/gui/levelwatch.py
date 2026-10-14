@@ -101,6 +101,19 @@ MIN_PER_LEVEL_LOW = [(60, 0.7), (80, 1.3), (100, 1.8), (110, 3.3), (116, 6.0), (
 EXP_PER_MIN_HIGH = 780_000
 
 
+def ensure_encounter(when: str) -> None:
+    """練功中確認原地遇敵還開著（使用者 2026-10-15：開關面板時有機會點到移動，把遇敵關掉 → 原地不動、白掛）。
+    只讀像素；戰鬥中不判斷（圖示會被蓋住）；沒開才點開。"""
+    try:
+        if not heal.gui('seq', f'waitpix 0 {heal.SIG_NO_BATTLE} 40').startswith('ok'):     # 戰鬥中（頭上 VS 牌）
+            return
+        if not heal.encounter_on():
+            log(f'{when}：原地遇敵沒開 → 補開')
+            heal.set_encounter(True)
+    except Exception as e:
+        log(f'{when}：檢查原地遇敵失敗（{e}）')
+
+
 def eta_minutes(level: int, end: int, table: dict[int, int], t_in_level_min: float = 0.0, rate: float = 0) -> float | None:
     """從 level 練到 end 還要幾分鐘（扣掉目前這級已經練的時間）。rate = 實測每分鐘經驗（0 = 用預設 78 萬）。"""
     if level >= end:
@@ -234,6 +247,8 @@ def main() -> int:
                     fin = time.strftime('%m-%d %H:%M', time.localtime(time.time() + m * 60))
                     eta = f'；到 {END_LEVEL} 級約還要 {m / 60:.1f} 小時（預計 {fin}，預估值）'
             log(f'練功中（心跳）：{s.get("level") or "?"} 地圖 {s.get("pos") or "?"}{eta}')
+            if not a.dry_run and good_level and good_level < END_LEVEL:
+                ensure_encounter('心跳')
         lv = parse_level(s)
         if lv is None and '最小化' in str(s.get('error') or ''):
             # Unity 最小化不繪製（戰鬥也停）：gui info 會用 SW_SHOWNOACTIVATE 還原，不搶焦點；還原後馬上重讀
@@ -264,6 +279,7 @@ def main() -> int:
                 return 0
             if any(v is not None for v in plv):
                 bad = 0                   # 面板開得起來 = 沒有驗證視窗擋著，HUD 讀不到只是 OCR 問題
+            ensure_encounter('人物資訊面板檢查後')
         if lv is None:
             bad += 1
             bad_max = 15 if near_end and a.stop_at_end else 5      # 接近 131 時多給幾次，讓定期面板檢查有機會先確認
