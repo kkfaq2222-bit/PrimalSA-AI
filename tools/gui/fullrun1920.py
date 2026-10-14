@@ -262,8 +262,13 @@ def detect_grind_target(client: str) -> int:
                 log(f'[target] 任務詳情主線最上面：{top!r} → {"五轉 → 140" if five else "131"}')
                 return 140 if five else 131
             log(f'[target] 任務詳情主線最上面讀到漆黑但看不出幾轉：{top!r}（第 {k + 1}/3 次）')
+        elif top:
+            # 讀得到、只是最上面是別的任務（2026-10-14 11111 / 22222 都是「成人儀式」）：重讀也一樣，直接改看人物資訊轉數（省約 20 秒）
+            log(f'[target] 任務詳情主線最上面是 {top!r}（不是漆黑）→ 改看人物資訊轉數')
+            _esc()
+            break
         else:
-            log(f'[target] 任務詳情主線最上面不是漆黑：{top!r}（第 {k + 1}/3 次）→ ESC 後重讀')
+            log(f'[target] 任務詳情主線讀不到（第 {k + 1}/3 次）→ ESC 後重讀')
         _esc()
         time.sleep(1.0)
     try:                                           # 保底：人物資訊面板的轉數（4 轉 → 下一個漆黑是五轉）
