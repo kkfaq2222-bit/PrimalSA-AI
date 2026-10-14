@@ -232,6 +232,18 @@ def main(argv=None) -> int:
         if miss:
             print(f'第 {a.page} 頁缺：{"、".join(miss)}（背包、公共倉庫記錄都沒有）→ 照樣試合成，沒做出來會停手')
         print(f'第 {a.page} 頁要從公共倉庫領出：' + ('、'.join(want) or '（不用）'))
+        # 提速 2026-10-14：背包空間夠時，順便把後面幾頁（整頁）要領的也一起領，下一頁就不用再開倉庫
+        free = dn['bag'].count(None) - len(want) - 2          # 留 2 格放這頁的成品
+        for q in sorted({pg for pg, _it, _m in plan_all if pg > a.page}):
+            nq = [n for pg, _it, mats in plan_all if pg == q for n, _q in mats]
+            wq = [n for n in dict.fromkeys(nq) if n not in dn['bag'] and n in dn['depot'] and n not in want]
+            if not wq:
+                continue
+            if len(wq) > free:
+                break
+            print(f'  順便領第 {q} 頁：' + '、'.join(wq))
+            want += wq
+            free -= len(wq)
         if want:
             withdraw_items(want, dn)
             done_path.write_text(json.dumps(dn, ensure_ascii=False), encoding='utf-8')
@@ -350,7 +362,7 @@ def main(argv=None) -> int:
                     print(f'{st[0]}：換算畫面 ({sx},{sy}) 仍在可點範圍外 → 跳過（換個站位再跑一次）')
                     skipped.append(st[0])
                     break
-            jx, jy = CLICK_JITTER[_try]
+            jx, jy = SHOP_JITTER[_try]
             pd.click(sx + jx, sy + jy, wait=1400, note=f'daily 點 {st[0]}（第 {_try + 1} 次，偏移 {jx},{jy}）')
             if dialog_open(uikit):
                 dt = ''.join(uikit.ocr((590, 128, 200, 38), '-Zooms', '2,3'))
@@ -412,6 +424,13 @@ def main(argv=None) -> int:
                 return rc
         pd.click(*SHOP_CLOSE, wait=800, note='daily 關便利店')
         mine = [n for n in dn['bought'] if n not in p12 and n not in dn['stored'] and n in dn['bag']]
+        # 存倉集中做（提速 2026-10-14）：下一間店的新東西還放得下、而且下一間也是「存倉的」店 → 先不開背包，買完再一起存
+        if mine and not later and queue:
+            nst, nits = queue[0]
+            new_n = len({n for n, _q in nits if n not in dn['bag']})
+            if nits[0][0] not in p12 and dn['bag'].count(None) >= new_n + 1:
+                print(f'先不存倉（背包還有 {dn["bag"].count(None)} 格，下一間 {nst[0]} 要 {new_n} 格）→ 買完再一起存：' + '、'.join(mine))
+                mine = []
         if mine:
             got = store_items(mine, dn)
             dn['stored'] += sorted(got)
@@ -556,6 +575,29 @@ def learn_alias(text: str, name: str) -> None:
         print(f'學到格子名稱對照：{text!r} → {name}')
 
 
+def _grid_texts(slots):
+    """背包 15 格名稱一次 OCR：整塊截圖 → 依每行文字中心座標分到最近的格子（名稱在格子中心上方約 16~28px，可能折兩行）。
+    OCR 失敗回 None（呼叫端改逐格讀）。"""
+    import winenv
+    xs = sorted({x for x, _ in slots}); ys = sorted({y for _, y in slots})
+    try:
+        r = winenv.run_ps('ocr.ps1', str(xs[0] - 38), str(ys[0] - 32), str(xs[-1] - xs[0] + 76), str(ys[-1] - ys[0] + 30),
+                          '-Zooms', '2,3')
+        d = json.loads((r.stdout.strip().splitlines() or [''])[-1])
+    except Exception:
+        return None
+    if not d.get('ok'):
+        return None
+    out = [''] * len(slots)
+    for ln in d.get('lines', []):
+        x, y, t = int(ln['x']), int(ln['y']), ln['text']
+        k = min(range(len(slots)), key=lambda i: abs(x - slots[i][0]) + 2 * abs(y - (slots[i][1] - 18)))
+        sx, sy = slots[k]
+        if abs(x - sx) <= 36 and -34 <= y - sy <= 0 and t not in out[k]:
+            out[k] += t
+    return out
+
+
 def sync_bag(dn, known) -> list:
     """開背包讀 15 格名稱（每格 OCR 一次），對照 known（今天會用到的材料 / 成品名）重建 dn['bag']；看完關背包。
     讀不到字 = 空格；讀到字但對不上 known → 記 '?名稱'（佔格，不會被當空格放新東西）。"""
@@ -563,8 +605,10 @@ def sync_bag(dn, known) -> list:
     import uikit
     cr.click(*cr.BAG_BTN, wait=1600, note='daily 開背包（同步格位）')
     out = []
-    for x, y in cr.bag_slots():
-        t = ''.join(OCR_FIX.get(c, c) for c in ''.join(uikit.ocr((x - 36, y - 28, 72, 24), '-Zooms', '2,3')))
+    slots = cr.bag_slots()
+    texts = _grid_texts(slots)            # 整塊背包一次 OCR（原本 15 格各 OCR 一次，約 8 秒 → 1~2 秒）
+    for k, (x, y) in enumerate(slots):
+        t = fix_text(texts[k]) if texts is not None else             ''.join(OCR_FIX.get(c, c) for c in ''.join(uikit.ocr((x - 36, y - 28, 72, 24), '-Zooms', '2,3')))
         if not t.strip():
             out.append(None)
             continue
@@ -1149,6 +1193,8 @@ def coins(uikit) -> int | None:
 
 
 # 點不到時換幾個點位（人物身體比座標公式約大 ±10px）；順序 = 正中 → 往下（腳）→ 往上 → 左右 → 斜
+# 商店 NPC（1009 / 2009）：2026-10-14 統計 10 個角色，先點 (0,-8) 第一下沒開 44 次、第二下 (0,0) 幾乎都開 → 商店先點正中
+SHOP_JITTER = [(0, 0), (0, -8), (0, 8), (-8, 0), (8, 0), (0, -16), (-10, -8), (10, -8), (0, 16), (-14, 0)]
 CLICK_JITTER = [(0, -8), (0, 0), (0, 8), (-8, 0), (8, 0), (0, -16), (-10, -8), (10, -8), (0, 16), (-14, 0)]   # 實測（1009 / 醫院）：往上 8px 最常命中人物身體
 
 

@@ -365,6 +365,11 @@ def main() -> int:
                 if rc != 0:
                     return rc
                 rc = run_dq(['craft', '--page', str(pg), '--submit'] + pf, a.client)
+                if rc == 9:
+                    # 沒做出來（常見：預先領料 / 格位記憶跟實際不同）→ 重新同步背包、再領一次料、再合成一次（已綠的項目會跳過）
+                    log(f'[craft] 第 {pg} 頁沒做出來 → 重新同步背包領料、再試一次')
+                    run_dq(['withdraw', '--page', str(pg)] + pf, a.client)
+                    rc = run_dq(['craft', '--page', str(pg), '--submit'] + pf, a.client)
                 if rc != 0:
                     log(f'第 {pg} 頁合成 / 提交失敗（退出碼 {rc}）→ 停手；看 tools/.cache/craft-p{pg}-*.png')
                     return rc
