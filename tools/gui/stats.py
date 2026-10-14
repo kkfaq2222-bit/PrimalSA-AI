@@ -7,7 +7,8 @@
   tools/.cache/stats-fullrun.jsonl   一條龍每個階段一行（fullrun1920 寫；2026-10-15 起）
 用法（專案根目錄）：
   uv run --no-project python tools/gui/stats.py            # 全部
-  uv run --no-project python tools/gui/stats.py daily      # 只看每日任務（daily / grind / fullrun 可多個）
+  uv run --no-project python tools/gui/stats.py daily      # 只看每日任務（daily / grind / fullrun / errors 可多個）
+  uv run --no-project python tools/gui/stats.py errors --since=2026-10-14   # 錯誤次數與原因（--since 只看某天起）
 """
 import collections
 import csv
@@ -163,12 +164,83 @@ def fullrun() -> None:
     print()
 
 
+# ---------------- 錯誤 / 停手 ----------------
+def _norm(reason: str) -> str:
+    import re
+    r = re.sub(r'\d+', '#', reason)
+    r = re.sub(r'\s+', ' ', r).strip(' ：:，,')
+    return r[:60]
+
+
+def errors(since: str = '') -> None:
+    """各腳本記錄檔的錯誤次數與原因：看門狗重啟 / 停手、解任務停手 / 暫時性失敗、每日任務停手"""
+    import re
+    print('== 錯誤 / 停手統計 ==' + (f'（{since} 起）' if since else ''))
+    groups = collections.defaultdict(lambda: collections.defaultdict(list))   # 來源 → 原因 → [時間]
+
+    def add(src, reason, when):
+        if since and when and when[:10] < since:
+            return
+        groups[src][_norm(reason)].append(when)
+    for f in sorted(CACHE.glob('watchdog-*.log')):
+        client = f.stem[len('watchdog-'):]
+        for ln in f.read_text(encoding='utf-8', errors='replace').splitlines():
+            when = ln[:19]
+            m = re.search(r'退出碼 (\d+)（暫時性）.*最後輸出：(.*)', ln)
+            if m:
+                add(f'看門狗 {client}（自動重啟）', f'退出碼 {m.group(1)}：{m.group(2)}', when)
+                continue
+            m = re.search(r'\[watchdog\] 停手：(.*?)（旗標', ln)
+            if m:
+                add(f'看門狗 {client}（停手）', m.group(1), when)
+    for f in sorted(CACHE.glob('questflow-*.log')):
+        client = f.stem[len('questflow-'):]
+        for ln in f.read_text(encoding='utf-8', errors='replace').splitlines():
+            when = ln[:19]
+            m = re.search(r'停手（退出碼 (\d+)）：(.*)', ln)
+            if m and '帳本' not in ln:
+                add(f'解任務 {client}（停手）', f'退出碼 {m.group(1)}：{m.group(2)}', when)
+                continue
+            m = re.search(r'暫時性失敗（退出碼 (\d+)：(.*?)）→', ln)
+            if m:
+                add(f'解任務 {client}（暫時性失敗，自動重試）', f'退出碼 {m.group(1)}：{m.group(2)}', when)
+    dl = CACHE / 'daily-live.log'
+    if dl.exists():
+        for ln in dl.read_text(encoding='utf-8', errors='replace').splitlines():
+            if ('停手' in ln or '不提交' in ln) and not ln.startswith(' '):
+                body = re.sub(r'^\d\d:\d\d:\d\d\s*', '', ln)
+                if body.startswith(('購買未完成', '角色 ')) or '停手；排除後' in body:
+                    continue                         # 摘要行（原因在前一行）
+                add('每日任務（停手）', body, '')
+    if not groups:
+        print('（沒有記錄）\n')
+        return
+    for src in sorted(groups):
+        items = sorted(groups[src].items(), key=lambda kv: -len(kv[1]))
+        total = sum(len(v) for _, v in items)
+        print(f'-- {src}：共 {total} 次 --')
+        print(f'  {"次數":>4}  {"第一次":<16} {"最後一次":<16} 原因')
+        for reason, ts in items[:12]:
+            ts2 = sorted(t for t in ts if t)
+            a = ts2[0][5:16] if ts2 else '—'
+            b = ts2[-1][5:16] if ts2 else '—'
+            print(f'  {len(ts):>4}  {a:<16} {b:<16} {reason}')
+        if len(items) > 12:
+            print(f'  …另外 {len(items) - 12} 種原因')
+    print('（「#」= 數字；每日任務記錄沒有日期，所以沒有時間欄）\n')
+
+
 def main() -> int:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    want = sys.argv[1:] or ['daily', 'grind', 'fullrun']
+    args = sys.argv[1:]
+    since = next((x.split('=', 1)[1] for x in args if x.startswith('--since=')), '')
+    want = [x for x in args if not x.startswith('--')] or ['daily', 'grind', 'fullrun', 'errors']
     for w in want:
-        {'daily': daily, 'grind': grind, 'fullrun': fullrun}.get(w, lambda: print(f'不認得：{w}（daily / grind / fullrun）'))()
+        if w == 'errors':
+            errors(since)
+            continue
+        {'daily': daily, 'grind': grind, 'fullrun': fullrun}.get(w, lambda: print(f'不認得：{w}（daily / grind / fullrun / errors）'))()
     return 0
 
 
