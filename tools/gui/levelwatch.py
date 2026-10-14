@@ -166,9 +166,11 @@ def main() -> int:
     ap.add_argument('--exp-slow', type=float, default=1.6, help='升級時間超過預期的幾倍算經驗速度異常（預設 1.6）')
     ap.add_argument('--exp-per-min', type=float, default=0, help='基準每分鐘經驗；沒給就用同一張地圖最近 5 次升級的中位數')
     ap.add_argument('--battle-max', type=int, default=120, help='連續幾秒都在戰鬥中算戰鬥過久（預設 120）')
+    ap.add_argument('--end-level', type=int, default=END_LEVEL, help='練到幾級結束（預設 131；漆黑洞窟(五轉)要 140）')
     ap.add_argument('--stop-at-end', action='store_true', help=f'隊長達 {END_LEVEL} 級就結束監測（預設改成留在練功點繼續補血 / 檢查）')
     ap.add_argument('--dry-run', action='store_true', help='只印會做什麼，不傳送')
     a = ap.parse_args()
+    globals()['END_LEVEL'] = a.end_level      # 131（預設）/ 140（五轉）；使用者 2026-10-14
     global ASS_AFTER_ARRIVE
     ASS_AFTER_ARRIVE = not a.no_ass
     if layout.current() not in layout.SUPPORTED:

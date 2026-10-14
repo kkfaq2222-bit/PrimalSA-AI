@@ -380,25 +380,66 @@ def cmd_check(a) -> int:
     return 0
 
 
+def quest_done_here(qf, name: str) -> bool:
+    """目前這個角色的任務 name 已完成？任務詳情支線第一頁讀得到別的任務（有進行中 / 待接取）、
+    卻沒有這個任務，而且追蹤欄也找不到它。讀不到 / 不確定一律回 False（寧可照原流程做，不亂略過）。"""
+    try:
+        snap = qf.side_snapshot()
+        seen = list(snap.get('active', [])) + list(snap.get('pending', []))
+        if not seen or name in snap.get('visible', seen):
+            return False
+        return qf.find_track_row(name, scroll=False, reveal=False) is None
+    except Exception as e:
+        log(f'{name} 完成偵測失敗（{e}）→ 當作還沒完成')
+        return False
+
+
+def dino_done_here(qf) -> bool:
+    return quest_done_here(qf, '恐龍博士')
+
+
+def cmd_quest_check(a) -> int:
+    """只看角色 1（目前這個角色，不切換）的任務詳情：沒有這個任務 = 已完成（退出碼 0，帳本標 done）；
+    還有 / 讀不準 = 退出碼 1。只讀，不接、不交、不改寵物。使用者 2026-10-14：手動做完後重開要自己偵測；
+    不要切 5 個角色看（要 1 分鐘以上），看角色 1 就夠。"""
+    q, qf = setup_env(a.client)
+    try:
+        q.preflight()
+        if quest_done_here(qf, a.quest):
+            q.ledger_mark(a.quest, 'done', 'katantrain quest-check：角色 1 任務詳情已沒有這個任務')
+            log(f'{a.quest}：角色 1 任務詳情已沒有這個任務 → 已完成（帳本標 done）')
+            return 0
+        log(f'{a.quest}：角色 1 還沒完成 / 讀不準 → 照流程做')
+        return 1
+    except Exception as e:
+        log(f'偵測失敗（{getattr(e, "msg", e)}）→ 當作還沒完成')
+        return 1
+
+
 def cmd_dino_handin(a) -> int:
     """恐龍博士交任務（任務 2016；使用者 2026-10-12）：全部改休息 → 5 人組隊 → 到研究所接任務（哈魯）→ 隊長解散 →
     5 人逐一切換角色、各自交步 1（魯尼帖斯）+ 步 2（貝魯卡）（dino1920.py：選擇視窗依名字點卡片）。"""
     q, qf = setup_env(a.client)
     try:
-        rc = sub('petrest1920.py', '--client', a.client, '--roles', '1,2,3,4,5')
-        if rc != 0:
-            log(f'改休息失敗（退出碼 {rc}）→ 停手')
-            return 4
-        # 恐龍博士只有「接任務」要組隊（5 人一起傳到研究所），交任務一律單人（使用者 2026-10-13）。
-        # 已經接過（追蹤欄有）就不用再組隊：直接解散、單人交；重試時不會再白花 2~4 分鐘組隊。
         q.preflight()
         q.TRUST_TEAM = True
-        if qf.find_track_row('恐龍博士', scroll=False, reveal=False) is None:
-            ensure_team(q)
-            log('=== 接「恐龍博士」（5 人組隊，傳到研究所跟哈魯對話）===')
-            qf.accept_top('恐龍博士')
+        # 使用者 2026-10-14：手動解完恐龍博士後重開，流程要自己偵測，不是照階段紀錄又去組隊接任務。
+        # 偵測 = 任務詳情「支線」第一頁讀得到其他任務、卻沒有恐龍博士，且追蹤欄也沒有 → 這個角色已完成。
+        if dino_done_here(qf):
+            log('任務詳情支線已經沒有恐龍博士（已完成）→ 不改休息、不組隊、不接任務')
         else:
-            log('追蹤欄已有恐龍博士，不重接、也不組隊（單人交任務）')
+            rc = sub('petrest1920.py', '--client', a.client, '--roles', '1,2,3,4,5')
+            if rc != 0:
+                log(f'改休息失敗（退出碼 {rc}）→ 停手')
+                return 4
+            # 恐龍博士只有「接任務」要組隊（5 人一起傳到研究所），交任務一律單人（使用者 2026-10-13）。
+            # 已經接過（追蹤欄有）就不用再組隊：直接解散、單人交；重試時不會再白花 2~4 分鐘組隊。
+            if qf.find_track_row('恐龍博士', scroll=False, reveal=False) is None:
+                ensure_team(q)
+                log('=== 接「恐龍博士」（5 人組隊，傳到研究所跟哈魯對話）===')
+                qf.accept_top('恐龍博士')
+            else:
+                log('追蹤欄已有恐龍博士，不重接、也不組隊（單人交任務）')
         log('=== 隊長解散，5 人逐一交 ===')
         q.disband()
         for r in (1, 2, 3, 4, 5):
@@ -406,12 +447,16 @@ def cmd_dino_handin(a) -> int:
             if rc != 0:
                 log(f'切到角色 {r} 失敗（退出碼 {rc}）→ 停手')
                 return 4
+            if dino_done_here(qf):
+                log(f'角色 {r}：恐龍博士已完成（畫面沒有這個任務）→ 略過')
+                continue
             rc = sub('dino1920.py', '--client', a.client, '--track', 2)
             if rc != 0:
                 log(f'角色 {r} 交恐龍博士沒成功（退出碼 {rc}）→ 停手（前面角色已交完的不會重交）')
                 return 5
             log(f'角色 {r} 步 1 + 步 2 已交')
         sub('switch1920.py', '--client', a.client, '--role', 1)
+        q.ledger_mark('恐龍博士', 'done', 'katantrain：5 人都交完 / 畫面已無此任務')
         return 0
     except Exception as e:
         code = getattr(e, 'code', 99)
@@ -436,10 +481,13 @@ def main(argv=None) -> int:
     c.add_argument('--slot', type=int, default=4)
     c.add_argument('--max-min', type=int, default=0, help='最多偵測幾分鐘（0 = 不限）')
     sp.add_parser('dino-handin', help='恐龍博士：改休息 → 組隊接任務 → 解散 → 5 人逐一交')
+    qc = sp.add_parser('quest-check', help='5 人逐一看任務詳情，都沒有這個任務 = 已完成（退出碼 0）')
+    qc.add_argument('--quest', required=True)
     h = sp.add_parser('handin')
     h.add_argument('--step', type=int, choices=[1, 2], required=True)
     a = ap.parse_args(argv)
-    return {'train': cmd_train, 'handin': cmd_handin, 'check': cmd_check, 'dino-handin': cmd_dino_handin}[a.cmd](a)
+    return {'train': cmd_train, 'handin': cmd_handin, 'check': cmd_check, 'dino-handin': cmd_dino_handin,
+            'quest-check': cmd_quest_check}[a.cmd](a)
 
 
 if __name__ == '__main__':

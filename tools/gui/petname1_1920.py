@@ -43,7 +43,23 @@ def rename_slot(pd, i: int, name: str) -> bool:
     pd.click(*OK_BTN, wait=1000, note='petname1 確認')
     got = name_ink()
     pd.log(f'第 {i + 1} 格名稱字數：{cur} → {got}')
-    return got <= SHORT_MAX
+    if got <= SHORT_MAX:
+        return True
+    # 使用者 2026-10-14：WW 這種短名只要「沒有數字」就算改成功（白字數門檻會被 WW 的字寬 / 描邊影響）：
+    # 名稱 OCR 多種倍率都讀不到數字名，且白字數明顯少於改名前（< 70%）→ 成功
+    try:
+        import re
+        import uikit
+        import questflow1920 as qf
+        from petfetchimg1920 import is_numeric_name
+        txts = [''.join(uikit.ocr(qf.PET_NAME_BOX, *o)).strip()
+                for o in (('-Zooms', '3,4'), ('-Zooms', '2,3'), ('-Zooms', '3,4', '-Dark', '130'))]
+        has_digits = any(is_numeric_name(t) or len(re.findall(r'\d', t)) >= 2 for t in txts)
+        pd.log(f'第 {i + 1} 格名稱 OCR：{txts}（有數字={has_digits}）')
+        return (not has_digits) and got < cur * 0.7
+    except Exception as e:
+        pd.log(f'名稱 OCR 檢查失敗：{e}')
+        return False
 
 
 def main(argv=None) -> int:

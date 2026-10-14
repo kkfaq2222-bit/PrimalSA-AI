@@ -124,11 +124,14 @@ def track_keys(name: str) -> list:
 
 # ---- 背包 / 倉庫 / 龍王的守護 ----
 def open_bag() -> bool:
-    for _ in range(3):
+    for k in range(3):
         c = q.px([(480, 56), CLOSE_BAG])
         if c and c[1][0] > 150 and c[1][1] < 120:
             return True
-        q.click(BAG_BTN, right=2, wait_ms=1500, note='questflow 開背包')
+        if k > 0:      # 使用者 2026-10-14：沒開成先 ESC 復原再重點（別的面板 / 視窗擋住時重點也沒用；22222 gate 吃龍王的守護停手）
+            q.key('{ESC}')
+            q.sleep(0.9)
+        q.click(BAG_BTN, right=2, wait_ms=1500, note=f'questflow 開背包（第 {k + 1}/3 次）')
     c = q.px([(480, 56), CLOSE_BAG])
     return bool(c) and c[1][0] > 150 and c[1][1] < 120
 
@@ -594,7 +597,9 @@ def sync_ledger_with_game(snap: dict) -> None:
         if led.get(n, {}).get('status') != 'done':
             q.ledger_mark(n, 'done', 'questflow：任務詳情第一頁推定已完成（排序規則）')
             log(f'帳本補標 done：{n}')
-    for n in snap.get('visible', snap['active'] + snap['pending']):
+    # 使用者 2026-10-14：22222 / 11111 的琉璃 / 玄黃 / 碧青洞窟被改回 todo（名字出現在漆黑洞窟的說明文字「已完成 4 大洞窟任務」裡，
+    # 並不是清單裡的任務）→ 只有標籤是進行中 / 待接取的才算還沒完成。
+    for n in snap['active'] + snap['pending']:
         if led.get(n, {}).get('status') == 'done':
             q.ledger_mark(n, 'todo', 'questflow：任務詳情顯示尚未完成，帳本舊紀錄更正')
             log(f'帳本更正 todo：{n}（任務詳情顯示還沒完成）')

@@ -70,16 +70,63 @@ def fast_candidates(uikit, a) -> list:
     return out
 
 
+def take_first_personal(pd, uikit, r, tries=3) -> bool:
+    """角色 r：倉庫 → 個人分頁（驗證真的選中）→ 點第 1 格 → 按鈕是「取出寵物」才取 → 切別人再切回來數寵物欄，多 1 隻才算成功。"""
+    import time
+    before = sum(1 for i in range(5) if not pd.slot_empty(i))
+    if before >= 5:
+        pd.log(f'角色{r} 寵物欄已滿 5 隻 → 不能領，停手')
+        return False
+    for k in range(tries):
+        pd.click(*pd.TAB_DEPOT, wait=1300, note='getgold 倉庫分頁')
+        pd.click(*pd.DEPOT_PERSONAL, wait=900, note='getgold 個人分頁')
+        for _ in range(3):              # 遊戲會吃掉分頁點擊 → 存 / 取進錯的倉庫：一定要確認亮黃才往下
+            c = pd.px([(560, 96)])
+            if c and c[0][0] > 225 and c[0][1] > 190:
+                break
+            pd.click(*pd.DEPOT_PERSONAL, wait=900, note='getgold 重點個人分頁')
+        else:
+            pd.log(f'角色{r} 個人分頁切不過去（第 {k + 1} 次）')
+            continue
+        pd.click(XS[0], YS[0], wait=800, note='getgold 個人倉庫第 1 格')
+        lab = ''.join(uikit.ocr((300, 412, 125, 36), '-Zooms', '2,3'))
+        if '取出' not in lab:
+            pd.click(XS[0], YS[0], wait=1000, note='getgold 重點第 1 格')
+            lab = ''.join(uikit.ocr((300, 412, 125, 36), '-Zooms', '2,3'))
+        if '取出' not in lab:
+            pd.log(f'角色{r} 個人倉庫第 1 格按鈕不是「取出寵物」（{lab!r}；可能是空的）')
+            continue
+        nm = ''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '2,3'))
+        pd.click(*TAKE_BTN, wait=1200, note='getgold 取出個人倉庫第 1 格')
+        time.sleep(0.6)
+        other = 0 if r != 1 else 1        # 切別人再切回來才會刷新寵物欄
+        pd.click(pd.ROLE_X, pd.ROLE_Y[other], wait=800, note='getgold 先切別人（刷新）')
+        pd.click(pd.ROLE_X, pd.ROLE_Y[r - 1], wait=1000, note=f'getgold 切回角色 {r}')
+        now = sum(1 for i in range(5) if not pd.slot_empty(i))
+        pd.log(f'角色{r} 領個人倉庫第 1 格（{nm.strip()}）寵物欄 {before}→{now}')
+        if now > before:
+            return True
+        pd.log(f'角色{r} 按了取出但寵物欄數量沒變 → 不重按（避免多領一隻），停手請人看')
+        return False
+    pd.log(f'角色{r} 領個人倉庫第 1 格失敗（{tries} 次）')
+    return False
+
+
 def main():
+    global TARGETS
     ap = argparse.ArgumentParser()
     ap.add_argument('--client', default='kkfaq22222')
     ap.add_argument('--roles', default='1,2,3,4,5')
     ap.add_argument('--max-slots', type=int, default=10)
     ap.add_argument('--level', type=int, default=1, choices=[0, 1], help='1 = 只領 1 級的（點選後比對卡片綠字「0轉1級」；預設）；0 = 不驗證等級')
     ap.add_argument('--only', default='', help='只領名稱含這個關鍵字的（例：朵拉 = 只領金飛朵拉比斯）；預設全領')
+    ap.add_argument('--fresh', action='store_true', help='忽略「已領過」記檔，全部角色重領')
+    ap.add_argument('--first', action='store_true',
+                    help='不看名稱 / 等級：每個角色固定領「個人倉庫第 1 格」的寵物（使用者 2026-10-14：轉生後戰寵改領個人倉庫第 1 隻）')
     a = ap.parse_args()
-    if a.only:
-        global TARGETS
+    if a.first:
+        TARGETS = {'第1格': '個人倉庫第 1 格'}
+    elif a.only:
         TARGETS = {k: v for k, v in TARGETS.items() if k in a.only or a.only in k}
         if not TARGETS:
             print(f'--only {a.only} 不是已知目標（{"、".join(TARGETS_ALL)}）')
@@ -93,8 +140,41 @@ def main():
         print('寵物面板打不開')
         return 3
     rc = 0
+    # 已領過的角色記檔（2026-10-14：看門狗重啟會整輪重跑，已領完的角色倉庫沒有 1 級金飛 → 誤報「少了」）；1 小時內有效
+    import json
+    import time
+    st_path = Path(__file__).resolve().parents[1] / '.cache' / f'getgold-{a.client}.json'
+    try:
+        st = json.loads(st_path.read_text(encoding='utf-8'))
+    except Exception:
+        st = {}
+    if a.fresh or time.time() - st.get('ts', 0) > 3600:
+        st = {'ts': time.time(), 'done': {}}
+    tkey = '+'.join(sorted(TARGETS))
     for r in [int(x) for x in a.roles.split(',')]:
+        if st['done'].get(f'{r}:{tkey}'):
+            pd.log(f'角色{r} 先前已領過 {tkey}（記檔）→ 跳過；要重領加 --fresh')
+            continue
         pd.click(pd.ROLE_X, pd.ROLE_Y[r - 1], wait=1200, note=f'getgold 角色 {r}')
+        if a.first:
+            ok = take_first_personal(pd, uikit, r)
+            if ok:
+                st['done'][f'{r}:{tkey}'] = True
+                st['ts'] = time.time()
+                st_path.write_text(json.dumps(st), encoding='utf-8')
+            else:
+                rc = 5
+            continue
+        # 先看身上：寵物欄第 2 格（飛龍位）已是朵拉比斯就不用去倉庫找（手動領過 / 看門狗重啟都適用）
+        if tkey == '朵拉':
+            pd.click(885, 175, wait=900, note='getgold 寵物分頁')
+            pd.click(pd.SLOT_X, pd.SLOT_Y[1], wait=1500, note='getgold 檢查第 2 格')
+            nm0 = pd.match_pet_name(pd.read_pet_name(uikit))
+            if nm0 == '朵拉比斯':
+                pd.log(f'角色{r} 身上第 2 格已是朵拉比斯 → 不用領')
+                st['done'][f'{r}:{tkey}'] = True
+                st_path.write_text(json.dumps(st), encoding='utf-8')
+                continue
         pd.click(*pd.TAB_DEPOT, wait=1300, note='getgold 倉庫分頁')
         pd.click(*pd.DEPOT_PERSONAL, wait=900, note='getgold 個人分頁')
         found = set()
@@ -138,6 +218,10 @@ def main():
         if len(found) != len(TARGETS):
             pd.log(f'角色{r} 只取到 {sorted(TARGETS[k] for k in found)}，少了 {sorted(TARGETS[k] for k in TARGETS if k not in found)}')
             rc = 5
+        else:
+            st['done'][f'{r}:{tkey}'] = True
+            st['ts'] = time.time()
+            st_path.write_text(json.dumps(st), encoding='utf-8')
     pd.click(*pd.CLOSE_X, wait=500)
     return rc
 

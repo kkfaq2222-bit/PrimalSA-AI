@@ -235,6 +235,16 @@ def main(argv=None) -> int:
         if fam in ('shark', 'bird') and (a.no_setup or fi > 0 or a.family == 'rest'):
             ph = [p for p in ph if p != 'setup']     # rest = 鯊魚 / 火雞抓寵早就做完：絕不能再「全存倉庫」把要交的任務寵存走
         done = load_done(a.client, fam) if a.resume else []
+        # 使用者 2026-10-14：手動做完任務再重開，要先偵測畫面，不是照階段紀錄又去抓寵 / 組隊 / 接任務。
+        # 這個系別的任務在角色 1 的任務詳情已經沒有 → 全部階段標完成、直接跳過（只看角色 1，不切 5 個角色）（只在 --do 且階段還沒做完時偵測）
+        if do and a.resume and want is None and not all(p in done for p in ph):
+            quest = '恐龍博士' if fam == 'dino' else '卡坦的願望'
+            rc = subprocess.call(py('katantrain1920.py', '--client', a.client, 'quest-check', '--quest', quest))
+            if rc == 0:
+                log(f'[{fam}] 「{quest}」角色 1 任務詳情已沒有這個任務（已完成）→ 全部階段略過')
+                done = sorted(set(done) | set(allp))
+                save_done(a.client, fam, done)
+                continue
         for p in ph:
             if p in done and a.resume:
                 log(f'[{fam}] 階段 {p} 已完成，跳過')

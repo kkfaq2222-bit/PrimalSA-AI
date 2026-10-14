@@ -16,7 +16,7 @@ r"""11111 一條龍總控（1920×1017；終端機直接跑；可中斷續跑）
   gift       轉生後 1 級：開「N 轉新手禮盒」（最多試 3 次，失敗不停手）→ 吃 2 倍智慧果 + 離線水晶 → 安撫之素 / 寵物誘餌存共用倉庫（newbiebox1920）
   organize   整理寵物：丟棄 奇娜 / 多魯寶 / 烏力斯坦 / 修寶 / 布克布克；金飛 紅飛 紅暴 藍暴 金羊 存個人倉庫（petorganize1920）
   clear      寵物全身清空（petdepot --do 全存個人倉庫，再 --check-empty 驗證 5 人寵物欄全空）
-  prep       rebirthprep：角色 5 抓格魯西斯 + 分給其他人 + 外掛鎖定騎寵 + 領 1 級金飛設戰寵
+  prep       rebirthprep：角色 5 抓格魯西斯 + 分給其他人 + 外掛鎖定騎寵 + 領個人倉庫第 1 隻設戰寵
   grind      練等 1~131（levelwatch --no-heal --stop-at-end；不補血）
 
 用法（專案根目錄）：
@@ -42,6 +42,7 @@ STATE_DIR = ROOT / 'tools' / '.cache'
 
 STAGES = ['train', 'wait131', 'stopenc', 'ledger', 'prebag', 'quests', 'riddle', 'katan', 'dino', 'gate', 'rebirth', 'gift', 'organize', 'clear', 'prep', 'grind']
 TARGET = 131
+GRIND_TARGET = TARGET          # 本輪練功目標（131 / 140）；進 train / wait131 / grind 前由 detect_grind_target 決定
 TEAM_BTN, TEAM_X = (598, 465), (813, 42)
 CARD_CX = (237, 355, 480, 604, 729)          # 組隊面板 5 張卡片的名牌中心 x（960×508 截圖座標；2026-10-12 11111 實機量）
 LV_Y = 268
@@ -60,7 +61,7 @@ def plan(client: str, stage: str) -> list:
     c = ['--client', client]
     if stage == 'train':
         return [('確認 5 人自動轉換戰寵沒勾（卡坦 / 恐龍博士練寵後可能還開著）', py('autoswapoff1920.py', *c)),
-                ('練等到隊長 131 級（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal'))]
+                (f'練等到隊長 {GRIND_TARGET} 級（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal', '--end-level', GRIND_TARGET))]
     if stage == 'prebag':
         return [('任務前整理背包', py('bag1920.py', *c, '--do'))]
     if stage == 'quests':
@@ -81,10 +82,10 @@ def plan(client: str, stage: str) -> list:
         return [('寵物全存個人倉庫', py('petdepot1920.py', *c, '--do')),
                 ('驗證 5 人寵物欄全空', py('petdepot1920.py', *c, '--check-empty', '--roles', '1,2,3,4,5'))]
     if stage == 'prep':
-        return [('抓格魯西斯 / 分寵 / 鎖定騎寵 / 領金飛 / 設戰寵', py('rebirthprep1920.py', *c, '--do', '--resume'))]
+        return [('抓格魯西斯 / 分寵 / 鎖定騎寵 / 領個人倉庫第 1 隻 / 設戰寵', py('rebirthprep1920.py', *c, '--do', '--resume'))]
     if stage == 'grind':
         return [('確認 5 人自動轉換戰寵沒勾（卡坦 / 恐龍博士練寵後可能還開著）', py('autoswapoff1920.py', *c)),
-                ('練等 1~131（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal'))]
+                (f'練等 1~{GRIND_TARGET}（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal', '--end-level', GRIND_TARGET))]
     return []
 
 
@@ -225,8 +226,53 @@ def read_team_levels_retry(tries: int = 3) -> list:
     return lv
 
 
-def levels_ready(lv: list, target: int = TARGET) -> bool:
+def levels_ready(lv: list, target: int = None) -> bool:
+    target = GRIND_TARGET if target is None else target
     return len(lv) == 5 and all(v is not None and v >= target for v in lv)
+
+
+def detect_grind_target(client: str) -> int:
+    """練功目標：任務詳情「主線」分頁最上面那格是「漆黑洞窟(五轉)」→ 140（要掛 16~18 小時），其餘一轉~四轉 → 131。
+    使用者 2026-10-14：偵測異常時先 ESC 關視窗再重讀；還是讀不到就用人物資訊面板的轉數（4 轉 = 下一個漆黑是五轉）。"""
+    import re
+    try:
+        import questflow1920 as qf
+    except Exception as e:
+        log(f'[target] 載入 questflow 失敗（{e}）→ 131')
+        return 131
+    for k in range(3):                             # 任務詳情「主線」分頁最上面那格的漆黑（使用者 2026-10-14：不要讀追蹤欄）
+        top = ''
+        try:
+            if qf.open_detail(side=False):
+                rows = sorted(qf.q._list_rows(), key=lambda r: r[1])
+                lab = ('進行', '待接', '接取', '完成')
+                names = [t for t, _ in rows if not any(x in t for x in lab)]
+                top = names[0] if names else ''
+        except Exception as e:
+            log(f'[target] 任務詳情讀取失敗（{e}）')
+        finally:
+            try:
+                qf.q.key('{ESC}')
+                time.sleep(0.6)
+            except Exception:
+                pass
+        if '漆黑' in top:
+            five = bool(re.search(r'[五5][轉转]', top))
+            if five or re.search(r'[一二三四1-4][轉转]', top):
+                log(f'[target] 任務詳情主線最上面：{top!r} → {"五轉 → 140" if five else "131"}')
+                return 140 if five else 131
+            log(f'[target] 任務詳情主線最上面讀到漆黑但看不出幾轉：{top!r}（第 {k + 1}/3 次）')
+        else:
+            log(f'[target] 任務詳情主線最上面不是漆黑：{top!r}（第 {k + 1}/3 次）→ ESC 後重讀')
+        _esc()
+        time.sleep(1.0)
+    try:                                           # 保底：人物資訊面板的轉數（4 轉 → 下一個漆黑是五轉）
+        n = qf.current_trans()
+        log(f'[target] 追蹤欄讀不到 → 人物資訊面板轉數 {n}')
+        return 140 if n == 4 else 131
+    except Exception as e:
+        log(f'[target] 轉數也讀不到（{e}）→ 131')
+        return 131
 
 
 def stage_wait131(client: str, every: int, max_min: int) -> int:
@@ -240,11 +286,11 @@ def stage_wait131(client: str, every: int, max_min: int) -> int:
         except Exception:
             pass
         lv = read_team_levels_retry()
-        log(f'5 人等級：{lv}（目標 >= {TARGET}）')
+        log(f'5 人等級：{lv}（目標 >= {GRIND_TARGET}）')
         if levels_ready(lv):
             return 0
         time.sleep(every)
-    log(f'等了 {max_min} 分鐘 5 人還沒全到 {TARGET} 級 → 停手')
+    log(f'等了 {max_min} 分鐘 5 人還沒全到 {GRIND_TARGET} 級 → 停手')
     return 7
 
 
@@ -344,14 +390,17 @@ def stage_rebirth(client: str, wait_min: int) -> int:
 def run_cmds(client: str, stage: str) -> int:
     extra = []
     if stage in ('quests', 'riddle', 'gate'):          # questflow 的 HUD 轉生數 OCR 會讀錯 → 由組隊面板讀好傳進去
-        tr = None
-        for k in range(3):
-            tr = read_trans()
-            if tr is not None:
-                break
-            log(f'讀不到轉生數 N（第 {k + 1}/3 次）→ ESC 後重讀')
+        tr = read_trans()
+        if tr is None:      # 使用者 2026-10-14：讀不到就 ESC，改開左上角人物資訊面板讀大字，不重試組隊面板 3 次
+            log('組隊面板讀不到轉生數 → ESC 後改用人物資訊面板')
             _esc()
-        log(f'組隊面板讀到轉生數：{tr}')
+            time.sleep(0.8)
+            try:
+                import questflow1920 as qf
+                tr = qf.trans_from_info_panel()
+            except Exception as e:
+                log(f'人物資訊面板讀轉數失敗：{e}')
+        log(f'讀到轉生數：{tr}')
         if tr is not None:
             extra = ['--trans', str(tr)]
     for desc, argv in plan(client, stage):
@@ -397,14 +446,14 @@ def stage_grind(client: str, every: int, max_min: int) -> int:
                 break
             time.sleep(10)
         lv = read_team_levels_retry()
-        log(f'[grind] 5 人等級：{lv}（目標 >= {TARGET}）')
+        log(f'[grind] 5 人等級：{lv}（目標 >= {GRIND_TARGET}）')
         if levels_ready(lv):
             return 0
         t0 = t0 or time.time()
         if time.time() - t0 > max_min * 60:
-            log(f'[grind] 超過 {max_min} 分鐘 5 人還沒全到 {TARGET} 級 → 停手')
+            log(f'[grind] 超過 {max_min} 分鐘 5 人還沒全到 {GRIND_TARGET} 級 → 停手')
             return 7
-        log('[grind] 面板顯示還沒全到 131（HUD 可能誤讀）→ 繼續練')
+        log(f'[grind] 面板顯示還沒全到 {GRIND_TARGET}（HUD 可能誤讀）→ 繼續練')
         time.sleep(every)
 
 
@@ -462,6 +511,12 @@ def main(argv=None) -> int:
             continue
         pausegate.wait(log)
         log(f'===== 階段 {s} =====')
+        if s in ('train', 'wait131', 'grind'):
+            globals()['GRIND_TARGET'] = detect_grind_target(a.client)
+            if GRIND_TARGET >= 140:
+                log('練功目標 140（漆黑洞窟(五轉)）→ 要掛 16~18 小時，不設定多久沒動作')
+            else:
+                log(f'練功目標 {GRIND_TARGET}')
         if s == 'wait131':
             rc = stage_wait131(a.client, a.wait_every, a.wait_max_min)
         elif s == 'grind':

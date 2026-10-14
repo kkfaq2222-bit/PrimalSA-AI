@@ -34,7 +34,7 @@ check('store：第 2~5 格存公共', all(k in joined('store')[0] for k in ('--s
 check('give：角色 1~4 各領第 1 格', all(k in joined('give')[0] for k in ('--first', '1:格魯西斯;2:格魯西斯;3:格魯西斯;4:格魯西斯')), True)
 check('give 不含角色 5', '5:格魯西斯' in joined('give')[0], False)
 check('lock：自己的 lockmount 子指令', joined('lock')[0].endswith('lockmount --roles 1,2,3,4,5'), True)
-check('gold：只領朵拉、1 級', '--only 朵拉' in joined('gold')[0] and '--level 1' in joined('gold')[0], True)
+check('gold：領個人倉庫第 1 格（--first）', '--first' in joined('gold')[0] and '--only' not in joined('gold')[0], True)
 check('fight：5 人設出戰', names('fight'), ['petsetup1920.py'])
 check('OCR 容錯：缺字也認得', all(rp._hit(t) for t in ('格魯西斯', '格魯西', '魯西斯', '格魯 西斯'.replace(' ', ''))), True)
 check('OCR 不誤認別隻', rp._hit('貝魯卡'), False)

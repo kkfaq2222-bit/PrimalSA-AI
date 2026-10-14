@@ -47,6 +47,31 @@ def log(m):
     print(time.strftime('%H:%M:%S'), m, flush=True)
 
 
+# 名字特徵字（OCR 常缺字 / 重複，所以出現 2 個以上特徵字就算）
+NAME_CHARS = {'朵拉比斯': '朵拉比斯', '格魯西斯': '格魯西斯', '金格薩貝魯': '金格薩貝魯'}
+
+
+def read_pet_name(uikit, tries=3):
+    """讀選取寵物的名字：讀空就等 0.5 秒重讀，最多 tries 次"""
+    nm = ''
+    for _ in range(tries):
+        nm = ''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '2,3')) + ''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '3,4'))
+        if nm.strip():
+            break
+        time.sleep(0.5)
+    return nm
+
+
+def match_pet_name(nm):
+    """模糊比對：名字裡含某寵物 2 個以上特徵字 → 回傳全名；否則 ''"""
+    best, hit = '', 1
+    for full, chars in NAME_CHARS.items():
+        n = len({c for c in chars if c in nm})
+        if n > hit:
+            best, hit = full, n
+    return best
+
+
 def gui(*a, note=''):
     import uikit
     return uikit.gui(*a, note=note)

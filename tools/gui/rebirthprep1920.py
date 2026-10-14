@@ -7,7 +7,7 @@ r"""轉生後 1 級、開始練等之前的準備（1920×1017；終端機直接
   3. 寵物欄第 2~5 格存公共倉庫（4 隻）；第 1 格留給角色 5 自己
   4. 角色 1、2、3、4 各從公共倉庫領第 1 格（--first：公共倉庫只放這一批同一種）
   5. 外掛區域：5 人「鎖定騎寵」選格魯西斯並打勾
-  6. 從個人倉庫領出金飛（朵拉比斯）→ 設出戰（戰寵）
+  6. 從個人倉庫領出第 1 格的寵物 → 設出戰（戰寵）（使用者 2026-10-14：原本領 1 級金飛，改成固定領個人倉庫第 1 隻）
   （抓完、剩的寵物誘餌一律存回共用倉庫）
 
 階段（--phase）：check（角色 5 寵物欄全空 + 解散隊伍）、catch、rename、store、give、lock、gold、fight；all = 依序全部。
@@ -72,7 +72,7 @@ def plan(client: str, phase: str) -> list:
                     py('catchrun1920.py', *c, '--role', CATCHER, '--system', SYSTEM, '--pet', PET, '--n', 5, '--source', 'public')))
         out.append((f'角色 {CATCHER} 剩餘寵物誘餌存回共用倉庫（抓完放回去）', py('baitstore1920.py', *c, '--role', CATCHER)))
     elif phase == 'rename':
-        out.append((f'角色 {CATCHER} 寵物暱稱改回原本種類名', py('petrename1920.py', *c, '--expect', ','.join(PET_KEYS), '--count', 5, '--roles', CATCHER)))
+        out.append((f'角色 {CATCHER} 寵物暱稱改回原本種類名', py('petrename1920.py', *c, '--no-digits', '--count', 5, '--roles', CATCHER)))
     elif phase == 'store':
         out.append((f'角色 {CATCHER} 寵物欄第 2~5 格存公共倉庫（4 隻；第 1 格留自己）',
                     py('petfetchimg1920.py', *c, 'storebar', '--role', CATCHER, '--slots', '2,3,4,5', '--tab', 'public', '--do')))
@@ -82,9 +82,9 @@ def plan(client: str, phase: str) -> list:
     elif phase == 'lock':
         out.append((f'外掛「鎖定騎寵」5 人選{PET}並打勾', py('rebirthprep1920.py', *c, 'lockmount', '--roles', '1,2,3,4,5')))
     elif phase == 'gold':
-        out.append(('5 人從個人倉庫領出 1 級金飛（朵拉比斯；點選後讀卡片等級驗證）', py('petgetgold1920.py', *c, '--roles', '1,2,3,4,5', '--only', '朵拉', '--level', 1)))
+        out.append(('5 人各領個人倉庫第 1 格寵物（當戰寵；寵物欄數量 +1 驗證）', py('petgetgold1920.py', *c, '--roles', '1,2,3,4,5', '--first')))
     elif phase == 'fight':
-        out.append(('5 人朵拉比斯設出戰（戰寵）', py('petsetup1920.py', *c, '--roles', '1,2,3,4,5')))
+        out.append(('5 人寵物欄第 2 格設出戰（戰寵）', py('petsetup1920.py', *c, '--roles', '1,2,3,4,5')))
     else:
         raise ValueError(phase)
     return out

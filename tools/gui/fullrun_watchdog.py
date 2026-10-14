@@ -116,7 +116,7 @@ def main() -> int:
         def pump():
             for line in p.stdout:
                 last_out[0] = time.time()
-                if '階段 grind' in line:
+                if '階段 grind' in line or '練功目標 140' in line:
                     in_grind[0] = True
                 tail.append(line.rstrip())
                 print(line, end='', flush=True)
