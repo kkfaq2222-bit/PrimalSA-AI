@@ -173,7 +173,13 @@ def selected_role() -> str | None:
     if not cols:
         return None
     sel = [r for r, c in zip(ROLES, cols) if _close(c, AVATAR_SEL, 8)]
-    return sel[0] if len(sel) == 1 else None
+    if len(sel) == 1:
+        return sel[0]
+    # 刪去法（2026-10-15）：公告的小綠人會蓋在角色 3 圓鈕上，讀不到黑色；5 個一定有 1 個選中 → 其他 4 個都是「沒選中」就是它
+    off = [r for r, c in zip(ROLES, cols) if _close(c, AVATAR_OFF, 8)]
+    if not sel and len(off) == len(ROLES) - 1:
+        return next(r for r in ROLES if r not in off)
+    return None
 
 
 def select_role(role: str) -> bool:
@@ -182,8 +188,10 @@ def select_role(role: str) -> bool:
     if not panel_open():
         return False
     x, y = ROLES[role]
-    for _ in range(3):             # 訊息橫幅會吃掉點擊 → 沒切過去就再點，最多 3 次
-        gui('seq', f'click {x} {y}; wait 600', note=f'ass.py 選角色 {role}')
+    # 訊息橫幅 / 公告小綠人會擋住圓鈕（角色 3 最常被擋）→ 最多 8 次、等待逐步拉長（約 15 秒讓公告走過），點位稍微錯開；名字文字也點得到
+    tries = [(0, 0, 600), (0, 0, 900), (-5, 4, 1200), (5, -4, 1500), (30, 0, 1800), (0, 0, 2200), (-5, -4, 2600), (30, 2, 3000)]
+    for k, (dx, dy, w) in enumerate(tries):
+        gui('seq', f'click {x + dx} {y + dy}; wait {w}', note=f'ass.py 選角色 {role}（第 {k + 1} 次）')
         if selected_role() == role:
             return True
         if not panel_open():
