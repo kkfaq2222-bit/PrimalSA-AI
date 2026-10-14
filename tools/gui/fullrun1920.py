@@ -7,6 +7,7 @@ r"""11111 一條龍總控（1920×1017；終端機直接跑；可中斷續跑）
   stopenc    停止遇敵：等戰鬥結束 → 關原地遇敵並驗證
   ledger     任務帳本歸零：轉生後任務全部重置，帳本裡這個帳號舊的 done 要清掉（先備份到 notes/；katan / rebirthprep 的續跑狀態一併備份清除）
   prebag     開跑任務前先整理一次背包（bag1920 --do：名單內刪除 / 存倉庫，名單外只列出來），保證獎勵進得了背包
+  adult      成人儀式先做（questflow --only 成人儀式；轉生後會重置，一定排在四大洞窟之前；已做過就跳過）
   quests     questflow：全部任務（內含兩次整理背包：五兄弟之謎後 / 彌生和日美子後）
   riddle     猜謎三兄弟（questflow --only riddle；練金布伊 77 級）
   katan      卡坦的願望（鯊魚 → 火雞）          ← 寵物任務，排在最後
@@ -40,7 +41,7 @@ sys.path.insert(0, str(HERE))
 ROOT = HERE.parents[1]
 STATE_DIR = ROOT / 'tools' / '.cache'
 
-STAGES = ['train', 'wait131', 'stopenc', 'ledger', 'prebag', 'quests', 'riddle', 'katan', 'dino', 'gate', 'rebirth', 'gift', 'organize', 'clear', 'prep', 'grind']
+STAGES = ['train', 'wait131', 'stopenc', 'ledger', 'prebag', 'adult', 'quests', 'riddle', 'katan', 'dino', 'gate', 'rebirth', 'gift', 'organize', 'clear', 'prep', 'grind']
 TARGET = 131
 GRIND_TARGET = TARGET          # 本輪練功目標（131 / 140）；進 train / wait131 / grind 前由 detect_grind_target 決定
 TEAM_BTN, TEAM_X = (598, 465), (813, 42)
@@ -64,6 +65,9 @@ def plan(client: str, stage: str) -> list:
                 (f'練等到隊長 {GRIND_TARGET} 級（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal', '--end-level', GRIND_TARGET))]
     if stage == 'prebag':
         return [('任務前整理背包', py('bag1920.py', *c, '--do'))]
+    if stage == 'adult':
+        # 使用者 2026-10-15：成人儀式一定先做（轉生後會重置；333 帳本誤標完成 → 先跑了四大洞窟）；questflow 開頭會用主線清單校正帳本
+        return [('成人儀式（先做，四大洞窟之前）', py('questflow1920.py', *c, '--only', '成人儀式'))]
     if stage == 'quests':
         return [('任務總流程（含兩次整理背包）', py('questflow1920.py', *c))]
     if stage == 'riddle':
@@ -468,9 +472,12 @@ def state_file(client: str) -> Path:
 
 def load_done(client: str) -> list:
     try:
-        return json.loads(state_file(client).read_text(encoding='utf-8')).get('done', [])
+        done = json.loads(state_file(client).read_text(encoding='utf-8')).get('done', [])
     except (OSError, ValueError):
         return []
+    if 'quests' in done and 'adult' not in done:     # 2026-10-15 新增 adult 階段前的狀態檔：已過 quests 就視為成人儀式也做過
+        done.insert(done.index('quests'), 'adult')
+    return done
 
 
 def save_done(client: str, done: list) -> None:

@@ -124,7 +124,7 @@ uv run --no-project python tools/gui/dailyrun1920.py --client kkfaq22222 --roles
 - 24 小時店沒賣的材料（合成品、胡椒 1~3 等遠程店）目前不支援，規劃會標「？」，合成時防呆停手。
 
 ## 5.3 一條龍（fullrun）與看門狗
-一輪 = `train`（練到 131）→ `wait131` → `stopenc` → `ledger` → `prebag` → `quests` → `riddle` → `katan` → `dino` → `gate` → `rebirth` → `gift`（開 N 轉新手禮盒、吃 2 倍智慧果 / 離線水晶、安撫之素 / 誘餌存共用倉庫）→ `organize` → `clear` → `prep`（抓格魯西斯坐騎、鎖定騎寵、領個人倉庫第 1 隻當戰寵）→ `grind`（練 1~131）。
+一輪 = `train`（練到 131）→ `wait131` → `stopenc` → `ledger` → `prebag` → `adult`（成人儀式先做）→ `quests` → `riddle` → `katan` → `dino` → `gate` → `rebirth` → `gift`（開 N 轉新手禮盒、吃 2 倍智慧果 / 離線水晶、安撫之素 / 誘餌存共用倉庫）→ `organize` → `clear` → `prep`（抓格魯西斯坐騎、鎖定騎寵、領個人倉庫第 1 隻當戰寵）→ `grind`（練 1~131）。
 ```
 uv run --no-project python tools/gui/fullrun_watchdog.py --client kkfaq11111                      # 跑一輪，出錯自動重啟 / 卡住偵測
 uv run --no-project python tools/gui/fullrun_watchdog.py --client kkfaq11111 --loop --max-rounds 2 # 自動接下一輪（轉數到 --max-trans 5 或輪數到就停）
