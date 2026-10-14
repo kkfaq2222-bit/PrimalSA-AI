@@ -37,7 +37,7 @@ check('first 差 3 不可', lw.first_read_ok({'level': '0轉112級', 'petLevel':
 check('first 漏位數不可（2 vs 112）', lw.first_read_ok({'level': '0轉2級', 'petLevel': '0轉112級'}), False)
 check('first 只讀到隊長可（寵物欄讀不到）', lw.first_read_ok({'level': '1轉1級'}), True)
 check('first 只讀到寵物不可', lw.first_read_ok({'petLevel': '0轉112級'}), False)
-check('first 轉生數不同不可', lw.first_read_ok({'level': '1轉30級', 'petLevel': '0轉30級'}), False)
+check('first 轉生數不同也可（寵物轉數跟人物無關，2026-10-13 改）', lw.first_read_ok({'level': '1轉30級', 'petLevel': '0轉30級'}), True)
 
 # target_for：真門檻（REAL_STAGES）
 R = lw.REAL_STAGES
