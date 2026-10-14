@@ -182,6 +182,19 @@ class _Tee:
         return getattr(self._s, k)
 
 
+def record_daily(client, role, t0, done_f, pages) -> None:
+    """統計用：每個角色跑完一行寫進 tools/.cache/stats-daily.jsonl（時間、買了什麼、10 個成品；stats.py 讀）"""
+    try:
+        bought = json.loads(Path(done_f).read_text(encoding='utf-8')).get('bought', {}) if Path(done_f).exists() else {}
+        row = {'client': client, 'role': role, 'date': time.strftime('%Y%m%d'),
+               'start': time.strftime('%F %T', time.localtime(t0)), 'end': time.strftime('%F %T'),
+               'minutes': round((time.time() - t0) / 60, 1), 'bought': bought, 'items': pages}
+        with open(ROOT / 'tools' / '.cache' / 'stats-daily.jsonl', 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + '\n')
+    except Exception as e:
+        log(f'統計記錄失敗（{e}）')
+
+
 def run_roles(a) -> int:
     """使用者 2026-10-14：角色 1 解完自己切角色 2 再解，依序到 5。每個角色耗時記在 log。"""
     os.environ['PSA_EXE_MATCH'] = a.client
@@ -229,7 +242,8 @@ def main() -> int:
     if a.roles:
         return run_roles(a)
     tag = f'-r{a.role}' if a.role else ''
-    os.environ['PSA_DAILY_TAG'] = tag               # 子程序（dailyquest1920）的已買記錄也依角色分開
+    os.environ['PSA_DAILY_TAG'] = tag
+    t_start = time.time()               # 子程序（dailyquest1920）的已買記錄也依角色分開
     cache = ROOT / 'tools' / '.cache'
     pages_json = cache / f'daily-{a.client}{tag}.json'
     st_path = cache / f'dailyrun-{a.client}{tag}.json'
@@ -374,6 +388,7 @@ def main() -> int:
         if ri < len(rounds) and done_f.exists():          # 下一回合重新記格位（這回合的材料已用掉）
             done_f.rename(done_f.with_suffix('.json.r' + str(ri) + '.bak'))
     log('每日任務完成（請看 tools/.cache/craft-p5-submit.png 確認 5/5）')
+    record_daily(a.client, a.role, t_start, cache / f'daily-done-{a.client}{tag}.json', pages)
     return 0
 
 

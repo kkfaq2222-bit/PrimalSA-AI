@@ -470,6 +470,19 @@ def state_file(client: str) -> Path:
     return STATE_DIR / f'fullrun-{client}.json'
 
 
+def record_stage(client: str, stage: str, t0: float, rc) -> None:
+    """統計用：每個階段一行寫進 tools/.cache/stats-fullrun.jsonl（stats.py 讀；寫失敗不影響流程）"""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        row = {'client': client, 'stage': stage, 'start': time.strftime('%F %T', time.localtime(t0)),
+               'end': time.strftime('%F %T'), 'minutes': round((time.time() - t0) / 60, 1), 'rc': rc,
+               'target': GRIND_TARGET if stage in ('train', 'wait131', 'grind') else None}
+        with open(STATE_DIR / 'stats-fullrun.jsonl', 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
+
+
 def load_done(client: str) -> list:
     try:
         done = json.loads(state_file(client).read_text(encoding='utf-8')).get('done', [])
@@ -523,6 +536,7 @@ def main(argv=None) -> int:
             continue
         pausegate.wait(log)
         log(f'===== 階段 {s} =====')
+        _t0 = time.time()
         if s in ('train', 'wait131', 'grind'):
             globals()['GRIND_TARGET'] = detect_grind_target(a.client)
             if GRIND_TARGET >= 140:
@@ -541,6 +555,7 @@ def main(argv=None) -> int:
             rc = stage_rebirth(a.client, a.rebirth_wait_min)
         else:
             rc = run_cmds(a.client, s)
+        record_stage(a.client, s, _t0, rc)
         if rc:
             return rc
         if s not in done:
