@@ -606,28 +606,36 @@ def sync_ledger_with_game(snap: dict) -> None:
 
 
 def presume_adult_done(snap: dict) -> None:
-    """成人儀式是主線，不在「支線」快照裡；支線要成人儀式完成才接得到（使用者 2026-10-14：333 是 1 轉、支線已有待接取 / 進行中，
-    成人儀式早做完了，卻因帳本沒有紀錄又跑去做一次）。判斷順序：
-    1) 支線第一頁有進行中 / 待接取的任務 → 成人儀式一定做完了；
-    2) 否則看任務詳情「主線」分頁：清單讀得到名稱、卻沒有「成人儀式」→ 已完成（進行中的會排在最上面）。
-    帳本已經是 done / doing 就不動。"""
+    """成人儀式是主線，不在「支線」快照裡。判斷順序（2026-10-15 改）：
+    1) 先看任務詳情「主線」分頁：成人儀式那一列是「待接取 / 進行中」→ 一定還沒做（帳本是 done 也更正回 todo）；
+       （333 轉生後支線本來就有待接取，舊規則「支線有待接取 → 成人儀式做完了」把它誤標 done → 漆黑接了不算數、一直停手）
+    2) 主線讀得到名稱、卻沒有「成人儀式」→ 已完成；
+    3) 主線讀不到才退回舊規則：支線第一頁有進行中 / 待接取 → 推定已完成。"""
     name = ADULT[0]
     st = q.ledger_load().get(q.CLIENT, {}).get(name, {}).get('status')
-    if st in ('done', 'doing'):
-        return
-    if snap.get('active') or snap.get('pending'):
-        q.ledger_mark(name, 'done', 'questflow：支線已有進行中 / 待接取 → 成人儀式推定已完成')
-        log(f'帳本補標 done：{name}（支線已有進行中 / 待接取，成人儀式一定做完了）')
-        return
     rows = []
     if open_detail(False):
         rows = sorted(q._list_rows(), key=lambda r: r[1])
     q.key('{ESC}')
     q.sleep(0.6)
-    texts = [t for t, _ in rows]
-    if len(texts) >= 2 and not any(name in t or '成人' in t for t in texts):
+    adult = [(t, y) for t, y in rows if name in t or '成人' in t]
+    if adult:
+        y = adult[0][1]
+        lab = ''.join(t for t, ry in rows if y + 4 <= ry <= y + 40)
+        if any(k in lab for k in ('待接', '接取', '進行')):
+            if st == 'done':
+                q.ledger_mark(name, 'todo', 'questflow：任務詳情主線顯示成人儀式待接取 / 進行中 → 帳本更正')
+                log(f'帳本更正 todo：{name}（主線顯示「{lab}」，還沒做）')
+            return
+    if st in ('done', 'doing'):
+        return
+    if len(rows) >= 2 and not adult:
         q.ledger_mark(name, 'done', 'questflow：任務詳情主線清單沒有成人儀式 → 推定已完成')
         log(f'帳本補標 done：{name}（任務詳情主線清單看不到它）')
+        return
+    if not rows and (snap.get('active') or snap.get('pending')):
+        q.ledger_mark(name, 'done', 'questflow：主線讀不到、支線已有進行中 / 待接取 → 成人儀式推定已完成')
+        log(f'帳本補標 done：{name}（主線讀不到，支線已有進行中 / 待接取）')
 
 
 def presume_dark_progress(dark_name: str) -> str:
