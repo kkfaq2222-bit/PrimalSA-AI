@@ -95,6 +95,28 @@ def load_exp_table() -> dict[int, int]:
     return table
 
 
+# 練功剩餘時間預估（2026-10-15 實測 exp-log）：120 級以下用實測每級分鐘數；121 以上用 經驗表 ÷ 每分鐘經驗
+#（125~130 在地雷區 60049 / 60050 實測約 78 萬 / 分，兩個點幾乎一樣）
+MIN_PER_LEVEL_LOW = [(60, 0.7), (80, 1.3), (100, 1.8), (110, 3.3), (116, 6.0), (120, 9.0), (121, 15.0)]   # (未滿此級, 分/級)
+EXP_PER_MIN_HIGH = 780_000
+
+
+def eta_minutes(level: int, end: int, table: dict[int, int], t_in_level_min: float = 0.0, rate: float = 0) -> float | None:
+    """從 level 練到 end 還要幾分鐘（扣掉目前這級已經練的時間）。rate = 實測每分鐘經驗（0 = 用預設 78 萬）。"""
+    if level >= end:
+        return 0.0
+    total = 0.0
+    for lv in range(level, end):
+        if lv >= 121:
+            exp = table.get(lv)
+            if not exp:
+                return None
+            total += exp / (rate or EXP_PER_MIN_HIGH)
+        else:
+            total += next(m for lim, m in MIN_PER_LEVEL_LOW if lv < lim)
+    return max(0.0, total - t_in_level_min)
+
+
 def median(xs: list[float]) -> float:
     xs = sorted(xs)
     return xs[len(xs) // 2]
@@ -203,7 +225,15 @@ def main() -> int:
         if time.time() - last_beat >= HEARTBEAT_S:
             # 長時間同一等級 / 同一地圖（例：地雷區一練 10 小時）不會有任何事件輸出，看門狗會把沉默當卡住 → 定期印一行心跳
             last_beat = time.time()
-            log(f'練功中（心跳）：{s.get("level") or "?"} 地圖 {s.get("pos") or "?"}')
+            eta = ''
+            if good_level and good_level < END_LEVEL:
+                cur_map = track.get('map')
+                rate = median(rates[cur_map]) if cur_map and rates.get(cur_map) and good_level >= 121 else 0
+                m = eta_minutes(good_level, END_LEVEL, exp_table, (time.time() - track['t0']) / 60, rate)
+                if m is not None:
+                    fin = time.strftime('%m-%d %H:%M', time.localtime(time.time() + m * 60))
+                    eta = f'；到 {END_LEVEL} 級約還要 {m / 60:.1f} 小時（預計 {fin}，預估值）'
+            log(f'練功中（心跳）：{s.get("level") or "?"} 地圖 {s.get("pos") or "?"}{eta}')
         lv = parse_level(s)
         if lv is None and '最小化' in str(s.get('error') or ''):
             # Unity 最小化不繪製（戰鬥也停）：gui info 會用 SW_SHOWNOACTIVATE 還原，不搶焦點；還原後馬上重讀
