@@ -26,6 +26,12 @@ TELEPORT = {'薩姆吉爾': (485, 311), '瑪麗娜絲': (375, 385)}      # 傳�
 
 def log(m):
     print(time.strftime('%H:%M:%S'), m, flush=True)
+    if '停手' in m or '不提交' in m:            # 失敗現場存圖（tools/.cache/fail/；子程序剛拍過就沿用）
+        try:
+            import failshot
+            failshot.shot('dailyrun', m)
+        except Exception:
+            pass
 
 
 def run_dq(args, client, extra_env=None) -> int:

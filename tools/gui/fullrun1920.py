@@ -51,6 +51,12 @@ LV_Y = 268
 
 def log(m: str) -> None:
     print(time.strftime('%H:%M:%S'), m, flush=True)
+    if '停手' in m or '不提交' in m:            # 失敗現場存圖（tools/.cache/fail/；子程序剛拍過就沿用）
+        try:
+            import failshot
+            failshot.shot('fullrun', m)
+        except Exception:
+            pass
 
 
 def py(script: str, *args) -> list:

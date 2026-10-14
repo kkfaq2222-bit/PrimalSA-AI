@@ -403,5 +403,10 @@ if __name__ == '__main__':
     import notifyhalt
     rc = main()
     if rc:
+        try:
+            import failshot
+            failshot.shot('levelwatch', f'levelwatch 退出碼 {rc}')
+        except Exception:
+            pass
         notifyhalt.alert(f'levelwatch 退出碼 {rc}（見上方訊息）')
     sys.exit(rc)

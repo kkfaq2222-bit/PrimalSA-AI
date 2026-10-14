@@ -197,6 +197,13 @@ class Halt(Exception):
     def __init__(self, code, msg):
         super().__init__(msg)
         self.code, self.msg = code, msg
+        # 所有停手 / 暫時性失敗都在丟出當下存一張圖（tools/.cache/fail/，failshot 保留規則）；
+        # 要先 ESC 復原畫面的地方在 ESC 前呼叫 failshot.pre()，這裡會沿用那張
+        try:
+            import failshot
+            self.shot = failshot.shot(Path(sys.argv[0]).stem or 'q1920', f'退出碼 {code}：{msg}')
+        except Exception:
+            self.shot = None
 
 
 def log(msg: str) -> None:

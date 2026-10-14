@@ -26,6 +26,7 @@ sys.path.insert(0, str(HERE))
 import q1920 as q  # noqa: E402
 import pausegate  # noqa: E402
 import notifyhalt  # noqa: E402
+import failshot  # noqa: E402
 
 # ---- 座標（截圖 960×508，2026-10-12 在 22222 實機量）----
 BAG_BTN = (757, 462)
@@ -87,14 +88,6 @@ def log(msg: str) -> None:
                 fh.write(time.strftime('%F %T ') + str(msg) + '\n')
         except OSError:
             pass
-
-
-def snapshot(tag: str) -> None:
-    """停手 / 出錯當下存一張畫面：tools/.cache/questflow-<client>-<tag>.png"""
-    try:
-        q.uk().gui('shot', f'questflow-{q.CLIENT}-{tag}.png')
-    except Exception:
-        pass
 
 
 # ---- 純函式（離線測試用）----
@@ -686,6 +679,7 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
         q.require_team()
     keys = track_keys(name)
     if not open_detail(side):
+        failshot.pre('questflow')                # ESC 復原前先存圖（停手訊息的 Halt 會沿用這張）
         q.key('{ESC}')
         raise q.Halt(q.EXIT_TIMEOUT, '任務詳情面板開不起來（3 輪 ESC 重開都失敗）：不拖曳、停手，等看門狗重啟再試')
     hit, rows = [], []
@@ -693,6 +687,7 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
     rows = sorted(q._list_rows(), key=lambda r: r[1])
     hit = [r for r in rows if name in r[0] or any(k in r[0] for k in keys)]
     if len(hit) <= nth:
+        failshot.pre('questflow')
         q.key('{ESC}')
         raise q.Halt(q.EXIT_NOQUEST, f'任務詳情「{"支線" if side else "主線"}」清單找不到「{name}」（讀到：{[r[0] for r in rows][:6]}）：停手，不接其他任務')
     top = hit[nth]
@@ -706,6 +701,8 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
     q.click(q.GO_BTN, wait_ms=3500, note='questflow 傳送')
     s = q.wait_state(('DIALOG', 'REWARD'), timeout=15)
     if s != 'DIALOG':
+        failshot.pre('questflow')                # 提示窗 / 戰鬥畫面還在時先拍，下面 ESC 復原後就看不到了
+        log(f'傳送後等不到對話窗：畫面狀態 {s}')
         # 可能跳出「提示：接取任務條件不達標」→ 面板 + 提示窗都還開著：先 ESC、面板還在就點「確定」，把畫面還原再停手
         for _ in range(2):
             q.key('{ESC}')
@@ -1469,14 +1466,13 @@ def main(argv=None) -> int:
         log(f'停手（退出碼 {h.code}）：{h.msg}')
         q.note(f'questflow 停手：{h.msg}')
         mark_doing_paused(f'停手（退出碼 {h.code}）：{h.msg}')
-        snapshot('halt')
         notifyhalt.alert(f'questflow 退出碼 {h.code} {h.msg}'[:80])
         return h.code
     except Exception as e:                       # 腳本自己的錯：留 traceback + 畫面，方便事後修
         import traceback
         log('腳本例外：' + ''.join(traceback.format_exception(e)).strip())
         mark_doing_paused(f'腳本例外：{e}')
-        snapshot('error')
+        failshot.shot('questflow', f'腳本例外：{e}')
         notifyhalt.alert(f'questflow 腳本例外 {e}'[:80])
         return 99
 
