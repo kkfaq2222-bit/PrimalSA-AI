@@ -187,7 +187,176 @@ def bar_filled():
     return [i for i in range(5) if not pd.slot_empty(i)]
 
 
-def goto(role: int, tab: str):
+PET_TAB_XY = (884, 150)          # 寵物面板左上「寵物」分頁（questflow.PET_TAB）
+NAME_INK_PTS = [(x, y) for y in range(96, 124, 2) for x in range(230, 450, 2)]   # 名稱區（避開右邊鉛筆圖示）
+WW_WIDTH_MAX = 26                # 名稱字的左右寬度（px，截圖座標）；WW 14~20
+WW_INK_MAX = 60                  # 白點數 <= 此值 = 短名（WW / 11）；實測 WW 12~29、數字名 115+、中文名 123+（2026-10-14）
+
+
+# ---- 外型簽名（忽略顏色；使用者 2026-10-14：名稱 / 白點數值偶爾量錯，加外型取最像的）----
+# 頭像區灰階 -> 邊緣強度（|dx|+|dy|）-> 與樣板做正規化相關（NCC，-1~1）。邊緣不看底色，同系不同色的寵物也像。
+SHAPE_XS = list(range(-22, 23, 2))
+SHAPE_YS = list(range(-20, 15, 2))
+SHAPE_OK_DEPOT = 0.40  # 倉庫格門檻（實測 2026-10-14：倉庫鯊魚 vs 倉庫樣板 0.49~0.82，其他寵物最高 0.29）
+SHAPE_OK = 0.30        # 與任一樣板的相關 >= 此值才算「像」（實測：鯊魚彼此 0.39~0.78，鯊魚 vs 其他寵物 -0.13~0.14）
+
+
+def shape_vec_from(cols) -> list:
+    """cols = 該格 (len(SHAPE_YS) x len(SHAPE_XS)) 個 (r,g,b)，逐列 -> 邊緣強度向量"""
+    w, h = len(SHAPE_XS), len(SHAPE_YS)
+    lum = [[0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2] for c in cols[j * w:(j + 1) * w]] for j in range(h)]
+    return [abs(lum[y][x + 1] - lum[y][x - 1]) + abs(lum[y + 1][x] - lum[y - 1][x])
+            for y in range(1, h - 1) for x in range(1, w - 1)]
+
+
+def shape_vecs(centers) -> list:
+    """多個格子中心 -> [向量 or None, ...]（一次讀完，px 會自動分批）"""
+    import uikit
+    pts = [(cx + dx, cy + dy) for cx, cy in centers for dy in SHAPE_YS for dx in SHAPE_XS]
+    cols = uikit.px(pts)
+    n = len(SHAPE_XS) * len(SHAPE_YS)
+    if not cols or len(cols) != len(pts):
+        return [None] * len(centers)
+    return [shape_vec_from(cols[i * n:(i + 1) * n]) for i in range(len(centers))]
+
+
+def ncc(a: list, b: list) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    ma, mb = sum(a) / len(a), sum(b) / len(b)
+    da, db = [v - ma for v in a], [v - mb for v in b]
+    na, nb = sum(v * v for v in da) ** 0.5, sum(v * v for v in db) ** 0.5
+    return sum(x * y for x, y in zip(da, db)) / (na * nb) if na and nb else 0.0
+
+
+def shape_path(family: str) -> Path:
+    return ROOT / 'tools' / '.cache' / f'petshape-{family}.json'
+
+
+def load_shape(family: str, where: str = 'bar') -> list:
+    """where = bar（寵物欄）/ depot（倉庫格）：兩處畫面比例、背景不同，樣板分開存（使用者 2026-10-14）。舊檔的 vecs = bar"""
+    try:
+        d = json.loads(shape_path(family).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+    return d.get(where) or (d.get('vecs', []) if where == 'bar' else [])
+
+
+def shape_score(vec, tpls: list) -> float:
+    """與樣板的最大相關；沒樣板 / 讀不到 = -1"""
+    if vec is None or not tpls:
+        return -1.0
+    return max(ncc(vec, t) for t in tpls)
+
+
+WW_REF = (26, 15)                # WW 名稱區的 (白點數, 左右寬度) 參考值（實測 WW：23~29 / 14~16）
+SCORE_OK = 1.0                   # 分數 <= 此值才算「像」；中文本名（含 1 級）實測 > 3
+
+
+def similarity_score(ink: int, width: int, txt: str) -> float:
+    """越小越像「WW / 數字名」：OCR 讀到數字名 = 0；否則看白點數 + 寬度離 WW 參考值多遠（不是各項都過門檻）"""
+    if is_numeric_name(txt):
+        return 0.0
+    if not ink:
+        return 9.0
+    return abs(ink - WW_REF[0]) / WW_REF[0] + abs(width - WW_REF[1]) / WW_REF[1]
+
+
+def _measure_selected() -> tuple:
+    """量一次目前選中那隻的名稱區 → (是否, 白點數, 寬度, OCR 文字, 相似度)"""
+    import uikit
+    cols = uikit.px(NAME_INK_PTS) or []
+    xs = [NAME_INK_PTS[j][0] for j, (r, g, b) in enumerate(cols) if r > 200 and g > 170]
+    ink = len(xs)
+    width = (max(xs) - min(xs)) if xs else 0
+    if xs and similarity_score(ink, width, '') <= SCORE_OK:
+        return True, ink, width, '', similarity_score(ink, width, '')
+    import questflow1920 as qf
+    txt = ''
+    for opts in (('-Zooms', '3,4'), ('-Zooms', '2,3'), ('-Zooms', '3,4', '-Dark', '130')):
+        try:
+            t = ''.join(uikit.ocr(qf.PET_NAME_BOX, *opts))
+        except Exception:
+            t = ''
+        if is_numeric_name(t):
+            return True, ink, width, t, 0.0
+        txt = txt or t
+    return False, ink, width, txt, similarity_score(ink, width, txt)
+
+
+def selected_is_short_or_numeric(tries: int = 3) -> tuple:
+    """目前選中的那隻寵物，名稱是不是 WW / 數字名 → (是否, 白點數, 寬度, OCR 文字)。
+    WW：名稱區白字少且窄（量字的範圍，不靠 OCR）；數字名：多種倍率 OCR 讀名稱框，像「31/7/3/9」。
+    中文本名（含 1 級寵物）= 否。點選後名稱欄偶爾還沒換完就量到舊畫面（2026-10-14 兩個客戶端同時跑，
+    第 3 隻 WW 量成 31 / 64 被當本名）→ 量起來不像就等一下重量，最多 tries 次，取最像的那次。"""
+    import time as _t
+    best = None
+    for k in range(tries):
+        r = _measure_selected()
+        if r[0]:
+            return r[:4]
+        if best is None or r[4] < best[4]:
+            best = r
+        if r[4] >= 5.0:          # 離 WW 很遠（中文本名實測 6.5 以上）→ 不用重量，省時間
+            break
+        if k < tries - 1:
+            _t.sleep(0.6)
+    return best[:4]
+
+
+def depot_numeric_slots(shape_tpls: list = None) -> list:
+    """倉庫目前這一頁，名稱是 WW / 數字名的格（0 起算）：逐隻點選後量名稱區（舊的靠格子上緣小字 OCR，WW 讀不到）"""
+    import petdepot1920 as pd
+    import uikit
+    pts, spans = [], []
+    for i in range(COLS * ROWS):          # 非空格：卡片底部有綠色「0轉N級」字（空格只有腳印圖；不靠「空」樣板，沒學過也能用）
+        cx, cy = slot_center(i)
+        p = [(cx - 30 + dx, cy + 4 + dy) for dy in range(0, 28, 2) for dx in range(0, 61, 3)]
+        spans.append((len(pts), len(pts) + len(p)))
+        pts += p
+    cols = uikit.px(pts) or []
+    if len(cols) != len(pts):
+        return []
+    filled = [i for i, (s0, e0) in enumerate(spans)
+              if sum(1 for r, g, b in cols[s0:e0] if g > 150 and g - r > 50 and g - b > 90) >= 4]
+    shapes = dict(zip(filled, shape_vecs([slot_center(i) for i in filled]))) if shape_tpls else {}
+    # 外型像的先看；其他格仍然看（樣板是在欄位錄的，倉庫格的畫面比例可能略有不同，當保險）
+    order = sorted(filled, key=lambda i: -shape_score(shapes.get(i), shape_tpls or []))
+    out = []
+    for i in order:
+        x, y = slot_center(i)
+        pd.click(x, y, wait=700, note=f'petfetchimg 看倉庫第 {i + 1} 格名稱')
+        hit, ink, width, txt = selected_is_short_or_numeric()
+        sc = similarity_score(ink, width, txt)
+        sh = shape_score(shapes.get(i), shape_tpls or [])
+        if sh >= SHAPE_OK_DEPOT:
+            hit = True
+            sc = min(sc, 3 * (1 - sh))           # 外型與名稱分數取較像的那個
+        if hit:
+            out.append((sc, i))
+        pd.log(f'  倉庫第 {i + 1} 格：白點 {ink}、寬 {width}、OCR {txt!r}、外型 {sh:.2f} → 相似度 {sc:.2f}{"（像）" if hit else ""}')
+    return [i for _, i in sorted(out)]       # 最像的排前面（同分取格序小的）
+
+
+def bar_numeric_count(role: int, shape_tpls: list = None) -> int:
+    """目前寵物欄裡「WW / 數字名」的隻數（逐隻點選後比相似度；不單靠 OCR 認 WW）。呼叫前面板要在「寵物」分頁。"""
+    import petdepot1920 as pd
+    n = 0
+    filled = [i for i in range(5) if not pd.slot_empty(i)]
+    vecs = dict(zip(filled, shape_vecs([(pd.SLOT_X, pd.SLOT_Y[i]) for i in filled]))) if shape_tpls else {}
+    for i in filled:
+        pd.click(pd.SLOT_X, pd.SLOT_Y[i], wait=800, note=f'petfetchimg 看寵物欄第 {i + 1} 格名稱')
+        hit, ink, width, txt = selected_is_short_or_numeric()
+        sh = shape_score(vecs.get(i), shape_tpls or [])
+        if not hit and sh >= SHAPE_OK:           # 名稱量不像，但外型像（名稱欄沒換完 / OCR 失敗）-> 以外型為準
+            hit = True
+        pd.log(f'  寵物欄第 {i + 1} 格：白點 {ink}、寬 {width}、OCR {txt!r}、外型 {sh:.2f} -> 相似度 {similarity_score(ink, width, txt):.2f}'
+               f'{"（WW/數字名）" if hit else "（本名）"}')
+        n += hit
+    return n
+
+
+def goto(role: int, tab: str, count_bar: bool = False, shape_tpls: list = None):
     import petdepot1920 as pd
     try:                                    # 外掛面板還開著（catchrun 剛抓完）會蓋住寵物鈕 → 寵物面板打不開（2026-10-12 火雞 r1）
         import ass
@@ -200,10 +369,15 @@ def goto(role: int, tab: str):
     other = 0 if role != 1 else 1          # 先切到別的角色再切回來才會刷新寵物欄（剛抓完的第 5 隻否則還顯示空格；2026-10-12 實測）
     pd.click(pd.ROLE_X, pd.ROLE_Y[other], wait=900, note='petfetchimg 先切別人（刷新）')
     pd.click(pd.ROLE_X, pd.ROLE_Y[role - 1], wait=1200, note=f'petfetchimg 選角色 {role}')
+    have = None
+    if count_bar:
+        pd.click(*PET_TAB_XY, wait=900, note='petfetchimg 寵物分頁')
+        have = bar_numeric_count(role, shape_tpls)
     pd.click(*pd.TAB_DEPOT, wait=1300, note='petfetchimg 倉庫分頁')
     pd.click(*TAB[tab], wait=900, note=f'petfetchimg {tab} 分頁')
     if not ensure_tab(tab):
         raise SystemExit(f'倉庫{tab}分頁切不過去 → 停手（不存、不取）')
+    return have
 
 
 def close_pet_panel_if_open() -> None:
@@ -447,22 +621,34 @@ def cmd_fetch_numeric(a):
     """領「名稱是數字」的寵物 N 隻（別的寵物都是本名，不會錯亂）：每領一隻重新讀整頁名稱、重新定位
     數字名稱 = OCR 讀到的四圍數字（31/7/3/9），或名字被改成「11」的短名（OCR 讀不出來，改看字的多寡）"""
     import petdepot1920 as pd
-    goto(a.role, a.tab)
+    tpls = load_shape(a.shape, 'bar') if a.shape else []
+    dtpls = load_shape(a.shape, 'depot') if a.shape else []
+    if a.shape:
+        pd.log(f'外型樣板「{a.shape}」：欄位 {len(tpls)} 張、倉庫 {len(dtpls)} 張' + ('' if (tpls or dtpls) else '（沒有 -> 只用名稱判斷）'))
+    have = goto(a.role, a.tab, count_bar=bool(a.want_total), shape_tpls=tpls)
+    need = a.numeric
+    if a.want_total:           # 使用者 2026-10-14：重跑要先數寵物欄現有幾隻，只領還缺的（不是每次都領 --numeric 隻）
+        need = max(0, min(a.numeric, a.want_total - have))
+        pd.log(f'寵物欄已有 WW / 數字名 {have} 隻，目標總數 {a.want_total} → 還要領 {need} 隻')
+        if need == 0:
+            pd.log('已經夠了，不用再領')
+            close_pet_panel_if_open()
+            return 0
     before = bar_filled()
     free = 5 - len(before)
-    pd.log(f'角色 {a.role} 寵物欄 {len(before)} 隻、空 {free} 格；要領 {a.numeric} 隻數字名稱寵物（{a.tab}）')
-    if free < a.numeric:
+    pd.log(f'角色 {a.role} 寵物欄 {len(before)} 隻、空 {free} 格；要領 {need} 隻數字名稱寵物（{a.tab}）')
+    if free < need:
         print('寵物欄空格不夠 → 停手')
         return 4
     taken = 0
-    for k in range(1, a.numeric + 1):
-        names = read_names()
-        hits = sorted(set(i for i, nm in enumerate(names) if is_numeric_name(nm)) | set(short_named_slots(names)))
+    for k in range(1, need + 1):
+        hits = depot_numeric_slots(dtpls)
+        names = [''] * (COLS * ROWS)
         if not hits:
             print(f'找不到數字名稱的寵物 → 停手（已領 {taken} 隻）')
             return 5
         i = hits[0]
-        pd.log(f'第 {k}/{a.numeric} 隻：第 {i + 1} 格 {names[i]!r}（共 {len(hits)} 隻數字名稱）' + ('' if a.do else '  [預覽]'))
+        pd.log(f'第 {k}/{need} 隻：第 {i + 1} 格 {names[i]!r}（共 {len(hits)} 隻數字名稱）' + ('' if a.do else '  [預覽]'))
         if not a.do:
             continue
         x, y = slot_center(i)
@@ -477,6 +663,42 @@ def cmd_fetch_numeric(a):
             return 6
         taken += 1
     pd.log(f'完成：領回 {taken} 隻' if a.do else '預覽結束（加 --do 才真的取出）')
+    return 0
+
+
+def cmd_shape_learn(a):
+    """錄製外型樣板：目前寵物欄（--role）裡每一隻（非空格）都存成 --shape 這個系別的樣板。
+    先確認那幾隻就是該系的（鯊魚：角色 2 欄位 4 隻）。只讀畫面，存到 tools/.cache/petshape-<系別>.json（不進 git）。"""
+    import petdepot1920 as pd
+    if not a.shape:
+        print('要給 --shape 系別（shark / bird）')
+        return 2
+    goto(a.role, a.tab)
+    if a.where == 'depot':           # 倉庫格：--slots 指定倉庫第幾格（1~20）是這個系別的寵物
+        idx = [int(x) - 1 for x in a.slots.split(',') if x.strip()]
+        if not idx:
+            print('--where depot 要給 --slots（倉庫格序，例 2,5）')
+            return 2
+        filled = idx
+        vecs = shape_vecs([slot_center(i) for i in idx])
+    else:
+        filled = [i for i in range(5) if not pd.slot_empty(i)]
+        vecs = shape_vecs([(pd.SLOT_X, pd.SLOT_Y[i]) for i in filled])
+    if not filled or any(v is None for v in vecs):
+        print('讀不到寵物欄 -> 停手')
+        return 3
+    for k in range(len(vecs)):
+        sims = [round(ncc(vecs[k], vecs[j]), 2) for j in range(len(vecs))]
+        pd.log(f'  寵物欄第 {filled[k] + 1} 格：{len(vecs[k])} 維；彼此相關 {sims}')
+    try:
+        d = json.loads(shape_path(a.shape).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        d = {}
+    if 'vecs' in d and 'bar' not in d:
+        d['bar'] = d.pop('vecs')
+    d.update({'family': a.shape, a.where: vecs})
+    shape_path(a.shape).write_text(json.dumps(d), encoding='utf-8')
+    pd.log(f'已存 {len(vecs)} 張外型樣板 -> {shape_path(a.shape).name}')
     return 0
 
 
@@ -532,7 +754,7 @@ def cmd_fetch(a):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description='用頭像樣板從倉庫領回指定寵物')
-    ap.add_argument('cmd', choices=['scan', 'names', 'snap', 'learn', 'fetch', 'move', 'storebar'])
+    ap.add_argument('cmd', choices=['scan', 'names', 'snap', 'learn', 'fetch', 'move', 'storebar', 'shape-learn'])
     ap.add_argument('--client', default='kkfaq22222')
     ap.add_argument('--tab', choices=list(TAB), default=None)
     ap.add_argument('--slots', default='')
@@ -543,6 +765,9 @@ def main(argv=None):
     ap.add_argument('--names', default='')
     ap.add_argument('--new', action='store_true', help='learn：用 snap 的快照找出剛存進去的那一格')
     ap.add_argument('--numeric', type=int, default=0, help='fetch：領名稱是數字的寵物 N 隻（不用樣板）')
+    ap.add_argument('--want-total', type=int, default=0, help='fetch --numeric：寵物欄目標總隻數（WW / 數字名）；先數現有的，只領缺的')
+    ap.add_argument('--where', choices=['bar', 'depot'], default='bar', help='shape-learn：錄寵物欄（bar）還是倉庫格（depot，要 --slots）')
+    ap.add_argument('--shape', default='', help='外型樣板系別（shark / bird）：fetch 時加外型判斷；shape-learn 時錄製')
     ap.add_argument('--n', type=int, default=4)
     ap.add_argument('--do', action='store_true')
     a = ap.parse_args(argv)
@@ -553,7 +778,7 @@ def main(argv=None):
     winenv.enable_server()
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    fn = {'scan': cmd_scan, 'names': cmd_names, 'snap': cmd_snap, 'learn': cmd_learn, 'fetch': cmd_fetch, 'move': cmd_move, 'storebar': cmd_storebar}[a.cmd]
+    fn = {'scan': cmd_scan, 'names': cmd_names, 'snap': cmd_snap, 'learn': cmd_learn, 'fetch': cmd_fetch, 'move': cmd_move, 'storebar': cmd_storebar, 'shape-learn': cmd_shape_learn}[a.cmd]
     try:
         return fn(a)
     finally:

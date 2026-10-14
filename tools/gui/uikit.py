@@ -54,7 +54,9 @@ def gui(*args: str, note: str = '') -> str:
 def px(points) -> list | None:
     """一次讀多點 → [(r,g,b), ...]；失敗 / 數量不符回 None（同 ass._px）"""
     pts = list(points)
-    out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
+    out = []
+    for k in range(0, len(pts), 1200):         # Windows 命令列上限約 32K 字元：點多就分批（2026-10-14 name_ink_all 6400 點 → WinError 206）
+        out += gui('pixel', ' '.join(f'{x},{y}' for x, y in pts[k:k + 1200])).split()
     try:
         cols = [tuple(int(v) for v in c.split(',')) for c in out]
     except ValueError:

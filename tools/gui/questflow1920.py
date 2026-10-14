@@ -41,7 +41,13 @@ ROLE1 = (52, 108)
 BUFF_ICON = (60, 105)            # 龍王守護 Buff 圖示（點了出現「龍王守護 0天0時9分49秒」）
 BUFF_SIG = (52, 98, 5, 21, 51)   # 圖示深藍底；沒有 Buff 時這裡是地圖
 BUFF_TIME_BOX = (540, 228, 140, 30)
+HEAL_BEFORE_DARK = True           # 設定：第一次漆黑任務前先回醫院補血一次（使用者 2026-10-14）；--no-dark-heal 單次關閉
 POTION = '龍王'
+POTION_PARTS = ('龍王', '王的守')   # 道具名在格子上方被截斷（實測讀到「王的守護」「王的守王的守」）
+
+
+def is_potion(t: str) -> bool:
+    return any(k in t for k in POTION_PARTS)
 POTION_MIN_S = 150               # 剩餘不到這麼多秒就吃（Buff 持續 10 分鐘）
 CHECK_GAP_S = 90                 # 長任務每步前檢查，但兩次檢查至少隔這麼久
 
@@ -135,11 +141,19 @@ def _ocr(box, *opts) -> str:
     return ''.join(q.uk().ocr(box, *opts)).strip()
 
 
-def bag_has_potion() -> bool:
-    """背包第 1 格是不是龍王的守護：先確保「顯示道具名」是開的（bag1920.ensure_names，沒開會自動按），再 OCR 名稱"""
+def potion_slot():
+    """背包 15 格（3 列 × 5 欄）哪一格是龍王的守護：先確保「顯示道具名」是開的，再整頁 OCR 名稱（使用者 2026-10-14：不只看第 1 格）。
+    回格序 0~14，沒有回 None"""
     import bag1920
     bag1920.ensure_names()
-    return POTION in _ocr(BAG_NAME1, '-Zooms', '3,4', '-Dark', '170')
+    for j, t in enumerate(bag1920.read_names()):
+        if is_potion(t):
+            return j
+    return None
+
+
+def bag_has_potion() -> bool:
+    return potion_slot() is not None
 
 
 def take_from_depot() -> bool:
@@ -147,16 +161,30 @@ def take_from_depot() -> bool:
     if not open_bag():
         raise q.Halt(q.EXIT_HALT, '背包打不開（戰鬥 / 對話中？）')
     q.click(ROLE1, wait_ms=1000, note='questflow 選角色 1')
-    q.click(TAB_DEPOT, wait_ms=1200, note='questflow 倉庫分頁')
-    q.click(DEPOT_PUBLIC, wait_ms=900, note='questflow 公共倉庫')
     hit = None
-    for y in DEPOT_Y[:2]:
-        for x in DEPOT_X:
-            if POTION in _ocr((x - 34, y - 26, 68, 20), '-Zooms', '3,4', '-Dark', '170'):
-                hit = (x, y)
+    # 遊戲會吃掉分頁點擊（使用者 2026-10-14：11111 倉庫明明有龍王的守護卻沒領）：倉庫分頁 + 公共倉庫最多重試 3 次；
+    # 倉庫 5 欄 × 4 列全部掃（原本只掃前 2 列），沒找到就印出讀到的名稱方便對照
+    for k in range(3):
+        q.click(TAB_DEPOT, wait_ms=1200, note=f'questflow 倉庫分頁（第 {k + 1}/3 次）')
+        q.click(DEPOT_PUBLIC, wait_ms=900, note='questflow 公共倉庫')
+        seen = []
+        for y in DEPOT_Y:
+            for x in DEPOT_X:
+                t = _ocr((x - 34, y - 26, 68, 20), '-Zooms', '3,4', '-Dark', '170')
+                seen.append(t)
+                if is_potion(t):
+                    hit = (x, y)
+                    break
+            if hit:
                 break
         if hit:
             break
+        log(f'公共倉庫第 {k + 1}/3 次沒看到龍王的守護；讀到：{[t for t in seen if t]}')
+        q.key('{ESC}')
+        q.sleep(0.6)
+        if not open_bag():
+            break
+        q.click(ROLE1, wait_ms=900, note='questflow 選角色 1')
     if not hit:
         q.click(TAB_BAG, wait_ms=700)
         close_bag()
@@ -177,8 +205,10 @@ def eat_potion() -> bool:
             raise q.Halt(q.EXIT_HALT, '背包打不開（戰鬥 / 對話中？）')
         q.click(ROLE1, wait_ms=1000, note='questflow 選角色 1')
         q.click(TAB_BAG, wait_ms=900, note='questflow 背包分頁')
-        if bag_has_potion():
-            q.click(BAG_SLOT1, wait_ms=900, note='questflow 選第 1 格')
+        j = potion_slot()
+        if j is not None:
+            import bag1920
+            q.click((bag1920.SLOT_X[j % 5], bag1920.SLOT_Y[j // 5]), wait_ms=900, note=f'questflow 選龍王的守護（背包第 {j + 1} 格）')
             q.click(USE_BTN, wait_ms=1200, note='questflow 使用龍王的守護')
             close_bag()
             log('已吃一顆龍王的守護')
@@ -456,6 +486,8 @@ def detail_status(name: str, side: bool = True):
 
     # 名稱比對：先要求完整名稱（漆黑洞窟(二轉) / (三轉) 都含「漆黑」，不能用短關鍵字）；完整名稱讀不到才退到關鍵字
     exact = [(t, y) for t, y in names if name in t]
+    if name.startswith('漆黑') and not side and names:
+        exact = [names[0]]                       # 任務詳情主線的漆黑只看最上面那格（使用者 2026-10-14），不比對 N 轉
     target = exact[0] if exact else next(((t, y) for t, y in names if any(k in t for k in keys) and not name.startswith('漆黑')), None)
     if target:
         y = target[1]
@@ -483,6 +515,20 @@ def detail_panel_open() -> bool:
     return bool(c) and q.near(c[0], (192, 75, 51), 30)
 
 
+TAB_LIT_PTS = [(150, 122), (225, 122)]      # 主線 / 支線分頁底色取樣點（960 座標）；選中的分頁亮橘、沒選的暗褐
+
+
+def tab_lit():
+    """回傳目前亮燈的分頁 'main' / 'side'；兩邊亮度差不到 25% 讀不準回 None（使用者 2026-10-14：只要偵測分頁亮燈）"""
+    c = q.px(TAB_LIT_PTS)
+    if not c:
+        return None
+    m, s = sum(c[0][:2]), sum(c[1][:2])
+    if max(m, s) < 1.25 * max(1, min(m, s)):
+        return None
+    return 'main' if m > s else 'side'
+
+
 def open_detail(side: bool = True) -> bool:
     """開任務詳情並切到支線 / 主線分頁，用像素確認面板真的開了（使用者 2026-10-13：沒開成時往下拖會拖到聊天室）。
     沒開成：ESC ×1 → 再點「詳情」，最多 3 輪；仍沒開回 False（呼叫端不得拖曳、不得讀清單）"""
@@ -490,7 +536,11 @@ def open_detail(side: bool = True) -> bool:
         if not detail_panel_open():
             q.click(q.DETAIL_BTN, right=2, wait_ms=1000, note=f'questflow 開任務詳情（第 {k + 1}/3 次）')
         if detail_panel_open():
-            q.click(q.TAB_SIDE if side else q.TAB_MAIN, wait_ms=800, note='questflow ' + ('支線' if side else '主線') + '分頁')
+            want = 'side' if side else 'main'
+            for _ in range(2):
+                q.click(q.TAB_SIDE if side else q.TAB_MAIN, wait_ms=800, note='questflow ' + ('支線' if side else '主線') + '分頁')
+                if tab_lit() in (want, None):        # 亮的是要的分頁（或讀不準）才算數；亮在另一邊就再點一次
+                    break
             return True
         q.key('{ESC}')
         q.sleep(1.2)
@@ -537,8 +587,10 @@ def sync_ledger_with_game(snap: dict) -> None:
     """帳本以遊戲畫面為準：推定已完成 → 補標 done；畫面上還看得到（進行中 / 待接取）卻標 done → 改回 todo（轉生重置後的舊紀錄）"""
     led = q.ledger_load().get(q.CLIENT, {})
     for n in snap['done']:
-        if n in snap.get('visible', []) or led.get(n, {}).get('status') in ('doing', 'paused'):
+        if n in snap.get('visible', []) or led.get(n, {}).get('status') == 'doing':
             continue                             # 畫面上看得到 / 正在做的不補標 done
+        # paused 且任務詳情第一頁完全看不到：進行中的一定排在最上面看得到，所以是已完成（使用者 2026-10-14：11111 強盜的洞穴
+        # 帳本 paused、遊戲其實做完了，每次都在清單找不到而停手、看門狗空轉）
         if led.get(n, {}).get('status') != 'done':
             q.ledger_mark(n, 'done', 'questflow：任務詳情第一頁推定已完成（排序規則）')
             log(f'帳本補標 done：{n}')
@@ -546,6 +598,64 @@ def sync_ledger_with_game(snap: dict) -> None:
         if led.get(n, {}).get('status') == 'done':
             q.ledger_mark(n, 'todo', 'questflow：任務詳情顯示尚未完成，帳本舊紀錄更正')
             log(f'帳本更正 todo：{n}（任務詳情顯示還沒完成）')
+
+
+def presume_adult_done(snap: dict) -> None:
+    """成人儀式是主線，不在「支線」快照裡；支線要成人儀式完成才接得到（使用者 2026-10-14：333 是 1 轉、支線已有待接取 / 進行中，
+    成人儀式早做完了，卻因帳本沒有紀錄又跑去做一次）。判斷順序：
+    1) 支線第一頁有進行中 / 待接取的任務 → 成人儀式一定做完了；
+    2) 否則看任務詳情「主線」分頁：清單讀得到名稱、卻沒有「成人儀式」→ 已完成（進行中的會排在最上面）。
+    帳本已經是 done / doing 就不動。"""
+    name = ADULT[0]
+    st = q.ledger_load().get(q.CLIENT, {}).get(name, {}).get('status')
+    if st in ('done', 'doing'):
+        return
+    if snap.get('active') or snap.get('pending'):
+        q.ledger_mark(name, 'done', 'questflow：支線已有進行中 / 待接取 → 成人儀式推定已完成')
+        log(f'帳本補標 done：{name}（支線已有進行中 / 待接取，成人儀式一定做完了）')
+        return
+    rows = []
+    if open_detail(False):
+        rows = sorted(q._list_rows(), key=lambda r: r[1])
+    q.key('{ESC}')
+    q.sleep(0.6)
+    texts = [t for t, _ in rows]
+    if len(texts) >= 2 and not any(name in t or '成人' in t for t in texts):
+        q.ledger_mark(name, 'done', 'questflow：任務詳情主線清單沒有成人儀式 → 推定已完成')
+        log(f'帳本補標 done：{name}（任務詳情主線清單看不到它）')
+
+
+def presume_dark_progress(dark_name: str) -> str:
+    """漆黑洞窟先偵測追蹤欄再判讀（使用者 2026-10-14）：漆黑永遠在追蹤欄，副標題就是目前步驟。
+    副標題「通過守護人」= 步 5（步 1~4 已打完）、「覲見精靈王」= 步 6 → 帳本補標 done（只代表步 1~4 完成；
+    步 5 守門人留到最後任務都做完才回頭，由 gate 階段處理）。不倒退：副標題讀不出來 / 還在前面的步驟就不動帳本。
+    回傳 'gate' / 'rebirth' / ''。"""
+    try:
+        lines = sorted(_track_lines(), key=lambda r: r[1])
+    except Exception:
+        return ''
+    for i, (text, y) in enumerate(lines):
+        if '漆黑' not in text:
+            continue
+        sub = ''.join(t for t, yy in lines if y + 6 <= yy <= y + 48)
+        if not sub:    # 副標題在深色橫幅上，一般二值化讀不到（2026-10-14 333 實測：-Dark 200 讀得到「通過守護人」）
+            try:
+                for opts in (('-Zooms', '3,4', '-Dark', '200'), ('-Zooms', '2,3', '-Dark', '200')):
+                    sub += ''.join(q.uk().ocr((45, y + 1, 175, 32), *opts))
+            except Exception:
+                pass
+        if '覲見' in sub or '精靈王' in sub:
+            stage = 'rebirth'
+        elif '守護人' in sub or '守門人' in sub or '護人' in sub:
+            stage = 'gate'
+        else:
+            continue
+        st = q.ledger_load().get(q.CLIENT, {}).get(dark_name, {}).get('status')
+        if st != 'done':
+            q.ledger_mark(dark_name, 'done', f'questflow：追蹤欄副標題「{sub[:12]}」→ 步 1~4 已完成；步 5 守門人留到 gate 階段')
+            log(f'帳本補標 done：{dark_name}（追蹤欄副標題「{sub[:12]}」＝步 1~4 已打完，守門人留到最後）')
+        return stage
+    return ''
 
 
 def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
@@ -577,7 +687,14 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
     q.click(q.GO_BTN, wait_ms=3500, note='questflow 傳送')
     s = q.wait_state(('DIALOG', 'REWARD'), timeout=15)
     if s != 'DIALOG':
-        raise q.Halt(q.EXIT_TIMEOUT, '傳送後沒出現 NPC 對話窗')
+        # 可能跳出「提示：接取任務條件不達標」→ 面板 + 提示窗都還開著：先 ESC、面板還在就點「確定」，把畫面還原再停手
+        for _ in range(2):
+            q.key('{ESC}')
+            q.sleep(0.8)
+            if not detail_panel_open():
+                break
+            q.click((478, 343), wait_ms=700, note='questflow 提示窗「確定」')
+        raise q.Halt(q.EXIT_TIMEOUT, '傳送後沒出現 NPC 對話窗（已 ESC / 確定 復原畫面）')
     # 猜謎三兄弟：點「接藍暴任務」後會跳「進入裏面嗎？」確認框，必須按「接受」任務才算接下（22222 2026-10-11 實測：按接受只是進 811:29,15、任務已承接）；
     # 先前 ESC 掉它 → 任務詳情仍是「待接取」→ 追蹤欄找不到（2026-10-13 一條龍停手原因）。其他任務維持不自動按（避免誤進副本）。
     res = q.talk(allow_confirm=name in CONFIRM_ACCEPT)
@@ -673,6 +790,15 @@ def read_level_text() -> int | None:
             m = re.search(r'(\d+)\s*轉\s*(\d+)', t)
             if m:
                 vals.append(int(m[2]))
+    if not vals:        # 備援（2026-10-14：0轉59 在 -Dark 170 讀成「S9」→ 一直 None；換別的二值化門檻 / 不二值化就讀得到）
+        for box in (PET_LVL_BOX, (320, 382, 90, 22), (PET_LVL_BOX[0] - 10, PET_LVL_BOX[1] - 6, PET_LVL_BOX[2] + 20, PET_LVL_BOX[3] + 12)):
+            for opts in (('-Zooms', '3,4', '-Dark', '130'), ('-Zooms', '3,4', '-Dark', '200'), ('-Zooms', '3,4'), ('-Zooms', '2,3')):
+                for t in q.uk().ocr(box, *opts):
+                    m = re.search(r'[0-9OoSs]?\s*轉\s*(\d+)', t)
+                    if m and 1 <= int(m[1]) <= 200:
+                        vals.append(int(m[1]))
+            if vals:
+                break
     return collections.Counter(vals).most_common(1)[0][0] if vals else None
 
 
@@ -973,7 +1099,7 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
         potion_check(force=True)
     q.ledger_mark(name, 'doing', 'questflow')
     if stop_after_last_boss:                     # 漆黑：永遠在追蹤欄，不能當「已接」；一律先看主線那列是不是待接取
-        accept_top(name, side=False, nth=int(key) - 2004 if str(key).isdigit() else 0)
+        accept_top(name, side=False, nth=0)      # 主線永遠取最上面那格（使用者 2026-10-14：待接取排最上、已完成沉到最下；用位置 nth 會選到四轉）
         row = find_track_row(name)
     else:
         row = find_track_row(name, reveal=name in TRAIN_STEPS)
@@ -1164,6 +1290,7 @@ def main(argv=None) -> int:
     ap.add_argument('--dry', action='store_true', help='只印每個任務的規劃，不操作遊戲')
     ap.add_argument('--from', dest='from_name', help='從這個任務開始（前面的全部跳過）')
     ap.add_argument('--only', help='只做這些任務（逗號分隔）')
+    ap.add_argument('--no-dark-heal', action='store_true', help='不要在第一次漆黑任務前回醫院補血（預設會補一次，見 HEAL_BEFORE_DARK）')
     ap.add_argument('--no-potion', action='store_true', help='不管龍王的守護（不領、不吃）')
     ap.add_argument('--trans', type=int, help='轉生數（決定漆黑洞窟是第幾轉；預設讀 HUD）')
     ap.add_argument('--skip-bag', action='store_true', help='跳過整理背包階段')
@@ -1209,6 +1336,11 @@ def main(argv=None) -> int:
                 snap = side_snapshot()
                 log(f'任務詳情支線第一頁：進行中 {snap["active"]}；待接取 {snap["pending"]}；推定已完成 {snap["done"]}')
                 sync_ledger_with_game(snap)
+                presume_adult_done(snap)
+                _tr = a.trans if a.trans is not None else (0 if a.dry else current_trans())
+                _dk = dark_cave_name(_tr)
+                if _dk:
+                    presume_dark_progress(_dk[0])
             except q.Halt:
                 raise
             except Exception as e:
@@ -1219,8 +1351,10 @@ def main(argv=None) -> int:
             if not dark:
                 raise q.Halt(q.EXIT_USAGE, '5 轉以上沒有漆黑洞窟可做')
             log(f'=== {dark[0]} 步 5 守門人（領守護獸；轉生前）===')
-            if a.solo:                                # 帳本是以帳號為單位：前一個角色做完會標 done，這裡每個角色都要重講一次
-                q.ledger_mark(dark[0], 'doing', 'gate solo')
+            # 帳本是以帳號為單位：questflow 解到打完機暴就把這個任務標 done（步 5 守門人是故意留到轉生前），
+            # 這裡不先改回 doing，run_quest 會看到「帳本已完成」直接跳過 → 沒講話、追蹤欄還是「通過守護人」→ 轉生階段停手
+            # （2026-10-14 11111 第 2 輪）。單人版每個角色都要重講一次，原因相同。
+            q.ledger_mark(dark[0], 'doing', 'gate solo' if a.solo else 'gate')
             run_quest(dark[0], key=str(dark[1]), use_potion=use_potion, from_step=5, to_step=5)
             return q.EXIT_OK
 
@@ -1271,6 +1405,16 @@ def main(argv=None) -> int:
                 log(f'已做滿 --limit {a.limit} 個任務，停止')
                 break
             was_done = q.ledger_load().get(q.CLIENT, {}).get(name, {}).get('status') == 'done'
+            heal_label = f'第一次漆黑前補血（{name}）'
+            if (stop and HEAL_BEFORE_DARK and not a.no_dark_heal and not a.dry and not was_done
+                    and q.ledger_load().get(q.CLIENT, {}).get(heal_label, {}).get('status') != 'done'):
+                log('=== 第一次漆黑任務前：先回醫院補血一次 ===')
+                try:
+                    import heal
+                    heal.heal_trip('波拉島', no_return=True)     # 補完停在醫院，之後由任務傳送 / 導航去漆黑
+                    q.ledger_mark(heal_label, 'done', 'questflow：漆黑前補血')
+                except Exception as e:                     # 補血失敗不停手（只是少補一次血）
+                    log(f'漆黑前補血失敗（{e}）→ 略過，照常接任務')
             for attempt in range(3):             # 暫時性失敗（傳送沒到 / 外掛面板打不開）最多重試 2 次，再停手
                 try:
                     run_quest(name, key=key, stop_after_last_boss=stop, use_potion=use_potion, dry=a.dry,

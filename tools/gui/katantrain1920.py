@@ -117,9 +117,9 @@ def slot_levels(q, qf, roles, slot: int = 4) -> dict:
             other = 1 if r == 1 else 0
             q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[other]), wait_ms=450, note='katan 刷新')
             q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[r - 1]), wait_ms=800, note=f'katan 角色 {r}')
-            if slot != 1:                                  # 不明原因沒出戰：偵測再補出戰第 1 隻（使用者 2026-10-13）
-                if not qf.ensure_battle(0):
-                    log(f'警告：角色 {r} 第 1 隻沒有出戰（按了出戰仍沒變 / 空格）')
+            # 讀等級只讀、不動出戰狀態（使用者 2026-10-14：每次讀都強制第 1 隻出戰，會跟「自動轉換戰寵」打架：
+            # 第 1 隻到級數後外掛換成第 2 隻，檢查又把第 1 隻改回出戰；交任務前「全部改休息」後也會被改回出戰）。
+            # 出戰只在 train 開頭 battle_first() 設一次。
             q.click((qf.PET_SLOT_X, qf.PET_SLOT_Y[slot - 1]), wait_ms=800, note=f'katan 選第 {slot} 隻')
             lv = None
             for _ in range(3):
@@ -165,7 +165,9 @@ def battle_first(q, qf) -> None:
             other = 0 if r else 1
             q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[other]), wait_ms=500, note='katan 刷新')
             q.click((qf.PET_ROLE_X, qf.PET_ROLE_Y[r]), wait_ms=900, note=f'katan 角色 {r + 1}')
-            if not qf.ensure_battle(0):                  # 先看狀態，不是出戰才按，並驗證（不盲點）
+            if qf.ensure_battle(0):                      # 先看狀態，不是出戰才按，並驗證（不盲點）
+                log(f'角色 {r + 1}：寵物第 1 格 → 出戰（已驗證）')
+            else:
                 log(f'警告：角色 {r + 1} 第 1 隻沒有出戰（按了出戰仍沒變 / 空格）')
     finally:
         qf.close_pet_panel()
@@ -258,6 +260,8 @@ def cmd_train(a) -> int:
         log(f'目前第 {a.slot} 隻等級：{lv}')
         if ge_all(lv, roles, a.target):
             log(f'5 人第 {a.slot} 隻都已 >= {a.target}，不用再練')
+            q.set_ass(encounter=False)       # 使用者 2026-10-14：略過練寵也要關原地遇敵（練寵中途停手 / 重啟後遇敵還開著）
+            log('已關原地遇敵')
             return 0
         battle_first(q, qf)
         log('5 人第 1 隻已設出戰')
@@ -295,6 +299,15 @@ def cmd_train(a) -> int:
             if tot > best:
                 best, t_prog = tot, time.time()
             elif time.time() - t_prog >= a.stall_min * 60:
+                # 使用者 2026-10-14：第 1 隻 > 25 就不當作卡住，繼續看第 slot 隻（不停手）
+                try:
+                    f1 = slot_levels(q, qf, pending, slot=1) if a.slot != 1 else {}
+                except q.Halt:
+                    f1 = {}
+                if a.slot != 1 and all((f1.get(r) or 0) > a.first_ok for r in pending):
+                    log(f'{a.stall_min} 分鐘第 {a.slot} 隻總和沒增加，但第 1 隻都 > {a.first_ok}（{f1}）→ 不停手，繼續看第 {a.slot} 隻')
+                    t_prog = time.time()
+                    continue
                 raise q.Halt(q.EXIT_TIMEOUT, f'連續 {a.stall_min} 分鐘等級總和沒有增加（{lv}）：停手，請看畫面')
         log(f'5 人第 {a.slot} 隻都 >= {a.target} 級，關原地遇敵')
         q.set_ass(encounter=False)
@@ -413,6 +426,7 @@ def main(argv=None) -> int:
     t = sp.add_parser('train')
     t.add_argument('--target', type=int, default=25)
     t.add_argument('--slot', type=int, default=4, help='讀第幾隻的等級（卡坦 4、恐龍博士 2）')
+    t.add_argument('--first-ok', type=int, default=25, help='卡住判斷：第 1 隻 > 此級數就不算卡住、不停手（預設 25）')
     t.add_argument('--swap-level', type=int, default=25, help='外掛自動轉換戰寵的轉換級數（1~4 列）')
     t.add_argument('--stall-min', type=int, default=30)
     c = sp.add_parser('check', help='只偵測第 N 隻的等級，達標就停、未達標隔幾秒再看')

@@ -23,7 +23,7 @@ ROOT = HERE.parents[1]
 NOTES = ROOT / 'notes'
 LEVELS_MD = ROOT / 'knowledge' / 'pets' / 'levels.md'
 CLIENTS_JSON = ROOT / 'tools' / '.cache' / 'clients.json'
-DEFAULT_CLIENTS = ['kkfaq11111', 'kkfaq22222']
+DEFAULT_CLIENTS = ['kkfaq11111', 'kkfaq22222', 'kkfaq33333']
 FMT = '%Y-%m-%d %H:%M:%S'
 
 

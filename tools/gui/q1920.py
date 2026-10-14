@@ -234,7 +234,11 @@ def classify(cols: dict) -> str:
         return 'DIALOG'
     fam = cols.get('fam')
     in_battle_ui = fam is not None and near(fam, (232, 192, 71), 40)
-    main_like = hud_red and near(cols['avatar'], (151, 70, 43), 30) and near(cols['tab'], (145, 135, 108), 40)
+    av = cols['avatar']
+    # 頭像探針：原本只認 (151,70,43)（深髮色角色）。333 的角色頭像探針是膚色 (241,193,151) → 永遠判 OTHER，
+    # wait131 / 練寵 / 任務全部靜默空轉（2026-10-14）。再接受暖色（紅 - 藍 >= 40、紅 >= 140，亮度不是白 / 灰面板）
+    avatar_ok = near(av, (151, 70, 43), 30) or (av is not None and av[0] >= 140 and av[0] - av[2] >= 40 and av[0] >= av[1] >= av[2])
+    main_like = hud_red and avatar_ok and near(cols['tab'], (145, 135, 108), 40)
     # 橫幅探針只有 1 個點：沙地地圖（薩伊那斯）背景色 (237,209,139) 與橫幅 (226,199,148) 幾乎一樣 → 誤判戰鬥而卡住
     # （2026-10-12 卡坦步 1）。HUD 頭像 / 分頁都像主畫面時，不能只憑橫幅那一點判戰鬥。
     if hud_red and (in_battle_ui or (near(cols['banner'], (226, 199, 148), 22) and not main_like)):
@@ -441,7 +445,15 @@ def disband() -> None:
         click(TEAM_BTN, right=2, wait_ms=1300, note='q1920 開組隊面板')
         cols = px([TEAM_X, TEAM_ACT])
         if not (cols and near(cols[0], (197, 73, 49), 35)):
-            log('組隊面板沒開 → 重試')
+            # 沒開成：先 ESC 關掉可能擋住的視窗 / 面板（背包、外掛面板、獲得物品）再重開（使用者 2026-10-14：
+            # 11111 解散隊伍 3 次都沒開成，因為重試之間沒按 ESC）；仍是別的畫面就再點一下關閉 ✕
+            log('組隊面板沒開 → ESC 後重試')
+            key('{ESC}')
+            sleep(1.0)
+            if state() != 'MAIN':
+                click((832, 66), wait_ms=700, note='q1920 解散前關背包 / 面板 ✕')
+                key('{ESC}')
+                sleep(0.8)
             continue
         if near(cols[1], (135, 40, 19), 45):               # 紅 = 解散隊伍
             click(TEAM_ACT, wait_ms=1200, note='q1920 解散隊伍')

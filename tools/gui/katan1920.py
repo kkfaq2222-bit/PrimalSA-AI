@@ -156,8 +156,8 @@ def plan(client: str, family: str, phase: str) -> list:
             out.append(('步 2 獎勵（朵拉比斯）存個人倉庫', py('petdepot1920.py', *c, '--do')))
         return out
     if phase == 'final':
-        out.append((f'角色 {catcher} 從個人倉庫領回前 3 輪各 1 隻（名稱是數字）',
-                    py('petfetchimg1920.py', *c, 'fetch', '--role', catcher, '--numeric', 3, '--do')))
+        out.append((f'角色 {catcher} 從個人倉庫領回前 3 輪各 1 隻（名稱是數字；已在欄位裡的不重領：目標總數 4 = 第 4 輪留著的 1 + 前 3 輪 3）',
+                    py('petfetchimg1920.py', *c, 'fetch', '--role', catcher, '--numeric', 3, '--want-total', 4, '--shape', family, '--do')))
         return out
     raise ValueError(phase)
 

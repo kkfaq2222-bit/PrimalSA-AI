@@ -37,6 +37,9 @@ from walk import log, stat
 
 # (等級門檻, 練功點名稱) 由高到低；0～5 轉都用同一組門檻（使用者 2026-10-12：每次轉生都從 1 級重練，只看人物等級）
 END_LEVEL = 131      # 到這個等級才結束監測
+PANEL_FROM = 128      # --stop-at-end：HUD 確認讀到這個等級後，開始定期開人物資訊面板確認 5 人等級
+PANEL_EVERY_S = 300   # 面板確認的間隔（秒）
+HEARTBEAT_S = 600    # 練功中每 10 分鐘印一行心跳，讓看門狗知道還活著（不然升級間隔 > 看門狗卡住門檻會被誤重啟）
 STAGES = [(130, '地雷區'), (120, '波拉島'), (80, '柯奧4F龜洞'), (60, '五兄弟洞窟'),
           (30, '海主人隧道'), (20, '阿布龜洞'), (10, '柯奧龜洞')]
 REAL_STAGES = [(120, '地雷區'), (80, '波拉島'), (60, '柯奧4F龜洞'), (45, '五兄弟洞窟'),
@@ -188,11 +191,17 @@ def main() -> int:
     rates: dict[str, list[float]] = {}                        # 地圖 → 最近幾次升級的每分鐘經驗
     want_check: str | None = None                             # 觸發了、等戰鬥結束 + HUD 回來再檢查的原因
     last_check = 0.0
+    last_panel = 0.0
     busy_since: float | None = None
     log('監測中：' + '、'.join(f'{n} 級→{name}' for n, name in reversed(stages)) + '（Ctrl+C 結束）')
+    last_beat = time.time()
     while True:
         pausegate.wait(log)                      # 每輪開頭的安全點（不會停在補血 / 換點中途）
         s = stat()
+        if time.time() - last_beat >= HEARTBEAT_S:
+            # 長時間同一等級 / 同一地圖（例：地雷區一練 10 小時）不會有任何事件輸出，看門狗會把沉默當卡住 → 定期印一行心跳
+            last_beat = time.time()
+            log(f'練功中（心跳）：{s.get("level") or "?"} 地圖 {s.get("pos") or "?"}')
         lv = parse_level(s)
         if lv is None and '最小化' in str(s.get('error') or ''):
             # Unity 最小化不繪製（戰鬥也停）：gui info 會用 SW_SHOWNOACTIVATE 還原，不搶焦點；還原後馬上重讀
@@ -209,10 +218,25 @@ def main() -> int:
                 want_check = f'戰鬥過久（連續 {int(time.time() - busy_since)} 秒在戰鬥中）'
         else:
             busy_since = None
+        near_end = good_level is not None and good_level >= PANEL_FROM
+        if (a.stop_at_end and near_end and not in_battle and not a.dry_run
+                and time.time() - last_panel >= PANEL_EVERY_S):
+            # 接近 131 後 HUD 的 OCR 會漏位數、讀不準 131（使用者 2026-10-13）→ 不靠 HUD 判斷結束，改定期開人物資訊面板讀 5 人等級
+            last_panel = time.time()
+            import fullrun1920 as fr
+            plv = fr.read_team_levels_retry()
+            log(f'人物資訊面板：5 人等級 {plv}（HUD：{s.get("level")}，目標 >= {END_LEVEL}）')
+            if fr.levels_ready(plv, END_LEVEL):
+                log(f'5 人都 >= {END_LEVEL} 級，結束監測')
+                progress.add(f'levelwatch 人物面板確認 5 人都 >= {END_LEVEL} 級，結束監測')
+                return 0
+            if any(v is not None for v in plv):
+                bad = 0                   # 面板開得起來 = 沒有驗證視窗擋著，HUD 讀不到只是 OCR 問題
         if lv is None:
             bad += 1
-            log(f'讀不到等級（{bad}/5）：{s.get("error") or s.get("level")}')
-            if bad >= 5:
+            bad_max = 15 if near_end and a.stop_at_end else 5      # 接近 131 時多給幾次，讓定期面板檢查有機會先確認
+            log(f'讀不到等級（{bad}/{bad_max}）：{s.get("error") or s.get("level")}')
+            if bad >= bad_max:
                 log('連續讀不到 HUD，可能有驗證視窗或對話框，停止監測，請人看畫面')
                 return 1
         else:

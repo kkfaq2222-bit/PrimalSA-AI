@@ -95,7 +95,10 @@ def warn_dialog() -> bool:
 
 def slot_empty(i: int) -> bool:
     c = px([(178, SLOT_Y[i] + 22)])
-    return bool(c) and c[0][0] > 120 and c[0][1] > 90       # 有寵物是深褐（R≈80~100）；空格腳印圖米色（R 145~190）
+    # 有寵物是深褐（R≈80~100）；空格腳印圖米色（R 145~190、G−B ≈ 40~47）。
+    # 使用者 2026-10-14：紅色寵物（多魯寶）這一點是 (179,98,100)，只看 R>120 且 G>90 會被當空格 → organize / clear 完全沒讀到它
+    # → 加上「米色」條件：G−B >= 25（紅 / 粉色的寵物身體 G−B 接近 0 或負）
+    return bool(c) and c[0][0] > 120 and c[0][1] > 90 and (c[0][1] - c[0][2]) >= 25
 
 
 def personal_tab_on() -> bool:

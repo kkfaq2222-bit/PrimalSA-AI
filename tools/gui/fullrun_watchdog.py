@@ -29,7 +29,8 @@ CACHE = ROOT / 'tools' / '.cache'
 sys.path.insert(0, str(HERE))
 
 AUTO_RESTART = {3, 4, 5, 7, 8}
-STALL_S = 420            # 7 分鐘沒有新輸出就當卡住（單步最長的等待是戰鬥 / 導覽，日誌會持續有輸出）
+STALL_S = 2400           # 40 分鐘沒有新輸出才當卡住（grind 階段 levelwatch 只在升級 / 換圖時印字，高等一級可能 20 分鐘以上；
+                         # 2026-10-13 用 420 秒誤判 3 次把 30 分鐘內的重啟額度用光）
 MAX_SAME_IN_WINDOW = 3   # 同一退出碼在 WINDOW_S 內最多自動重啟幾次
 WINDOW_S = 1800
 
@@ -41,6 +42,17 @@ def loop_decision(rounds: int, trans, max_rounds: int, max_trans: int) -> str:
     if trans >= max_trans or (max_rounds and rounds >= max_rounds):
         return 'stop'
     return 'next'
+
+
+def kill_tree(p) -> None:
+    """連子程序（levelwatch、gui 腳本）一起殺；只 p.kill() 會留下孤兒 levelwatch，多個一起搶同一個遊戲視窗"""
+    try:
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/PID', str(p.pid), '/T', '/F'], capture_output=True, timeout=20)
+        else:
+            p.kill()
+    except Exception:
+        p.kill()
 
 
 def now() -> str:
@@ -99,10 +111,13 @@ def main() -> int:
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', bufsize=1)
         tail = deque(maxlen=60)
         last_out = [time.time()]
+        in_grind = [False]    # 進到 grind（練等）後不用「沒輸出」判卡住：卡住偵測是給卡坦 / 恐龍博士 / 英雄傳後傳用的（使用者 2026-10-13）
 
         def pump():
             for line in p.stdout:
                 last_out[0] = time.time()
+                if '階段 grind' in line:
+                    in_grind[0] = True
                 tail.append(line.rstrip())
                 print(line, end='', flush=True)
 
@@ -111,10 +126,10 @@ def main() -> int:
         stalled = False
         while p.poll() is None:
             time.sleep(5)
-            if time.time() - last_out[0] > a.stall:
+            if not in_grind[0] and time.time() - last_out[0] > a.stall:
                 stalled = True
                 log(f'連續 {a.stall} 秒沒有新輸出 → 判定卡住，結束程序')
-                p.kill()
+                kill_tree(p)
                 break
         t.join(timeout=5)
         code = p.wait()

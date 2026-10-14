@@ -287,9 +287,26 @@ def stage_ledger(client: str) -> int:
     return 0
 
 
+REBIRTH_PREREQ = ['猜謎三兄弟', '卡坦的願望', '恐龍博士']     # 轉生前一定要先做完（轉生後任務全部重置，使用者 2026-10-14）
+
+
+def rebirth_prereq_missing(client: str) -> list:
+    """帳本裡這三個任務不是 done 的清單；轉生不可逆，漏做就不准轉。"""
+    import json
+    try:
+        led = json.loads((ROOT / 'notes' / 'quest-ledger.json').read_text(encoding='utf-8')).get(client, {})
+    except (OSError, ValueError):
+        led = {}
+    return [n for n in REBIRTH_PREREQ if led.get(n, {}).get('status') != 'done']
+
+
 def stage_rebirth(client: str, wait_min: int) -> int:
     """go（組隊 + 導航到精靈王）→ 對話窗開著等使用者放行 → 偵測 5 人回到 1 級附近才算完成"""
     import q1920 as q
+    miss = rebirth_prereq_missing(client)
+    if miss:
+        log(f'轉生前置未完成：{miss} 帳本不是 done → 不轉生、停手（轉生不可逆，任務會全部重置）')
+        return 1
     rc = subprocess.call(py('rebirth1920.py', '--client', client, 'go'))
     if rc:
         return rc
@@ -340,15 +357,55 @@ def run_cmds(client: str, stage: str) -> int:
     for desc, argv in plan(client, stage):
         if extra and argv and 'questflow1920.py' in argv[1]:
             argv = argv + extra
-        log(f'[{stage}] {desc}')
-        env = dict(os.environ, PSA_EXE_MATCH=client, PSA_GUI_SERVER='1', PYTHONIOENCODING='utf-8')
-        env.setdefault('PSA_TILE_SCALE', '0.5')
-        env.setdefault('PSA_CLICK_HOLD_MS', '120')
-        rc = subprocess.call(argv, cwd=str(ROOT), env=env)
+        rc = run_argv(client, stage, desc, argv)
         if rc:
-            log(f'[{stage}] 退出碼 {rc} → 停手')
             return rc
     return 0
+
+
+def run_argv(client: str, stage: str, desc: str, argv: list) -> int:
+    log(f'[{stage}] {desc}')
+    env = dict(os.environ, PSA_EXE_MATCH=client, PSA_GUI_SERVER='1', PYTHONIOENCODING='utf-8')
+    env.setdefault('PSA_TILE_SCALE', '0.5')
+    env.setdefault('PSA_CLICK_HOLD_MS', '120')
+    rc = subprocess.call(argv, cwd=str(ROOT), env=env)
+    if rc:
+        log(f'[{stage}] 退出碼 {rc} → 停手')
+    return rc
+
+
+def stage_grind(client: str, every: int, max_min: int) -> int:
+    """練等 1~131：levelwatch 用 HUD OCR（會漏位數）說到 131 就結束，所以結束後一定開人物資訊面板讀 5 人等級確認
+    （使用者 2026-10-13）；沒全到 131 就再跑 levelwatch 繼續練（HUD 若真的 >= 131 它會馬上結束，隔 every 秒再開面板看）"""
+    import q1920 as q
+    cmds = plan(client, 'grind')
+    rc = run_argv(client, 'grind', *cmds[0])
+    if rc:
+        return rc
+    t0 = None                                        # 第一次 levelwatch 結束後才開始算「確認等待」時間
+    while True:
+        rc = run_argv(client, 'grind', *cmds[1])
+        if rc:
+            return rc
+        log('[grind] levelwatch 結束（HUD 讀到 >= 131）→ 開人物資訊面板確認 5 人等級')
+        lv = [None] * 5
+        for _ in range(30):                          # 戰鬥中不開面板，最多等 5 分鐘
+            try:
+                if q.state() == 'MAIN':
+                    break
+            except Exception:
+                break
+            time.sleep(10)
+        lv = read_team_levels_retry()
+        log(f'[grind] 5 人等級：{lv}（目標 >= {TARGET}）')
+        if levels_ready(lv):
+            return 0
+        t0 = t0 or time.time()
+        if time.time() - t0 > max_min * 60:
+            log(f'[grind] 超過 {max_min} 分鐘 5 人還沒全到 {TARGET} 級 → 停手')
+            return 7
+        log('[grind] 面板顯示還沒全到 131（HUD 可能誤讀）→ 繼續練')
+        time.sleep(every)
 
 
 def state_file(client: str) -> Path:
@@ -376,6 +433,7 @@ def main(argv=None) -> int:
     ap.add_argument('--fresh', action='store_true', help='忽略狀態檔，全部重來')
     ap.add_argument('--wait-every', type=int, default=60, help='wait131 每幾秒再看一次')
     ap.add_argument('--wait-max-min', type=int, default=180, help='wait131 最長等幾分鐘')
+    ap.add_argument('--grind-wait-max-min', type=int, default=600, help='grind 結束後面板確認 5 人 >= 131 最長等幾分鐘（使用者 2026-10-13：600）')
     ap.add_argument('--rebirth-wait-min', type=int, default=60, help='rebirth 等使用者放行的最長分鐘數')
     a = ap.parse_args(argv)
     os.environ['PSA_EXE_MATCH'] = a.client
@@ -406,6 +464,8 @@ def main(argv=None) -> int:
         log(f'===== 階段 {s} =====')
         if s == 'wait131':
             rc = stage_wait131(a.client, a.wait_every, a.wait_max_min)
+        elif s == 'grind':
+            rc = stage_grind(a.client, a.wait_every, a.grind_wait_max_min)
         elif s == 'stopenc':
             rc = stage_stopenc(a.client)
         elif s == 'ledger':
