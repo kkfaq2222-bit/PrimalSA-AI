@@ -59,6 +59,19 @@ def now() -> str:
     return time.strftime('%F %T')
 
 
+def fail_signature(code, tail, stalled=False):
+    """失敗特徵 = (退出碼, 最後一行「停手（退出碼 N）：…」去掉時間與數字)；沒有停手行就用最後一行。卡住 = 固定特徵。"""
+    import re
+    if stalled:
+        return (code, '連續沒有新輸出（卡住）')
+    lines = [x for x in tail if x.strip()]
+    halt = [x for x in lines if '停手（退出碼' in x] or [x for x in lines if '停手' in x and '] 退出碼' not in x]   # 要原因那行，不要「[quests] 退出碼 5 → 停手」
+    src = (halt or lines or [''])[-1]
+    src = re.sub(r'^\s*(\d{4}-\d\d-\d\d )?\d\d:\d\d:\d\d\s*', '', src)     # 去掉時間
+    src = re.sub(r'\d+', '#', src)                                               # 數字（座標、秒數）不算差異
+    return (code, src.strip()[:120]) if src.strip() else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--client', default=os.environ.get('PSA_EXE_MATCH', 'kkfaq11111'))
@@ -102,6 +115,7 @@ def main() -> int:
     env.setdefault('PSA_TILE_SCALE', '0.5')
     env.setdefault('PSA_CLICK_HOLD_MS', '120')
     history = {}                                   # 退出碼 → [重啟時間戳]
+    last_sig = None                                # 上一次失敗的「錯誤訊息特徵」（同一錯誤連續兩輪就停手）
     rounds = 0
     while True:
         stamp = '；'.join(f'{n} {time.strftime("%H:%M:%S", time.localtime((HERE / n).stat().st_mtime))}'
@@ -158,6 +172,7 @@ def main() -> int:
                 log(f'已到上限（轉數 {trans}/{a.max_trans}、輪數 {rounds}/{a.max_rounds or "不限"}）→ 看門狗結束')
                 return 0
             history.clear()
+            last_sig = None
             log(f'開第 {rounds + 1} 輪（狀態檔已歸零，從 train 開始）')
             time.sleep(10)
             continue
@@ -165,6 +180,12 @@ def main() -> int:
             reason = {6: '疑似驗證視窗 / 卡住（鐵則 5，請人看畫面）', 1: '用法錯誤或缺少必要道具（龍王的守護沒有不會走到這裡，會繼續跑）', 2: '視窗版面不對（要 1920x1017）'}.get(code, f'退出碼 {code}（不在自動重啟名單）')
             stop(code, reason, tail)
             return code
+        # 同一個錯誤連續兩輪就停手（2026-10-14 / 15：22222、333 同一錯誤白跑 3~4 輪，每輪 6~8 分；子程序內部已重試 2 次，重啟也不會好）
+        sig = fail_signature(code, tail, stalled)
+        if sig and sig == last_sig:
+            stop(code, f'同一個錯誤連續兩輪（{sig[1][:60]}）→ 重跑也不會好，需要人看', tail)
+            return code
+        last_sig = sig
         ts = [x for x in history.get(code, []) if time.time() - x < WINDOW_S]
         if len(ts) >= MAX_SAME_IN_WINDOW:
             stop(code, f'退出碼 {code} 在 {WINDOW_S // 60} 分鐘內已自動重啟 {len(ts)} 次仍沒好，需要人看', tail)
