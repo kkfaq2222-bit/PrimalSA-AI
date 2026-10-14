@@ -1106,6 +1106,11 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
     if stop_after_last_boss:                     # 漆黑：永遠在追蹤欄，不能當「已接」；一律先看主線那列是不是待接取
         accept_top(name, side=False, nth=0)      # 主線永遠取最上面那格（使用者 2026-10-14：待接取排最上、已完成沉到最下；用位置 nth 會選到四轉）
         row = find_track_row(name)
+        for _ in range(2):                       # 剛接完追蹤欄常還沒更新（2026-10-15 333：接完馬上讀不到 → 誤去支線找 → 停手）
+            if row is not None:
+                break
+            time.sleep(2)
+            row = find_track_row(name, scroll=True, reveal=True)
     else:
         row = find_track_row(name, reveal=name in TRAIN_STEPS)
         for _ in range(2):                       # 剛吃完藥 / 面板還沒收好時 OCR 會暫時讀不到：先重讀，不要直接去任務詳情接（2026-10-12 四寶玉之謎）
@@ -1115,7 +1120,7 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
             row = find_track_row(name, scroll=False, reveal=False)
     fresh = False
     if row is None:
-        accept_top(name, side=name not in ADULT)    # 成人儀式在任務詳情「主線」分頁
+        accept_top(name, side=name not in ADULT and not stop_after_last_boss)    # 成人儀式、漆黑都在任務詳情「主線」分頁
         fresh = True
         row = find_track_row(name, reveal=name in TRAIN_STEPS)
         if row is None:
