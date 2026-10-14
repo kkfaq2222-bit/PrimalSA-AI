@@ -115,9 +115,8 @@ def ensure_encounter(when: str, plugin: bool = True) -> None:
         if rc == 0 and st and st.get('原地遇敵'):
             log(f'{when}：外掛確認原地遇敵開著（{ass.fmt(st)}）')
         else:
-            log(f'{when}：外掛確認原地遇敵沒成功（退出碼 {rc}：{msg}）→ 改用主畫面遇敵鈕')
-            if not heal.encounter_on():
-                heal.set_encounter(True)
+            # 只有隊長（外掛第 1 格 DKBO）能開原地遇敵；主畫面遇敵鈕作用在「目前操作的角色」，可能不是隊長 → 不用它補，下次再檢查
+            log(f'{when}：外掛確認原地遇敵沒成功（退出碼 {rc}：{msg}）→ 下次檢查再試')
     except Exception as e:
         log(f'{when}：檢查原地遇敵失敗（{e}）')
 
