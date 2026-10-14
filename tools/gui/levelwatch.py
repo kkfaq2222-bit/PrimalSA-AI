@@ -101,15 +101,23 @@ MIN_PER_LEVEL_LOW = [(60, 0.7), (80, 1.3), (100, 1.8), (110, 3.3), (116, 6.0), (
 EXP_PER_MIN_HIGH = 780_000
 
 
-def ensure_encounter(when: str) -> None:
+def ensure_encounter(when: str, plugin: bool = True) -> None:
     """練功中確認原地遇敵還開著（使用者 2026-10-15：開關面板時有機會點到移動，把遇敵關掉 → 原地不動、白掛）。
-    只讀像素；戰鬥中不判斷（圖示會被蓋住）；沒開才點開。"""
+    plugin=True：開外掛讀「原地遇敵」勾選（最準；ass.set_states 只在沒勾時才點，讀回確認後關面板）。
+    plugin=False（心跳）：先只看主畫面遇敵圖示像素，看起來沒開才開外掛確認 / 補勾，平常不開面板。戰鬥中不判斷。"""
     try:
         if not heal.gui('seq', f'waitpix 0 {heal.SIG_NO_BATTLE} 40').startswith('ok'):     # 戰鬥中（頭上 VS 牌）
             return
-        if not heal.encounter_on():
-            log(f'{when}：原地遇敵沒開 → 補開')
-            heal.set_encounter(True)
+        if not plugin and heal.encounter_on():
+            return
+        import ass
+        rc, st, msg = ass.set_states('DKBO', {'原地遇敵': True})
+        if rc == 0 and st and st.get('原地遇敵'):
+            log(f'{when}：外掛確認原地遇敵開著（{ass.fmt(st)}）')
+        else:
+            log(f'{when}：外掛確認原地遇敵沒成功（退出碼 {rc}：{msg}）→ 改用主畫面遇敵鈕')
+            if not heal.encounter_on():
+                heal.set_encounter(True)
     except Exception as e:
         log(f'{when}：檢查原地遇敵失敗（{e}）')
 
@@ -248,7 +256,7 @@ def main() -> int:
                     eta = f'；到 {END_LEVEL} 級約還要 {m / 60:.1f} 小時（預計 {fin}，預估值）'
             log(f'練功中（心跳）：{s.get("level") or "?"} 地圖 {s.get("pos") or "?"}{eta}')
             if not a.dry_run and good_level and good_level < END_LEVEL:
-                ensure_encounter('心跳')
+                ensure_encounter('心跳', plugin=False)
         lv = parse_level(s)
         if lv is None and '最小化' in str(s.get('error') or ''):
             # Unity 最小化不繪製（戰鬥也停）：gui info 會用 SW_SHOWNOACTIVATE 還原，不搶焦點；還原後馬上重讀
