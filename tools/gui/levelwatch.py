@@ -349,6 +349,10 @@ def main() -> int:
                 if m and int(m.group(1)) == heal.SPOTS[spot][2]:
                     done = spot
                     log(f'已在 {spot}，不重複傳送')
+                    if not a.no_ass:
+                        # 不傳送就不會跑「到點後補勾」→ 重啟時照樣補勾 5 人快速 / 自動戰鬥（2026-10-15 11111：5 人快速戰鬥都沒勾、128 級卡 138 分）
+                        ensure_ass(a.dry_run)
+                        ensure_encounter('重啟已在練功點')
             if spot and spot != done:
                 if not a.no_team and not ensure_team(a.dry_run):
                     log('隊伍沒組好，停止監測，請人工處理（有人離線 / 地圖禁止組隊？）')
@@ -370,6 +374,9 @@ def main() -> int:
             reason, want_check = want_check, None
             log(f'觸發異常檢查：{reason}')
             healthcheck.run(reason)
+            if not a.no_ass and not a.dry_run:
+                ensure_ass()            # healthcheck 只看不改；沒勾的快速 / 自動戰鬥這裡補（2026-10-15 11111 發現沒勾卻沒補，多卡 50 分）
+                ensure_encounter('異常檢查後')
             busy_since = None
         if not a.no_heal and not a.dry_run and done and lv is not None and heal.low(s, a.hp, a.mp):
             time.sleep(3)
