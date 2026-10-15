@@ -13,6 +13,17 @@ FIGHT_BTN = (280, 433)
 RIDE_BTN = (345, 433)
 
 
+def fail_shot(pd, r, why):
+    """停手當下（面板還開著、還停在這個角色）存圖 + 記第 1 / 2 格判空格用的顏色（2026-10-15：停手後才拍只拍到主畫面，看不出是哪隻寵物）"""
+    try:
+        cols = pd.px([(178, pd.SLOT_Y[i] + 22) for i in range(2)])
+        pd.log(f'  判空格顏色：第 1 格 {cols[0] if cols else None}、第 2 格 {cols[1] if cols and len(cols) > 1 else None}')
+        import failshot
+        failshot.shot('petsetup', f'{why}；顏色 {cols}')
+    except Exception:
+        pass
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--client', default='kkfaq22222')
@@ -39,12 +50,14 @@ def main():
                 names.append(pd.match_pet_name(pd.read_pet_name(uikit)))
             if not any(names):
                 pd.log(f'角色{r} 寵物欄前兩格讀不到寵物名（{names}）→ 可能沒領到，不按騎乘 / 出戰')
+                fail_shot(pd, r, f'角色{r} 前兩格讀不到寵物名')
                 rc = 5
                 continue
             # 戰寵 = 第 2 格（使用者 2026-10-14 改成領個人倉庫第 1 隻，不一定是朵拉比斯；2026-10-15 333 全部被「沒讀到朵拉比斯」擋下）。
             # 騎乘已在 lock 階段鎖定，這裡不再按（再按可能變成取消騎乘）。護欄：第 2 格要有寵物，且不是騎寵格魯西斯
             if pd.slot_empty(1) or names[1] == '格魯西斯':
                 pd.log(f'角色{r} 第 2 格沒有戰寵（{names}）→ 不按出戰')
+                fail_shot(pd, r, f'角色{r} 第 2 格沒有戰寵 {names}')
                 rc = 5
                 continue
             i = 1
