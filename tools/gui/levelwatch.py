@@ -297,6 +297,7 @@ def main() -> int:
             if any(v is not None for v in plv):
                 bad = 0                   # 面板開得起來 = 沒有驗證視窗擋著，HUD 讀不到只是 OCR 問題
             ensure_encounter('人物資訊面板檢查後')
+        from_panel = False
         if lv is None and not a.dry_run and not in_battle:
             # HUD 讀不到（三位數等級常讀成「囀2」= 4轉112級）→ 開左上角人物資訊面板讀隊長等級（使用者 2026-10-15：
             # 22222 / 11111 都因為 HUD 連續讀不到 5 次而停手）。面板讀得到就用它，轉數沿用已確認的
@@ -307,6 +308,7 @@ def main() -> int:
                 lv = (good_trans if good_trans not in (None, -1) else -1, plv[0])
                 log(f'HUD 讀不到（{s.get("level")}）→ 人物資訊面板：隊長 {plv[0]} 級（5 人 {plv}）')
                 pending = plv[0]                  # 面板讀數可信：不用再等第二次一樣
+                from_panel = True
         if lv is None:
             bad += 1
             bad_max = 15 if near_end and a.stop_at_end else 5      # 接近 131 時多給幾次，讓定期面板檢查有機會先確認
@@ -325,7 +327,7 @@ def main() -> int:
                 log(f'讀到 {trans}轉{level} 級，比已確認的 {good_trans}轉{good_level} 級低，視為 OCR 誤讀，略過')
                 time.sleep(a.every)
                 continue
-            if good_level is None and not first_read_ok(s):
+            if good_level is None and not from_panel and not first_read_ok(s):     # 面板讀到的等級直接採信（HUD 字串還是「囀2」）
                 # 第一次確認：隊長（人物）等級要讀到才採信，否則只觀察不傳送（見 first_read_ok）
                 log(f'啟動後第一次確認：隊長 {s.get("level")} 讀不到，先觀察不傳送')
                 pending = None
