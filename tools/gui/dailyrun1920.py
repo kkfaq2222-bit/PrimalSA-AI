@@ -188,6 +188,30 @@ class _Tee:
         return getattr(self._s, k)
 
 
+BAG_SLOTS = 15
+
+
+def craft_groups(todo, plan_all, keep, peppers) -> list:
+    """把要合成的頁分組（純函式）：下一頁的材料加進來後，背包放得下才併成一組（同一次開面板連續合成）。
+    背包佔用 = 後面還要用的「留身上」材料（從這一組開始算）+ 這一組要從倉庫領的材料種類 + 胡椒 + 2 個成品（每頁提交後拿走），留 1 格餘裕。"""
+    def mats(pg):
+        return {n for p, _it, m in plan_all if p == pg for n, _q in m}
+    groups, i = [], 0
+    while i < len(todo):
+        g = [todo[i]]
+        while i + len(g) < len(todo):
+            cand = g + [todo[i + len(g)]]
+            kept = {n for p in todo[i:] for n in mats(p) if n in keep}
+            pulled = {n for p in cand for n in mats(p) if n not in keep}          # 公共倉庫領的 + 胡椒（都要佔格）
+            if len(kept) + len(pulled) + 2 + 1 <= BAG_SLOTS:            # 成品每頁合成完就提交拿走，同時最多 2 個
+                g = cand
+            else:
+                break
+        groups.append(g)
+        i += len(g)
+    return groups
+
+
 def record_step(client, role, page, step, t0, rc) -> None:
     """統計用：每頁每一步（withdraw 領料 + 取胡椒 / craft 合成提交 / pepperback 放回胡椒）的耗時寫進
     tools/.cache/stats-daily-steps.jsonl（使用者 2026-10-15：要記時間、次數、數量，分析速度可以進步的地方）"""
@@ -391,23 +415,32 @@ def main() -> int:
                     if not wait_at(a.client, 1005, HOSPITAL_NPC_STAND):
                         log('等不到角色站到 NPC 旁 → 停手')
                         return 5
-            for pg in todo:
-                log(f'[craft] 第 {pg} 頁')
+            # 已提交的頁（一次做好幾頁時中途失敗，重跑不重做；dailyquest 每頁提交後寫 daily-crafted-*.json）
+            try:
+                cd = json.loads((cache / f'daily-crafted-{a.client}{tag}.json').read_text(encoding='utf-8'))
+                if cd.get('date') == time.strftime('%Y%m%d'):
+                    todo = [pg for pg in todo if pg not in cd.get('pages', [])]
+            except (OSError, ValueError):
+                pass
+            # 背包放得下就連續幾頁一起領料、一次開面板合成（使用者 2026-10-15 要求 4：不要每頁開關一次每日任務面板）
+            for grp in craft_groups(todo, plan_all, dq.keep_list(plan_all), dq.PEPPERS):
+                for pg in grp:
+                    log(f'[craft] 第 {pg} 頁')
+                    t0 = time.time()
+                    rc = run_dq(['withdraw', '--page', str(pg)] + pf, a.client)     # 公共倉庫領料 + 個人倉庫取胡椒
+                    record_step(a.client, a.role, pg, 'withdraw', t0, rc)
+                    if rc != 0:
+                        return rc
                 t0 = time.time()
-                rc = run_dq(['withdraw', '--page', str(pg)] + pf, a.client)     # 公共倉庫領料 + 個人倉庫取胡椒
-                record_step(a.client, a.role, pg, 'withdraw', t0, rc)
+                rc = run_dq(['craft', '--craft-pages', ','.join(map(str, grp)), '--submit'] + pf, a.client)
+                record_step(a.client, a.role, ','.join(map(str, grp)), 'craft', t0, rc)
                 if rc != 0:
-                    return rc
-                t0 = time.time()
-                rc = run_dq(['craft', '--page', str(pg), '--submit'] + pf, a.client)
-                record_step(a.client, a.role, pg, 'craft', t0, rc)
-                if rc != 0:
-                    log(f'第 {pg} 頁合成 / 提交失敗（退出碼 {rc}）→ 停手；看 tools/.cache/craft-p{pg}-*.png')
+                    log(f'第 {grp} 頁合成 / 提交失敗（退出碼 {rc}）→ 停手；看 tools/.cache/craft-p*-fail.png（已提交的頁重跑不會重做）')
                     return rc
                 t0 = time.time()
                 run_dq(['pepperback'] + pf, a.client)       # 剩的胡椒照 1 普通 / 2 黑 / 3 香味濃厚 放回個人倉庫（沒有就不開面板）
-                record_step(a.client, a.role, pg, 'pepperback', t0, 0)
-                st['done'].append(f'craft{pg}')
+                record_step(a.client, a.role, ','.join(map(str, grp)), 'pepperback', t0, 0)
+                st['done'] += [f'craft{pg}' for pg in grp]
                 save()
         done_f = cache / f'daily-done-{a.client}{tag}.json'
         if ri < len(rounds) and done_f.exists():          # 下一回合重新記格位（這回合的材料已用掉）
