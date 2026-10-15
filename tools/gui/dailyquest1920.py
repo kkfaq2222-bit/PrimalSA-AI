@@ -411,6 +411,10 @@ def main(argv=None) -> int:
             jx, jy = CLICK_JITTER[_try]
             pd.click(*walk.PRIMER_XY, wait=NPC_PRIMER_GAP_MS, note='daily 引子（第一下會被吃掉）')
             pd.click(sx + jx, sy + jy, wait=1400, note=f'daily 點 {st[0]}（第 {_try + 1} 次，偏移 {jx},{jy}）')
+            for _w in range(4):                    # 對話框慢出來：多等最多 1.2 秒再判失敗（2026-10-15 加引子後「對話沒出現」仍 28 次 → 不是第一下被吃，是太早判）
+                if dialog_open(uikit):
+                    break
+                time.sleep(0.3)
             if dialog_open(uikit):
                 dt = npc_name(uikit)
                 if npc_title_ok(st[0], dt, ALL_STORE_NAMES):
