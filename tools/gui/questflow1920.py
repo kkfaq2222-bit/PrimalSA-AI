@@ -318,14 +318,14 @@ def eat_potion() -> bool:
         close_bag()
         if attempt == 0 and not take_from_depot():
             break
-    # 沒有龍王的守護不停手（使用者 2026-10-13）：照樣往下跑，只是路上會遇到野怪、比較花時間。30 分鐘內不再重找（避免每步都開背包 / 倉庫）
-    global _POTION_EMPTY_AT
-    _POTION_EMPTY_AT = time.time()
-    log('警告：背包和公共倉庫都沒有龍王的守護 → 不停手，沒有 Buff 繼續跑（會遇到野怪、較慢）；30 分鐘內不再重找')
+    # 沒有龍王的守護不停手（使用者 2026-10-13）：照樣往下跑，只是路上會遇到野怪、比較花時間。
+    # 使用者 2026-10-16：沒有就當沒有 → 這一輪（POTION_EMPTY_HOLD_S 內，存檔、重啟也記得）不再開背包 / 倉庫找（原本 30 分鐘後又找，一輪白找 4 次約 4 分鐘）
+    _potion_save(empty_at=time.time())
+    log(f'警告：背包和公共倉庫都沒有龍王的守護 → 不停手，沒有 Buff 繼續跑（會遇到野怪、較慢）；{POTION_EMPTY_HOLD_S // 3600} 小時內不再找')
     return False
 
 
-_POTION_EMPTY_AT = 0.0
+POTION_EMPTY_HOLD_S = 4 * 3600  # 確認沒有龍王的守護後多久內不再找（解任務 ~2.5 小時 + 後面階段；下一輪練等要好幾小時，屆時重新找）
 
 
 POTION_COOLDOWN_S = 480         # 上次吃之後這麼久內一律視為還有效（Buff 持續 10 分鐘），不重讀也不再吃（使用者 2026-10-13：有經驗加倍等其他 Buff，圖示位置 / 時間會讀錯 → 一直吃）
@@ -348,13 +348,31 @@ def _potion_eats() -> list:
         return []
 
 
-def _potion_record() -> None:
+def _potion_state() -> dict:
     import json
-    eats = _potion_eats() + [time.time()]
     try:
-        _potion_state_path().write_text(json.dumps({'eats': eats}), encoding='utf-8')
+        return json.loads(_potion_state_path().read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+
+
+def _potion_save(**kw) -> None:
+    import json
+    d = _potion_state()
+    d.update(kw)
+    try:
+        _potion_state_path().write_text(json.dumps(d), encoding='utf-8')
     except OSError:
         pass
+
+
+def potion_empty() -> bool:
+    """這一輪已確認背包與公共倉庫都沒有龍王的守護（POTION_EMPTY_HOLD_S 內）"""
+    return time.time() - _potion_state().get('empty_at', 0) < POTION_EMPTY_HOLD_S
+
+
+def _potion_record() -> None:
+    _potion_save(eats=_potion_eats() + [time.time()])
 
 
 q.LIST_OCR = (120, 140, 160, 330)       # 任務詳情只讀左邊清單欄（2026-10-13：右邊任務描述被當成任務名稱列，進行中的任務被誤判已完成）
@@ -442,8 +460,8 @@ def potion_check(force: bool = False) -> None:
     ③兩次吃間隔 >= POTION_HARD_GAP_S ④30 分鐘最多 POTION_MAX_PER_30MIN 顆"""
     global _last_check
     now = time.time()
-    if _POTION_EMPTY_AT and now - _POTION_EMPTY_AT < 1800:
-        return                                   # 剛確認過背包與公共倉庫都沒有：30 分鐘內不再找
+    if potion_empty():
+        return                                   # 這一輪已確認背包與公共倉庫都沒有：不再找
     eats = _potion_eats()
     last = max(eats) if eats else 0
     since = now - last if last else None
