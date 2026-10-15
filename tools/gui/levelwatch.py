@@ -297,6 +297,16 @@ def main() -> int:
             if any(v is not None for v in plv):
                 bad = 0                   # 面板開得起來 = 沒有驗證視窗擋著，HUD 讀不到只是 OCR 問題
             ensure_encounter('人物資訊面板檢查後')
+        if lv is None and not a.dry_run and not in_battle:
+            # HUD 讀不到（三位數等級常讀成「囀2」= 4轉112級）→ 開左上角人物資訊面板讀隊長等級（使用者 2026-10-15：
+            # 22222 / 11111 都因為 HUD 連續讀不到 5 次而停手）。面板讀得到就用它，轉數沿用已確認的
+            import fullrun1920 as fr
+            plv = fr.read_team_levels_retry()
+            ensure_encounter('人物資訊面板讀等級後')
+            if plv and plv[0] is not None:
+                lv = (good_trans if good_trans not in (None, -1) else -1, plv[0])
+                log(f'HUD 讀不到（{s.get("level")}）→ 人物資訊面板：隊長 {plv[0]} 級（5 人 {plv}）')
+                pending = plv[0]                  # 面板讀數可信：不用再等第二次一樣
         if lv is None:
             bad += 1
             bad_max = 15 if near_end and a.stop_at_end else 5      # 接近 131 時多給幾次，讓定期面板檢查有機會先確認
