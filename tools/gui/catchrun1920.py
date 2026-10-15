@@ -71,6 +71,20 @@ def bag_open() -> bool:
     return bool(c) and all(abs(a - b) <= 35 for a, b in zip(c[0], (197, 73, 49)))
 
 
+def open_bag(tries: int = 3) -> None:
+    """開背包並偵測；沒開成 → ESC 復原再點（使用者規則：打開 → 偵測 → 沒成功 ESC 再來）。
+    2026-10-15 22222 角色 5 抓貝魯卡：只點一次、沒開成就退出碼 11 停手（看門狗不重啟）"""
+    import time
+    for k in range(tries):
+        if bag_open():
+            return
+        if k > 0:
+            gui('key', '{ESC}', note='catchrun 背包沒開成 → ESC 復原')
+            time.sleep(0.8)
+        click(*BAG_BTN, wait=1500, note=f'catchrun 開背包（第 {k + 1}/{tries} 次）')
+    need_bag()
+
+
 def need_bag():
     """背包沒開 → 立刻停手（絕不在面板外亂點：會誤點任務追蹤 / 整理背包）"""
     if not bag_open():
@@ -149,7 +163,7 @@ def main(argv=None) -> int:
 
     if not a.no_bait_check:                    # 誘餌已經在背包（使用者 2026-10-12：檢查誘餌是多餘的）→ 整段略過
         # 1. 背包：切角色、看有沒有誘餌；沒有就從倉庫取出
-        click(*BAG_BTN, wait=1500, note='catchrun 開背包')
+        open_bag()
         click(ROLE_X, ROLE_Y[a.role - 1], wait=1200, note=f'catchrun 背包切角色 {a.role}')
         click(*TAB_BAG, wait=900, note='catchrun 背包分頁')
         pos = find_bait(bag_slots())
