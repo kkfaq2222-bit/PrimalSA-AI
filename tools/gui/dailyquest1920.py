@@ -119,6 +119,30 @@ def build_plan(pages):
     return plan, stores
 
 
+def reconcile_memory(mem: list, occ) -> list:
+    """背包格位記憶 vs 像素實際（occ = 有東西的格號）→ 回傳修正後的記憶（純函式，離線測試用）：
+    記憶空、實際有 → '?'（有東西、名字不確定）；記憶有、實際空 → None；其餘照舊"""
+    if occ is None:
+        return list(mem)
+    occ = set(occ)
+    return [('?' if v is None else v) if k in occ else None for k, v in enumerate(mem)]
+
+
+def reconcile_bag(dn) -> None:
+    """存倉 / 領料時背包本來就開著（倉庫分頁也看得到背包 15 格）：像素看一次哪幾格有東西（約 0.3 秒），校正格位記憶。
+    使用者 2026-10-15：背包記憶要能修正，不是每次繞過去數空格"""
+    import bag1920
+    try:
+        occ = bag1920.slots_with_item()
+    except Exception:
+        return
+    new = reconcile_memory(dn['bag'], occ)
+    diff = [k + 1 for k, (a, b) in enumerate(zip(dn['bag'], new)) if a != b]
+    if diff:
+        print(f'背包記憶校正：第 {diff} 格（像素實際 vs 記憶不同）')
+        dn['bag'][:] = new
+
+
 def bag_free_actual():
     """開背包用像素實際數空格（bag1920.slots_with_item：格心像素和空格底色比，不靠 OCR）→ 空格數；讀不到回 None"""
     import catchrun1920 as cr
@@ -865,6 +889,7 @@ def store_items(names, dn) -> set:
             dn['depot'][dn['depot'].index(None)] = nm
         stored.add(nm)
         print(f'已存公共倉庫：{nm}（背包第 {i + 1} 格）')
+    reconcile_bag(dn)
     cr.gui('key', '{ESC}', note='daily ESC')
     cr.click(*cr.CLOSE_BAG, wait=700, note='daily 關背包')
     return stored
@@ -1190,6 +1215,7 @@ def withdraw_items(names, dn) -> set:
         bag_acquire(dn, nm)
         got.add(nm)
         print(f'已從公共倉庫取出：{nm}（倉庫第 {i + 1} 格）')
+    reconcile_bag(dn)
     cr.gui('key', '{ESC}', note='daily ESC')
     cr.click(*cr.CLOSE_BAG, wait=700, note='daily 關背包')
     return got
