@@ -160,13 +160,19 @@ def assign_names(lines) -> list:
     return out
 
 
+# 格子上緣名稱是淺色字：舊讀法 -Dark 170 會把字拆成部首（2026-10-15 22222 4 轉禮盒在個人倉庫卻讀成空的 / 「頓家的頓家的」）。
+# 用 333 個人倉庫截圖離線比：-Dark 170 一格都沒讀到；-Dark 0 讀到第 12 格「新手禮」→ 三種讀法每格串起來（舊讀法保留當備援）
+NAME_OPTS = (('-Zooms', '3,4', '-Dark', '170'), ('-Zooms', '3,4', '-Dark', '0'), ('-Zooms', '2,3', '-Dark', '0'))
+
+
+def merge_reads(reads) -> list:
+    """同一區域多種讀法的分格結果 → 每格把各讀法的字串起來（比對用子字串 / 關鍵字，多串不影響）"""
+    return [''.join(r[i] for r in reads) for i in range(len(reads[0]))] if reads else []
+
+
 def bag_names() -> list:
     """背包 15 格名稱：整塊區域只跑一次 OCR（舊版每格 1~2 次、共 15~30 次 PowerShell，一個角色要 3~5 分鐘）"""
-    lines = ocr_lines(BAG_REGION, '-Zooms', '3,4', '-Dark', '170')
-    names = assign_names(lines)
-    if not any(names):                       # 保底：換一組設定再整塊讀一次
-        names = assign_names(ocr_lines(BAG_REGION, '-Zooms', '2,3'))
-    return names
+    return merge_reads([assign_names(ocr_lines(BAG_REGION, *o)) for o in NAME_OPTS])
 
 
 def candidates(kind: str, names: list, occupied=None) -> list:
@@ -281,14 +287,17 @@ DEPOT_REGION = (148, 140, 300, 250)
 
 def depot_names() -> list:
     """個人倉庫 20 格名稱：整塊 OCR 一次，依位置分格（名稱在格子上緣）"""
-    out = [''] * 20
-    for text, x, y in sorted(ocr_lines(DEPOT_REGION, '-Zooms', '3,4', '-Dark', '170'), key=lambda t: (t[2], t[1])):
-        row = min(range(4), key=lambda k: abs(y - (DEPOT_Y[k] - 16)))
-        col = min(range(5), key=lambda k: abs(x - DEPOT_X[k]))
-        if abs(y - (DEPOT_Y[row] - 16)) > 16 or abs(x - DEPOT_X[col]) > 30:
-            continue
-        out[row * 5 + col] += text.strip()
-    return out
+    reads = []
+    for opts in NAME_OPTS:
+        out = [''] * 20
+        for text, x, y in sorted(ocr_lines(DEPOT_REGION, *opts), key=lambda t: (t[2], t[1])):
+            row = min(range(4), key=lambda k: abs(y - (DEPOT_Y[k] - 16)))
+            col = min(range(5), key=lambda k: abs(x - DEPOT_X[k]))
+            if abs(y - (DEPOT_Y[row] - 16)) > 16 or abs(x - DEPOT_X[col]) > 30:
+                continue
+            out[row * 5 + col] += text.strip()
+        reads.append(out)
+    return merge_reads(reads)
 
 
 def take_box_from_depot(n: int, role_idx: int = 0) -> bool:
