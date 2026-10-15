@@ -16,6 +16,13 @@ def check(name, got, want):
     print('PASS' if ok else 'FAIL', name, '' if ok else f'got={got!r} want={want!r}')
 
 
+# 寵物欄空格顏色（2026-10-15 333 角色 5：藍龍黃點被當空格）
+import petdepot1920 as _pd  # noqa: E402
+for _n, _c, _w in (('腳印', (171, 135, 90), True), ('腳印2', (177, 145, 98), True), ('藍龍黃點', (195, 151, 0), False),
+                   ('格魯西斯', (96, 63, 40), False), ('紅寵多魯寶', (179, 98, 100), False)):
+    check(f'空格判斷 {_n}', _pd.is_empty_color(_c), _w)
+
+
 def names(phase):
     return [Path(a[1]).name for _, a in rp.plan('kkfaq22222', phase)]
 

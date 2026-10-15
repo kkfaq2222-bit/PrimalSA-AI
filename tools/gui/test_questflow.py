@@ -32,6 +32,28 @@ check('only 強盜 → 不做整理背包 2', qf.bag_in_only('__BAG2__', ['強�
 check('only 彌生 → 整理背包 2', qf.bag_in_only('__BAG2__', ['彌生和日美子']), True)
 check('only bag → 兩次都做', (qf.bag_in_only('__BAG__', ['bag']), qf.bag_in_only('__BAG2__', ['bag'])), (True, True))
 
+# 任務詳情白名單（2026-10-15 22222 夢德洞窟：進行中的任務那顆鈕是「重置任務」花 50000 石幣；實測 OCR 字串）
+check('進行中', qf.is_in_progress('|進行中進行中'), True)
+check('待接取不是進行中', qf.is_in_progress('待接取待接取'), False)
+check('待接取', qf.is_pending('|待接取'), True)
+check('空白不是待接取', qf.is_pending('|'), False)
+check('重置鈕不放行', qf.is_go_text('重倕務置倕務|~…重置蓩“'), False)
+check('傳送鈕放行', qf.is_go_text('|傳送傳送'), True)
+check('讀不到不放行', qf.is_go_text('|'), False)
+check('重置提示窗', qf.is_reset_text('你是否願意花費50000重置此任務？'), True)
+
+# 剛接的任務存「第 0 步」→ 下次從第 1 步開始（2026-10-15 22222 夢德洞窟：沒存檔 → 副標題 OCR 猜成第 3 步）
+_st6 = [(i, 'talk', '', 0) for i in range(1, 7)]
+check('剛接存第 0 步 → 第 1 步', qf.pick_start_step({'quest': '夢德洞窟', 'step': 0}, '夢德洞窟', _st6, False, None)[0], 1)
+check('別的任務的存檔不用', qf.pick_start_step({'quest': '強恩一族', 'step': 0}, '夢德洞窟', _st6, False, None)[0], None)
+
+# 練寵等級累計：None 不覆蓋、只升不降（2026-10-15 22222 金布伊）
+_lv = {1: 80, 2: 77}
+qf.merge_levels(_lv, {2: None, 3: 80, 4: None})
+check('None 不蓋掉已達標', _lv, {1: 80, 2: 77, 3: 80})
+qf.merge_levels(_lv, {3: 2})
+check('等級只升不降', _lv[3], 80)
+
 # 別名
 check('別名 mazu', qf.ALIAS['mazu'], '馬祖快遞')
 check('別名 fourjade', qf.ALIAS['fourjade'], '四寶玉之謎')

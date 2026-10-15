@@ -123,7 +123,15 @@ def slot_empty(i: int) -> bool:
     # 有寵物是深褐（R≈80~100）；空格腳印圖米色（R 145~190、G−B ≈ 40~47）。
     # 使用者 2026-10-14：紅色寵物（多魯寶）這一點是 (179,98,100)，只看 R>120 且 G>90 會被當空格 → organize / clear 完全沒讀到它
     # → 加上「米色」條件：G−B >= 25（紅 / 粉色的寵物身體 G−B 接近 0 或負）
-    return bool(c) and c[0][0] > 120 and c[0][1] > 90 and (c[0][1] - c[0][2]) >= 25
+    # 2026-10-15 333 角色 5：藍龍在這一點是黃色 (195,151,0)，G−B=151 也過 → 被當空格、fight 階段不按出戰
+    # → 米色腳印 B 約 90~98、G−B 約 40~47：再加 B >= 70、G−B <= 60（黃 / 橘色寵物 B 很低、G−B 很大）
+    return is_empty_color(c[0]) if c else False
+
+
+def is_empty_color(rgb) -> bool:
+    """寵物欄空格（米色腳印圖）的顏色判斷；純函式，離線測試用"""
+    r, g, b = rgb
+    return r > 120 and g > 90 and b >= 70 and 25 <= g - b <= 60
 
 
 def personal_tab_on() -> bool:

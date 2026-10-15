@@ -67,14 +67,10 @@ def parse_level(s: dict) -> tuple[int, int] | None:
 
 
 def first_read_ok(s: dict) -> bool:
-    """啟動後第一次確認等級用：隊長等級要讀到；寵物等級也讀到時等級差 ≤ 2（不一致不採信；轉生數不比，寵物的轉數跟人物無關）。
-    寵物等級讀不到（1920 的寵物欄常讀不到）就只靠隊長等級 + 後面「連續兩次相同」的確認。
-    只升不降的保護要有「已確認的等級」才擋得住；第一次若兩次都漏讀同樣位數（112 讀成 2）就會傳錯地圖。"""
-    a, b = _one_level(s.get('level')), _one_level(s.get('petLevel'))
-    if not a:
-        return False
-    # 只比等級：寵物的轉生數跟人物無關（人 2 轉、寵 0 轉很正常；舊版要求同轉生數 → 轉生後永遠「不一致」、只觀察不傳送，2026-10-13）
-    return bool(not b or abs(a[1] - b[1]) <= 2)
+    """啟動後第一次確認等級用：只看隊長（人物）等級有沒有讀到，不跟寵物核對（使用者 2026-10-15：
+    轉生後戰寵是個人倉庫領的，等級跟人物無關 → 舊版要求差 ≤ 2，333 隊長 1 級 / 寵物 7 級永遠不一致、不傳送不組隊）。
+    防 OCR 漏讀位數（112 讀成 2）靠後面「連續兩次讀到同一個數字才採信」+ 只升不降。"""
+    return bool(_one_level(s.get('level')))
 
 
 def target_for(level: int, stages=None) -> str | None:
@@ -304,8 +300,8 @@ def main() -> int:
                 time.sleep(a.every)
                 continue
             if good_level is None and not first_read_ok(s):
-                # 第一次確認：隊長與寵物等級要讀到且一致才採信，否則只觀察不傳送（見 first_read_ok）
-                log(f'啟動後第一次確認：隊長 {s.get("level")} / 寵物 {s.get("petLevel")} 讀不到隊長或兩者不一致，先觀察不傳送')
+                # 第一次確認：隊長（人物）等級要讀到才採信，否則只觀察不傳送（見 first_read_ok）
+                log(f'啟動後第一次確認：隊長 {s.get("level")} 讀不到，先觀察不傳送')
                 pending = None
                 time.sleep(a.every)
                 continue
@@ -403,5 +399,10 @@ if __name__ == '__main__':
     import notifyhalt
     rc = main()
     if rc:
+        try:
+            import failshot
+            failshot.shot('levelwatch', f'levelwatch 退出碼 {rc}')
+        except Exception:
+            pass
         notifyhalt.alert(f'levelwatch 退出碼 {rc}（見上方訊息）')
     sys.exit(rc)

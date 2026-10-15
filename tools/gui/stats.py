@@ -5,6 +5,7 @@
   tools/.cache/daily-done-*.json     每日任務已買記錄（舊資料也有，沒有時間）
   notes/exp-log-<視窗>.csv           練功等級記錄（levelwatch 每 30 秒一行）
   tools/.cache/stats-fullrun.jsonl   一條龍每個階段一行（fullrun1920 寫；2026-10-15 起）
+  tools/.cache/stats-fail.jsonl      停手 / 暫時性失敗當下的截圖（failshot 寫；圖在 tools/.cache/fail/）
 用法（專案根目錄）：
   uv run --no-project python tools/gui/stats.py            # 全部
   uv run --no-project python tools/gui/stats.py daily      # 只看每日任務（daily / grind / fullrun / errors 可多個）
@@ -215,6 +216,16 @@ def errors(since: str = '') -> None:
     if not groups:
         print('（沒有記錄）\n')
         return
+    sys.path.insert(0, str(HERE))
+    import failshot
+    shots = failshot.latest_by_reason()          # 停手當下的截圖（2026-10-15 起，tools/.cache/fail/）
+
+    def shot_of(reason):
+        if reason in shots:
+            return shots[reason]
+        body = re.sub(r'^退出碼 #：', '', reason)
+        hit = [v for k, v in shots.items() if body and body[:40] in k]
+        return hit[-1] if hit else ''
     for src in sorted(groups):
         items = sorted(groups[src].items(), key=lambda kv: -len(kv[1]))
         total = sum(len(v) for _, v in items)
@@ -224,10 +235,11 @@ def errors(since: str = '') -> None:
             ts2 = sorted(t for t in ts if t)
             a = ts2[0][5:16] if ts2 else '—'
             b = ts2[-1][5:16] if ts2 else '—'
-            print(f'  {len(ts):>4}  {a:<16} {b:<16} {reason}')
+            sh = shot_of(reason)
+            print(f'  {len(ts):>4}  {a:<16} {b:<16} {reason}' + (f'\n{"":>40}截圖：{sh}' if sh else ''))
         if len(items) > 12:
             print(f'  …另外 {len(items) - 12} 種原因')
-    print('（「#」= 數字；每日任務記錄沒有日期，所以沒有時間欄）\n')
+    print('（「#」= 數字；每日任務記錄沒有日期，所以沒有時間欄；截圖 = 該原因最近一次停手的畫面）\n')
 
 
 def main() -> int:

@@ -26,6 +26,7 @@ sys.path.insert(0, str(HERE))
 import q1920 as q  # noqa: E402
 import pausegate  # noqa: E402
 import notifyhalt  # noqa: E402
+import failshot  # noqa: E402
 
 # ---- 座標（截圖 960×508，2026-10-12 在 22222 實機量）----
 BAG_BTN = (757, 462)
@@ -89,14 +90,6 @@ def log(msg: str) -> None:
             pass
 
 
-def snapshot(tag: str) -> None:
-    """停手 / 出錯當下存一張畫面：tools/.cache/questflow-<client>-<tag>.png"""
-    try:
-        q.uk().gui('shot', f'questflow-{q.CLIENT}-{tag}.png')
-    except Exception:
-        pass
-
-
 # ---- 純函式（離線測試用）----
 def parse_remaining(txt: str):
     """'0天0時9分49秒' → 589；讀不到回 None（OCR 常把「時」讀成別字，所以只要抓到分 / 秒就算）"""
@@ -113,6 +106,24 @@ def parse_remaining(txt: str):
 def last_boss_step(steps) -> int:
     """steps = q.plan_steps 回傳的 [(step, kind, desc, map)] → 最後一個戰鬥步的步號（沒有戰鬥回 0）"""
     return max([st for st, kind, _, _ in steps if kind == 'boss'] or [0])
+
+
+TIP_OCR = (345, 190, 270, 80)      # 「提示」視窗內文（例：你是否願意花費 50000 重置此任務？）
+is_reset_text, is_go_text, go_button_text = q.is_reset_text, q.is_go_text, q.go_button_text   # 任務詳情下方大按鈕白名單（q1920）
+
+
+def is_in_progress(txt: str) -> bool:
+    """任務詳情某列下方狀態文字是不是「進行中」（OCR 常只讀到一半）"""
+    return '進行' in txt or '行中' in txt
+
+
+def is_pending(txt: str) -> bool:
+    return '待接' in txt or '接取' in txt
+
+
+def row_status(y: int) -> str:
+    """任務詳情某列（名稱 y）下方狀態格單獨 OCR：清單整塊 OCR 常漏掉黃色「進行中」/ 部分「待接取」（2026-10-15 22222 實測）"""
+    return ''.join(q.uk().ocr((135, y + 10, 130, 24), '-Zooms', '3,4'))
 
 
 def bag_in_only(bag: str, only) -> bool:
@@ -693,6 +704,7 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
         q.require_team()
     keys = track_keys(name)
     if not open_detail(side):
+        failshot.pre('questflow')                # ESC 復原前先存圖（停手訊息的 Halt 會沿用這張）
         q.key('{ESC}')
         raise q.Halt(q.EXIT_TIMEOUT, '任務詳情面板開不起來（3 輪 ESC 重開都失敗）：不拖曳、停手，等看門狗重啟再試')
     hit, rows = [], []
@@ -700,27 +712,49 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
     rows = sorted(q._list_rows(), key=lambda r: r[1])
     hit = [r for r in rows if name in r[0] or any(k in r[0] for k in keys)]
     if len(hit) <= nth:
+        failshot.pre('questflow')
         q.key('{ESC}')
         raise q.Halt(q.EXIT_NOQUEST, f'任務詳情「{"支線" if side else "主線"}」清單找不到「{name}」（讀到：{[r[0] for r in rows][:6]}）：停手，不接其他任務')
     top = hit[nth]
-    if not side:
-        below = [r for r in rows if top[1] + 8 <= r[1] <= top[1] + 45]
-        if not any('待接' in r[0] or '接取' in r[0] for r in below):
-            log(f'「{name}」那一列不是「待接取」（下方文字 {[r[0] for r in below]}），視為已接，不重接')
-            q.key('{ESC}')
-            return False
+    below = [r for r in rows if top[1] + 8 <= r[1] <= top[1] + 45]
+    btxt = ''.join(r[0] for r in below) + '|' + row_status(top[1])
+    if is_in_progress(btxt):
+        # 「進行中」= 正在解（使用者 2026-10-15）：絕不按下方按鈕 —— 進行中的任務那顆鈕是「重置任務」（花 50000 石幣），
+        # 不是傳送（2026-10-15 22222 夢德洞窟：帳本 paused → 回來重接 → 連按重置）。回 False，呼叫端去追蹤欄找來解
+        log(f'「{name}」那一列是「進行中」（下方文字 {btxt!r}）：正在解的任務，不按重置 / 傳送，改去追蹤欄接著解')
+        q.key('{ESC}')
+        return False
+    if not is_pending(btxt):
+        # 白名單：要讀到「待接取」才接；讀不到就當已接（去追蹤欄找，找不到才停手），絕不盲按
+        log(f'「{name}」那一列不是「待接取」（下方文字 {btxt!r}），視為已接，不重接')
+        q.key('{ESC}')
+        return False
     q.click((200, top[1]), wait_ms=900, note=f'questflow 選「{top[0]}」')
+    go = go_button_text()
+    if not is_go_text(go):
+        failshot.pre('questflow')
+        q.key('{ESC}')
+        raise q.Halt(q.EXIT_HALT, f'「{name}」下方按鈕是「{go}」不是傳送（任務已在進行中？）：不按、停手，避免花石幣重置任務')
     q.click(q.GO_BTN, wait_ms=3500, note='questflow 傳送')
     s = q.wait_state(('DIALOG', 'REWARD'), timeout=15)
+    if s == 'REWARD':                            # 「獲得物品」畫面擋在前面：關掉再等對話窗，不算失敗
+        q.key('{ESC}')
+        s = q.wait_state(('DIALOG',), timeout=10)
     if s != 'DIALOG':
-        # 可能跳出「提示：接取任務條件不達標」→ 面板 + 提示窗都還開著：先 ESC、面板還在就點「確定」，把畫面還原再停手
-        for _ in range(2):
-            q.key('{ESC}')
-            q.sleep(0.8)
+        failshot.pre('questflow')                # 提示窗 / 戰鬥畫面還在時先拍，下面 ESC 復原後就看不到了
+        tip = ''.join(q.uk().ocr(TIP_OCR))
+        log(f'傳送後等不到對話窗：畫面狀態 {s}；提示窗文字 {tip!r}')
+        # 復原只按 ESC；「確定」只在提示窗明確是「條件不達標」時才按（重置 / 花費類的提示窗絕不按確定）
+        for _ in range(3):
             if not detail_panel_open():
                 break
-            q.click((478, 343), wait_ms=700, note='questflow 提示窗「確定」')
-        raise q.Halt(q.EXIT_TIMEOUT, '傳送後沒出現 NPC 對話窗（已 ESC / 確定 復原畫面）')
+            tip = ''.join(q.uk().ocr(TIP_OCR))
+            if tip and not is_reset_text(tip) and ('不達標' in tip or '條件' in tip):
+                q.click((478, 343), wait_ms=700, note='questflow 提示窗「確定」（條件不達標）')
+            else:
+                q.key('{ESC}')
+                q.sleep(0.8)
+        raise q.Halt(q.EXIT_TIMEOUT, f'傳送後沒出現 NPC 對話窗（畫面 {s}；已 ESC 復原畫面）')
     # 猜謎三兄弟：點「接藍暴任務」後會跳「進入裏面嗎？」確認框，必須按「接受」任務才算接下（22222 2026-10-11 實測：按接受只是進 811:29,15、任務已承接）；
     # 先前 ESC 掉它 → 任務詳情仍是「待接取」→ 追蹤欄找不到（2026-10-13 一條龍停手原因）。其他任務維持不自動按（避免誤進副本）。
     res = q.talk(allow_confirm=name in CONFIRM_ACCEPT)
@@ -1028,22 +1062,31 @@ def train_pets_slot(keyword: str, target: int, opts: dict) -> None:
             got = levels_at(keyword, slot, [1], fix_battle=True)
         except q.Halt:
             continue                                  # 戰鬥中開不了面板：下一輪再讀
-        last.update(got)
+        merge_levels(last, got)
         log(f'練寵進度（{int(q.clock() - t0)} 秒）：角色 1 = {got.get(1)}（目標 {target}）')
-        if got.get(1) is None or got[1] < target:
+        if last.get(1) is None or last[1] < target:
             continue
+        todo = [r for r in roles[1:] if last.get(r) is None or last[r] < target]   # 已達標的不再重讀
         try:
-            rest = levels_at(keyword, slot, roles[1:], fix_battle=True)   # 角色 1 達標 → 檢查角色 2~5
+            rest = levels_at(keyword, slot, todo, fix_battle=True) if todo else {}   # 角色 1 達標 → 檢查還沒達標的角色
         except q.Halt:
             continue
-        last.update(rest)
-        log(f'角色 1 達標，檢查角色 2~5：{rest}')
+        merge_levels(last, rest)
+        log(f'角色 1 達標，檢查角色 {todo}：{rest}；累計 {last}')
         if all(last.get(r) is not None and last[r] >= target for r in roles):
             break
     q.set_ass(encounter=False)
     q.wait_battle_end()
     log(f'「{keyword}」5 隻都到 {target} 級，已關原地遇敵')
     rest_quest_pets(keyword)
+
+
+def merge_levels(last: dict, new: dict) -> None:
+    """練寵等級累計：讀不到（None）不覆蓋、等級只升不降（2026-10-15 22222 金布伊：角色 2 先讀到 77，
+    下一輪名字 OCR 沒讀到 → 整個被 None 蓋掉 → 5 隻都到了還一直練）"""
+    for r, v in new.items():
+        if v is not None and (last.get(r) is None or v > last[r]):
+            last[r] = v
 
 
 def train_pets(keyword: str, target: int, opts: dict | None = None) -> None:
@@ -1142,11 +1185,27 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
             row = find_track_row(name, scroll=False, reveal=False)
     fresh = False
     if row is None:
-        accept_top(name, side=name not in ADULT and not stop_after_last_boss)    # 成人儀式、漆黑都在任務詳情「主線」分頁
-        fresh = True
-        row = find_track_row(name, reveal=name in TRAIN_STEPS)
+        try:
+            fresh = accept_top(name, side=name not in ADULT and not stop_after_last_boss)    # 成人儀式、漆黑都在任務詳情「主線」分頁
+        except q.Halt as h:
+            # 正在解的任務（帳本 doing / paused）追蹤欄、任務詳情都找不到 → 多半是剛解完（2026-10-15 22222 夢德洞窟：
+            # 起始步猜錯多做幾輪，最後一輪任務已完成 → 找不到就停手、看門狗重啟）。任務詳情判讀為「已完成」才記完成繼續，否則照停手
+            if h.code != q.EXIT_NOQUEST or led.get('status') not in ('doing', 'paused') or stop_after_last_boss:
+                raise
+            st = detail_status(name, side=name not in ADULT)
+            if st != '已完成':
+                raise
+            log(f'「{name}」追蹤欄、任務詳情都找不到，任務詳情判讀為已完成（帳本原本 {led.get("status")}）→ 記完成，接著做下一個')
+            q.ledger_mark(name, 'done', 'questflow：解到一半後追蹤欄 / 任務詳情都找不到 → 判讀已完成')
+            q.save_state({'quest': name, 'step': None, 'done': True, 'at': time.strftime('%F %T')})
+            return
+        if fresh:                                # 剛接：先記「做完第 0 步」，這次中途停手的話下次從第 1 步開始，不靠副標題 OCR 猜
+            q.save_state({'quest': name, 'step': 0, 'at': time.strftime('%F %T')})
+        # 回 False = 任務詳情顯示「進行中」/ 不是待接取 → 正在解的任務：追蹤欄往下拉找出來接著解（不重接、不重置）
+        row = find_track_row(name, reveal=name in TRAIN_STEPS) if fresh else find_track_row(name, scroll=True, reveal=True)
         if row is None:
-            raise q.Halt(q.EXIT_NOQUEST, f'接完任務後追蹤欄找不到「{name}」')
+            raise q.Halt(q.EXIT_NOQUEST, f'接完任務後追蹤欄找不到「{name}」' if fresh else
+                         f'「{name}」任務詳情是進行中，但追蹤欄找不到：停手（不按重置）')
     # 起始步：--from-step 明講就用它；否則才用追蹤欄副標題 OCR 猜（OCR 會猜錯：英雄島後傳曾把步 7 猜成步 11）
     if stop_after_last_boss and from_step is None and not fresh:
         from_step, src = None, ''
@@ -1481,14 +1540,13 @@ def main(argv=None) -> int:
         log(f'停手（退出碼 {h.code}）：{h.msg}')
         q.note(f'questflow 停手：{h.msg}')
         mark_doing_paused(f'停手（退出碼 {h.code}）：{h.msg}')
-        snapshot('halt')
         notifyhalt.alert(f'questflow 退出碼 {h.code} {h.msg}'[:80])
         return h.code
     except Exception as e:                       # 腳本自己的錯：留 traceback + 畫面，方便事後修
         import traceback
         log('腳本例外：' + ''.join(traceback.format_exception(e)).strip())
         mark_doing_paused(f'腳本例外：{e}')
-        snapshot('error')
+        failshot.shot('questflow', f'腳本例外：{e}')
         notifyhalt.alert(f'questflow 腳本例外 {e}'[:80])
         return 99
 
