@@ -79,6 +79,7 @@ def main():
         return 2
 
     def read_tab_name():
+        # 丟棄用：維持舊讀法（不加 -Dark 0）——讀越多字、誤中丟棄片段的機會越大，丟棄不可逆（2026-10-15）
         return (''.join(uikit.ocr(TAB_NAME_BOX, '-Zooms', '2,3')) + ''.join(uikit.ocr(TAB_NAME_BOX, '-Zooms', '3,4'))).strip()
 
     def filled():

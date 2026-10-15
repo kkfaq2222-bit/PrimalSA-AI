@@ -73,6 +73,16 @@ def first_read_ok(s: dict) -> bool:
     return bool(_one_level(s.get('level')))
 
 
+def is_misread_down(good_trans, good_level, trans, level) -> bool:
+    """已確認 good_trans 轉 good_level 級，這次讀到 trans 轉 level 級 → 是不是「往下掉」的誤讀（只升不降）。
+    轉數不明（-1 / None）就只比等級；轉數變小 = 讀錯；轉數變大 = 真的轉生，不擋（純函式，離線測試用）"""
+    if good_trans in (None, -1) or trans in (None, -1):
+        return level < good_level
+    if trans < good_trans:
+        return True
+    return trans == good_trans and level < good_level
+
+
 def target_for(level: int, stages=None) -> str | None:
     return next((name for need, name in (stages or STAGES) if level >= need), None)
 
@@ -295,8 +305,10 @@ def main() -> int:
             trans, level = lv
             # OCR 會漏讀位數（112 讀成 2）：等級只升不降；比已確認的等級低就不信（2026-10-10 112 級被讀成 2 級傳錯地圖）
             # 另外要連續兩次讀到同一個數字才採信
-            if good_level is not None and good_trans == trans and level < good_level:
-                log(f'讀到 {level} 級，比已確認的 {good_level} 級低，視為 OCR 誤讀，略過')
+            # 轉生數也只升不降：讀不到（-1）當作沒變、讀到比較小 = 讀錯（2026-10-15 22222 4轉37級被讀成「4 級」且轉數不同
+            # → 舊條件只在轉數相同才擋 → 當成剛轉生、傳回 1 級的柯奧龜洞掛了 30 分鐘）。轉數變大（真的轉生）才重新算
+            if good_level is not None and is_misread_down(good_trans, good_level, trans, level):
+                log(f'讀到 {trans}轉{level} 級，比已確認的 {good_trans}轉{good_level} 級低，視為 OCR 誤讀，略過')
                 time.sleep(a.every)
                 continue
             if good_level is None and not first_read_ok(s):

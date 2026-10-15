@@ -238,6 +238,15 @@ def ocr(box, *opts) -> list:
     return _ocr_once(box, *alt)
 
 
+NAME_READS = (('-Zooms', '2,3'), ('-Zooms', '3,4'), ('-Zooms', '2,3', '-Dark', '0'), ('-Zooms', '3,4', '-Dark', '0'))
+
+
+def ocr_name(box) -> str:
+    """名稱框（寵物名 / 道具浮窗標題 / 下拉選項等淺色字）共用讀法：舊讀法 + -Dark 0（不二值化）兩種縮放，全部串起來。
+    呼叫端用子字串 / 片段比對，多串不影響；淺色字被 -Dark 拆成部首時 -Dark 0 那兩次通常讀得對（2026-10-15 全面套用）"""
+    return ''.join(''.join(_ocr_once(box, *o)) for o in NAME_READS).strip()
+
+
 def _ocr_once(box, *opts) -> list:
     import subprocess
     try:

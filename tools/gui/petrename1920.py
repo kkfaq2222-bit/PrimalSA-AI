@@ -38,7 +38,7 @@ def main():
     def read_name() -> str:
         """多種倍率讀名稱，回傳「最像數字名」的那個（有數字名就一定要抓到）；全讀不到回 ''"""
         outs = []
-        for opts in (('-Zooms', '2,3'), ('-Zooms', '3,4'), ('-Zooms', '3,4', '-Dark', '130')):
+        for opts in (('-Zooms', '2,3'), ('-Zooms', '3,4'), ('-Zooms', '3,4', '-Dark', '130'), ('-Zooms', '3,4', '-Dark', '0')):
             try:
                 outs.append(''.join(uikit.ocr(NAME_BOX, *opts)).strip())
             except Exception:

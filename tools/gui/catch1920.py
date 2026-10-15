@@ -70,7 +70,8 @@ def tab_on() -> bool:
 
 
 def read_field(box) -> str:
-    return ocr(box, '-Zooms', '2,3')
+    import uikit
+    return uikit.ocr_name(box)        # 下拉選項 / 欄位：舊讀法 + -Dark 0（老虎系那列舊讀法讀不到，2026-10-15）
 
 
 def row_y(i: int) -> int:

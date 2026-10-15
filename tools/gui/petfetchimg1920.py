@@ -273,7 +273,7 @@ def _measure_selected() -> tuple:
         return True, ink, width, '', similarity_score(ink, width, '')
     import questflow1920 as qf
     txt = ''
-    for opts in (('-Zooms', '3,4'), ('-Zooms', '2,3'), ('-Zooms', '3,4', '-Dark', '130')):
+    for opts in (('-Zooms', '3,4'), ('-Zooms', '2,3'), ('-Zooms', '3,4', '-Dark', '130'), ('-Zooms', '3,4', '-Dark', '0')):
         try:
             t = ''.join(uikit.ocr(qf.PET_NAME_BOX, *opts))
         except Exception:

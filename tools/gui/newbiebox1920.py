@@ -100,7 +100,8 @@ CUR_ROLE = [0]        # 目前處理的角色（0 起算）；背包被關掉後
 
 def pop_title() -> str:
     import bag1920 as b
-    return b.ocr(POP_NAME, '-Zooms', '2,3').strip()
+    import uikit
+    return uikit.ocr_name(POP_NAME)   # 道具浮窗標題：舊讀法 + -Dark 0（2026-10-15）
 
 
 def reopen_bag() -> None:

@@ -30,6 +30,14 @@ check('parse 轉字讀壞', lw.parse_level({'level': '嘨117', 'petLevel': None}
 check('parse 轉字讀壞取較高等級', lw.parse_level({'level': '嘨117', 'petLevel': '0轉112級'}), (-1, 117))
 check('parse 單位數不算', lw.parse_level({'level': '7', 'petLevel': None}), None)
 
+# 等級 / 轉數只升不降（2026-10-15 22222 4轉37級 → 讀成 4 級、轉數不同 → 傳回 1 級練功點）
+check('同轉降級 = 誤讀', lw.is_misread_down(4, 37, 4, 4), True)
+check('轉數讀不到降級 = 誤讀', lw.is_misread_down(4, 37, -1, 4), True)
+check('轉數變小 = 誤讀', lw.is_misread_down(4, 37, 1, 40), True)
+check('真的轉生（轉數變大）不擋', lw.is_misread_down(4, 131, 5, 1), False)
+check('同轉升級不擋', lw.is_misread_down(4, 37, 4, 38), False)
+check('已確認轉數不明只比等級', lw.is_misread_down(-1, 37, 4, 4), True)
+
 # first_read_ok：只看隊長（人物）等級有沒有讀到，不跟寵物核對（使用者 2026-10-15）
 check('first 兩者一致', lw.first_read_ok({'level': '0轉112級', 'petLevel': '0轉112級'}), True)
 check('first 寵物等級不同也可（轉生後戰寵 7 級、隊長 1 級）', lw.first_read_ok({'level': '3轉1級', 'petLevel': '0轉7級'}), True)

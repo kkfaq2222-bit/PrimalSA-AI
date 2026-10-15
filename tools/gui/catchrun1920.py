@@ -58,7 +58,7 @@ POP_DESC = (340, 235, 300, 30)          # 浮窗「詳細介紹」內文
 def title() -> str:
     """浮窗標題 + 內文 OCR 合併（誘餌：標題「寵物誘餌」、內文「用於寵物圖鑑抓捕寵物寶寶」；OCR 會混字，所以兩處一起看）"""
     import uikit
-    t = ''.join(uikit.ocr(POP_NAME, '-Zooms', '2,3')).strip() + ''.join(uikit.ocr(POP_DESC, '-Zooms', '2,3')).strip()
+    t = uikit.ocr_name(POP_NAME) + ''.join(uikit.ocr(POP_DESC, '-Zooms', '2,3')).strip()   # 標題：舊讀法 + -Dark 0
     return ('誘餌 ' + t) if any(k in t for k in ('誘餌', '物誘', '誘飯', '抓捕', '圖鑑')) else t
 
 

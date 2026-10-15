@@ -56,7 +56,7 @@ def main():
             continue
         for i in range(2):                 # 轉生後寵物欄只有老虎 + 飛龍；空格會殘留上一隻的選取，不要掃
             pd.click(pd.SLOT_X, pd.SLOT_Y[i], wait=800, note=f'petsetup 第 {i + 1} 格')
-            nm =''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '2,3')) + ''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '3,4'))
+            nm =uikit.ocr_name((300, 90, 160, 34))
             if '朵拉' in nm:
                 pd.click(*FIGHT_BTN, wait=1000, note='petsetup 朵拉比斯 出戰')
                 pd.log(f'角色{r} 朵拉比斯（第 {i + 1} 格）已按出戰')

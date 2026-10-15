@@ -107,7 +107,7 @@ def take_first_personal(pd, uikit, r, tries=3) -> bool:
         if '取出' not in lab:
             pd.log(f'角色{r} 個人倉庫第 1 格按鈕不是「取出寵物」（{lab!r}；可能是空的）')
             continue
-        nm = ''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '2,3'))
+        nm = uikit.ocr_name((300, 90, 160, 34))
         pd.click(*TAKE_BTN, wait=1200, note='getgold 取出個人倉庫第 1 格')
         time.sleep(0.6)
         other = 0 if r != 1 else 1        # 切別人再切回來才會刷新寵物欄
@@ -211,7 +211,7 @@ def main():
             for idx in order:
                 x, y = XS[idx % 5], YS[idx // 5]
                 pd.click(x, y, wait=700, note=f'getgold 倉庫第 {idx + 1} 格')
-                nm = ''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '2,3')) + ''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '3,4'))
+                nm = uikit.ocr_name((300, 90, 160, 34))
                 key = next((k for k in TARGETS if k in nm and k not in found), None)
                 if not key:
                     continue

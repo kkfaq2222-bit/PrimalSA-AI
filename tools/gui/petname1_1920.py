@@ -53,7 +53,7 @@ def rename_slot(pd, i: int, name: str) -> bool:
         import questflow1920 as qf
         from petfetchimg1920 import is_numeric_name
         txts = [''.join(uikit.ocr(qf.PET_NAME_BOX, *o)).strip()
-                for o in (('-Zooms', '3,4'), ('-Zooms', '2,3'), ('-Zooms', '3,4', '-Dark', '130'))]
+                for o in (('-Zooms', '3,4'), ('-Zooms', '2,3'), ('-Zooms', '3,4', '-Dark', '130'), ('-Zooms', '3,4', '-Dark', '0'))]
         has_digits = any(is_numeric_name(t) or len(re.findall(r'\d', t)) >= 2 for t in txts)
         pd.log(f'第 {i + 1} 格名稱 OCR：{txts}（有數字={has_digits}）')
         return (not has_digits) and got < cur * 0.7

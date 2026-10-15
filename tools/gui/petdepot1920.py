@@ -55,7 +55,7 @@ def read_pet_name(uikit, tries=3):
     """讀選取寵物的名字：讀空就等 0.5 秒重讀，最多 tries 次"""
     nm = ''
     for _ in range(tries):
-        nm = ''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '2,3')) + ''.join(uikit.ocr((300, 90, 160, 34), '-Zooms', '3,4'))
+        nm = uikit.ocr_name((300, 90, 160, 34))
         if nm.strip():
             break
         time.sleep(0.5)
@@ -146,7 +146,8 @@ def goto_depot() -> None:
 
 
 def pet_name() -> str:
-    return ocr(NAME_BOX, '-Zooms', '2,3')
+    import uikit
+    return uikit.ocr_name(NAME_BOX)          # 存倉 / 領寵用（可補救）：舊讀法 + -Dark 0（2026-10-15）
 
 
 def load_log() -> dict:
