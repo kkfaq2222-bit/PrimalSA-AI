@@ -20,8 +20,8 @@ def check(name, got, want):
     print(('PASS ' if ok else 'FAIL ') + name + ('' if ok else f'  got={got!r} want={want!r}'))
 
 
-# parse_level：隊長漏讀位數（112 讀成 2）時取寵物等級較大者
-check('parse 隊長漏位數取寵物', lw.parse_level({'level': '0轉2級', 'petLevel': '0轉112級'}), (0, 112))
+# parse_level：只看人物等級，不看寵物（使用者 2026-10-15；轉生後戰寵等級跟人物無關）
+check('parse 不取寵物（寵物 0轉116、人物 3轉99）', lw.parse_level({'level': '3轉99級', 'petLevel': '0轉116級'}), (3, 99))
 check('parse 兩者一致', lw.parse_level({'level': '0轉112級', 'petLevel': '0轉112級'}), (0, 112))
 check('parse 只讀到隊長', lw.parse_level({'level': '0轉45級'}), (0, 45))
 check('parse 都讀不到', lw.parse_level({'level': None, 'petLevel': ''}), None)

@@ -58,12 +58,10 @@ def _one_level(v):
 
 
 def parse_level(s: dict) -> tuple[int, int] | None:
-    """隊長等級。隊長等級的 OCR 會漏讀位數（112 級讀成 2），所以同時看寵物等級取較大者
-    （練功階段隊長和戰寵等級相同；寵物欄讀到的位數比較穩）。"""
-    a, b = _one_level(s.get('level')), _one_level(s.get('petLevel'))
-    if a and b:
-        return max(a, b, key=lambda x: x[1])
-    return a or b
+    """隊長（人物）等級，只看人物、不看寵物（使用者 2026-10-15：只跟人物核對）。
+    舊版取「隊長 / 寵物較大者」：轉生後戰寵是個人倉庫領的、等級跟人物無關 → 333 / 22222 讀到寵物的「0轉116級」當成人物等級。
+    OCR 漏讀位數（112 讀成 2）靠「連續兩次相同才採信」+ 只升不降擋。"""
+    return _one_level(s.get('level'))
 
 
 def first_read_ok(s: dict) -> bool:
