@@ -35,5 +35,11 @@ kplan = [(1, 'A', [(n, 1) for n in keep]), (2, 'B', [('x', 1), ('y', 1)])]
 check('留身上的多 → 不併', dr.craft_groups([1, 2], kplan, keep, dq.PEPPERS), [[1], [2]])
 check('每組都不超過 15 格', all(len(g) >= 1 for g in dr.craft_groups([1, 2, 3], plan, [], dq.PEPPERS)), True)
 
+# 背包記憶校正（像素實際 vs 記憶）
+mem = ['A', None, 'B', None, None] + [None] * 10
+check('記憶空、實際有 → ?', dq.reconcile_memory(mem, [0, 1, 2])[:3], ['A', '?', 'B'])
+check('記憶有、實際空 → None', dq.reconcile_memory(mem, [0])[:3], ['A', None, None])
+check('讀不到像素 → 不改', dq.reconcile_memory(mem, None), mem)
+
 print(f'\n失敗 {fails}')
 sys.exit(1 if fails else 0)
