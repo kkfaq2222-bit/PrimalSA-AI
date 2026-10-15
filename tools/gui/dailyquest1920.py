@@ -119,6 +119,19 @@ def build_plan(pages):
     return plan, stores
 
 
+def keep_list(plan_all) -> list:
+    """留身上的材料（使用者 2026-10-14）：第 1 頁全部留；第 2 頁（再來第 3 頁）依剩餘格數補到 BAG_KINDS_MAX 種；
+    第 4、5 頁存倉，但與第 1 頁重複的材料一律留身上。胡椒不算（從個人倉庫拿，不用買、不佔名額；2026-10-15）"""
+    keep = []
+    for pg in (1, 2, 3):
+        for p_, _it, mats in plan_all:
+            if p_ == pg:
+                for n, _q in mats:
+                    if n not in keep and n not in PEPPERS and (pg == 1 or len(keep) < BAG_KINDS_MAX):
+                        keep.append(n)
+    return keep
+
+
 def print_plan(pages) -> dict:
     plan, stores = build_plan(pages)
     total = collections.Counter()
@@ -146,6 +159,13 @@ def print_plan(pages) -> dict:
     print('依店分組：')
     for s, items in by_store.items():
         print(f'  {s}：' + '、'.join(items))
+    keep = keep_list(plan)
+    store = [n for n in total if n not in keep and n not in PEPPERS and n in stores]
+    print(f'預計留身上 {len(keep)} 種：' + ('、'.join(f'{n}×{total[n]}' for n in keep) or '（無）'))
+    print(f'預計存公共倉庫 {len(store)} 種：' + ('、'.join(f'{n}×{total[n]}' for n in store) or '（無）'))
+    peps = [n for n in PEPPERS if n in total]
+    if peps:
+        print('個人倉庫取用（胡椒，用完放回原位）：' + '、'.join(f'{n}×{total[n]}' for n in peps))
     return dict(total)
 
 
@@ -344,13 +364,7 @@ def main(argv=None) -> int:
         done_path.write_text(json.dumps(dn, ensure_ascii=False), encoding='utf-8')
     # 留身上的材料（使用者 2026-10-14）：第 1 頁全部留；第 2 頁（再來第 3 頁）依剩餘格數補到 BAG_KINDS_MAX 種；
     # 第 4、5 頁存倉，但與第 1 頁重複的材料一律留身上
-    keep = []
-    for pg in (1, 2, 3):
-        for p_, _it, mats in plan_all:
-            if p_ == pg:
-                for n, _q in mats:
-                    if n not in keep and (pg == 1 or len(keep) < BAG_KINDS_MAX):
-                        keep.append(n)
+    keep = keep_list(plan_all)
     p12 = set(keep)
     print(f'留身上 {len(keep)} 種：' + '、'.join(keep))
     dn.setdefault('stored', [])
