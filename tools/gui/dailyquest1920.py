@@ -119,6 +119,25 @@ def build_plan(pages):
     return plan, stores
 
 
+def bag_free_actual():
+    """開背包用像素實際數空格（bag1920.slots_with_item：格心像素和空格底色比，不靠 OCR）→ 空格數；讀不到回 None"""
+    import catchrun1920 as cr
+    import bag1920
+    try:
+        for _ in range(2):
+            cr.gui('key', '{ESC}', note='daily 數空格前 ESC')
+            time.sleep(0.5)
+        cr.open_bag()
+        cr.click(*cr.TAB_BAG, wait=900, note='daily 背包分頁（數空格）')
+        occ = bag1920.slots_with_item()
+        return None if occ is None else 15 - len(occ)
+    except SystemExit:
+        return None
+    finally:
+        if cr.bag_open():                              # 背包真的開著才點關閉（沒開時那個位置是遊戲畫面，點了會走路）
+            cr.click(*cr.CLOSE_BAG, wait=700, note='daily 關背包（數空格）')
+
+
 def shop_route(shops, start):
     """店家照位置排路線（總走路距離最短，純函式）：shops = [(店資料 (名, id, 地圖, x, y), 品項)]；start = (x, y)。
     店 ≤ 8 間就試遍所有順序取最短（2009 的店幾乎在同一直線 x=27，「每次挑最近」會走到底又折回）；更多才用最近優先。"""
@@ -423,9 +442,16 @@ def main(argv=None) -> int:
 
     while queue:
         st, items = queue.pop(0)
-        need = len({n for n, _q in items if n not in dn['bag']}) + BAG_MARGIN
-        if dn['bag'].count(None) < need:
-            store_pending(f'背包剩 {dn["bag"].count(None)} 格、{st[0]} 要 {need} 格')
+        # 這間店要的格數（要買、背包還沒有的種類）。記憶有「?」（不確定的格）才開背包實際數空格（約 3 秒）；
+        # 實際數過就不加餘裕，沒數就多留 BAG_MARGIN 格吸收記憶誤差（使用者 2026-10-15：智慧判斷要存多少）
+        need = len({n for n, _q in items if n not in dn['bag']})
+        free, how = dn['bag'].count(None), '記憶'
+        if '?' in dn['bag']:
+            af = bag_free_actual()
+            if af is not None:
+                free, how = af, '實際數'
+        if free < need + (0 if how == '實際數' else BAG_MARGIN):
+            store_pending(f'背包剩 {free} 格（{how}）、{st[0]} 要 {need} 格')
         opened = False
         offscreen = False
         for _try in range(len(CLICK_JITTER)):
@@ -1547,8 +1573,10 @@ def buy_item_idx(pd, uikit, order, name, qty, state) -> int:
             time.sleep(0.6)
         if t.strip():
             break
-    middle = idx >= 8 and not (max_off > 0 and row >= max_off)   # 拖動幅度不保證每次一樣 → 中間段（第 9 項起、且不在最後 5 列）一定驗證商品
-    if middle and not title_matches(name, t, order):   # 前 8 項 / 最後 5 列用固定位置，不驗；中間段驗證標題
+    # 第 9 項起（有捲動）一律驗證商品標題：中間段（拖動幅度不保證）＋ 最後 5 列（長拖到底，使用者 2026-10-15：拖到底也要核對）。
+    # 標題本來就讀了（確認點選生效），比對不花時間；對不上 → 用點到的那列推算、直接點目標或校正捲動，推不出就停手不買
+    middle = idx >= 8
+    if middle and not title_matches(name, t, order):
         got = [n for n in order if n != name and title_matches(n, t, order)]
         rows = {order.index(n) // 2 for n in got}
         if len(rows) == 1:
