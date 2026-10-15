@@ -188,6 +188,18 @@ class _Tee:
         return getattr(self._s, k)
 
 
+def record_step(client, role, page, step, t0, rc) -> None:
+    """統計用：每頁每一步（withdraw 領料 + 取胡椒 / craft 合成提交 / pepperback 放回胡椒）的耗時寫進
+    tools/.cache/stats-daily-steps.jsonl（使用者 2026-10-15：要記時間、次數、數量，分析速度可以進步的地方）"""
+    try:
+        with open(ROOT / 'tools' / '.cache' / 'stats-daily-steps.jsonl', 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps({'client': client, 'role': role, 'page': page, 'step': step,
+                                 'start': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t0)),
+                                 'seconds': round(time.time() - t0, 1), 'rc': rc}, ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+
+
 def record_daily(client, role, t0, done_f, pages) -> None:
     """統計用：每個角色跑完一行寫進 tools/.cache/stats-daily.jsonl（時間、買了什麼、10 個成品；stats.py 讀）"""
     try:
@@ -381,13 +393,20 @@ def main() -> int:
                         return 5
             for pg in todo:
                 log(f'[craft] 第 {pg} 頁')
-                rc = run_dq(['withdraw', '--page', str(pg)] + pf, a.client)
+                t0 = time.time()
+                rc = run_dq(['withdraw', '--page', str(pg)] + pf, a.client)     # 公共倉庫領料 + 個人倉庫取胡椒
+                record_step(a.client, a.role, pg, 'withdraw', t0, rc)
                 if rc != 0:
                     return rc
+                t0 = time.time()
                 rc = run_dq(['craft', '--page', str(pg), '--submit'] + pf, a.client)
+                record_step(a.client, a.role, pg, 'craft', t0, rc)
                 if rc != 0:
                     log(f'第 {pg} 頁合成 / 提交失敗（退出碼 {rc}）→ 停手；看 tools/.cache/craft-p{pg}-*.png')
                     return rc
+                t0 = time.time()
+                run_dq(['pepperback'] + pf, a.client)       # 剩的胡椒照 1 普通 / 2 黑 / 3 香味濃厚 放回個人倉庫（沒有就不開面板）
+                record_step(a.client, a.role, pg, 'pepperback', t0, 0)
                 st['done'].append(f'craft{pg}')
                 save()
         done_f = cache / f'daily-done-{a.client}{tag}.json'

@@ -140,7 +140,9 @@ def print_plan(pages) -> dict:
     by_store = collections.defaultdict(list)
     for n, q in total.items():
         st = stores.get(n)
-        by_store[(st[0] + f'@{st[2]} {st[3]},{st[4]}') if st else '？（24h 店沒賣：合成品 / 遠程店，要另外處理）'].append(f'{n}×{q}')
+        key = ((st[0] + f'@{st[2]} {st[3]},{st[4]}') if st else
+               '個人倉庫第 1~3 格（胡椒，使用者預先放好）' if n in PEPPERS else '？（24h 店沒賣：合成品 / 遠程店，要另外處理）')
+        by_store[key].append(f'{n}×{q}')
     print('依店分組：')
     for s, items in by_store.items():
         print(f'  {s}：' + '、'.join(items))
@@ -186,7 +188,7 @@ def main(argv=None) -> int:
     if not isinstance(sys.stdout, _Tee):
         sys.stdout = _Tee(sys.stdout, str(ROOT / 'tools' / '.cache' / 'daily-live.log'))
     ap = argparse.ArgumentParser(description='每日任務材料規劃 / 購買')
-    ap.add_argument('cmd', choices=['plan', 'here', 'verify', 'craft', 'withdraw', 'read'])
+    ap.add_argument('cmd', choices=['plan', 'here', 'verify', 'craft', 'withdraw', 'read', 'pepperback'])
     ap.add_argument('--out', default='', help='read：把 5 頁成品名寫到這個 json')
     ap.add_argument('--pages', default='', help='5 頁成品名：頁以 ; 分隔，項以 , 分隔')
     ap.add_argument('--file', default='', help='json：[[頁1項1,項2],[...],...]')
@@ -256,6 +258,27 @@ def main(argv=None) -> int:
         if want:
             withdraw_items(want, dn)
             done_path.write_text(json.dumps(dn, ensure_ascii=False), encoding='utf-8')
+        peps = [n for n in PEPPERS if n in need and n not in dn['bag']]
+        if peps:                                   # 胡椒在個人倉庫第 1~3 格（使用者 2026-10-15）
+            print(f'第 {a.page} 頁要從個人倉庫取胡椒：' + '、'.join(peps))
+            got = pepper_get(peps, dn)
+            print(f'[stats] pepper_get page={a.page} want={len(peps)} got={len(got)}')
+            done_path.write_text(json.dumps(dn, ensure_ascii=False), encoding='utf-8')
+        return 0
+    if a.cmd == 'pepperback':
+        os.environ['PSA_EXE_MATCH'] = a.client
+        os.environ.setdefault('PSA_CLICK_HOLD_MS', '120')
+        import winenv
+        winenv.enable_server()
+        import petdepot1920 as pd
+        import uikit
+        _CTX.update(pd=pd, uikit=uikit)
+        done_path = ROOT / 'tools' / '.cache' / f'daily-done-{a.client}{os.environ.get("PSA_DAILY_TAG", "")}.json'
+        dn = json.loads(done_path.read_text(encoding='utf-8'))
+        n_in = sum(1 for n in PEPPERS if n in dn['bag'])
+        bad = pepper_put(dn)
+        done_path.write_text(json.dumps(dn, ensure_ascii=False), encoding='utf-8')
+        print(f'[stats] pepper_put items={n_in} bad={bad}')
         return 0
     if a.cmd == 'craft':
         os.environ['PSA_EXE_MATCH'] = a.client
@@ -1063,6 +1086,107 @@ def withdraw_items(names, dn) -> set:
     cr.gui('key', '{ESC}', note='daily ESC')
     cr.click(*cr.CLOSE_BAG, wait=700, note='daily 關背包')
     return got
+
+
+# ---- 胡椒：個人倉庫固定格（使用者 2026-10-15：三種胡椒只有遠程店賣 → 使用者每個帳號 5 角色都先放好，用完原位置原順序放回）----
+PEPPERS = ['普通的胡椒', '黑胡椒', '香味濃厚的胡椒']     # 個人倉庫第 1 / 2 / 3 格
+PERSONAL_LIT = [(180, 110), (260, 110)]                # 個人分頁選中時亮黃 (255,221,139)、沒選中棕 (171,125,82)（2026-10-15 333 實機量）
+
+
+def ensure_personal(cr) -> bool:
+    """個人分頁一定要真的選中才存 / 取（同 ensure_public：遊戲會吃掉分頁點擊 → 進錯倉庫）"""
+    import uikit
+    for _ in range(4):
+        c = uikit.px(PERSONAL_LIT)
+        if c and all(v[0] > 225 and v[1] > 190 for v in c):
+            return True
+        cr.click(*cr.DEPOT_PERSONAL, wait=1000, note='daily 重點個人分頁')
+    print('個人倉庫分頁切不過去 → 停手（不存 / 不取，避免進錯倉庫）')
+    return False
+
+
+def pepper_slot(cr, slots, name):
+    """個人倉庫找胡椒：先點固定格（第 1/2/3 格）；浮窗名稱不對 → 改看第 1~3 格的另外兩格（順序被打亂成 321 / 231 也找得到，
+    使用者 2026-10-15 要的防呆）。找到回格序（浮窗開著），找不到回 None。"""
+    first = PEPPERS.index(name)
+    for k in [first] + [i for i in range(3) if i != first]:
+        x, y = slots[k]
+        cr.click(x, y, wait=900, note=f'daily 個人倉庫第 {k + 1} 格（找 {name}）')
+        if _pop_is(cr, name):
+            if k != first:
+                print(f'{name}：不在固定的第 {first + 1} 格，在第 {k + 1} 格（順序亂了，放回時會照 1/2/3 排回）')
+            return k
+        _close_pop(cr)
+    return None
+
+
+def _open_depot_tab(cr, personal: bool) -> bool:
+    for _ in range(2):
+        cr.gui('key', '{ESC}', note='daily 開倉庫前 ESC')
+        time.sleep(0.6)
+    cr.open_bag()
+    cr.click(*cr.TAB_DEPOT, wait=1200, note='daily 倉庫分頁')
+    cr.click(*(cr.DEPOT_PERSONAL if personal else cr.DEPOT_PUBLIC), wait=900, note='daily 個人倉庫' if personal else 'daily 公共倉庫')
+    if (ensure_personal if personal else ensure_public)(cr):
+        return True
+    cr.gui('key', '{ESC}', note='daily ESC')
+    return False
+
+
+def pepper_get(names, dn) -> set:
+    """個人倉庫 → 背包：要用的胡椒整疊取出（剩的合成後 pepper_put 放回）"""
+    import catchrun1920 as cr
+    got = set()
+    todo = [n for n in PEPPERS if n in names and n not in dn['bag']]
+    if not todo or not _open_depot_tab(cr, personal=True):
+        return got
+    slots = cr.depot_slots()
+    for nm in todo:
+        k = pepper_slot(cr, slots, nm)
+        if k is None:
+            print(f'{nm}：個人倉庫第 1~3 格都沒有 → 請補貨（每個角色第 1 普通 / 2 黑 / 3 香味濃厚，各 10 個）；照樣試合成')
+            continue
+        cr.click(*cr.POP_BTN, wait=1300, note=f'daily 取出 {nm}（個人倉庫）')
+        bag_acquire(dn, nm)
+        got.add(nm)
+        print(f'已從個人倉庫第 {k + 1} 格取出：{nm}')
+    cr.gui('key', '{ESC}', note='daily ESC')
+    cr.click(*cr.CLOSE_BAG, wait=700, note='daily 關背包')
+    return got
+
+
+def pepper_put(dn) -> int:
+    """背包剩的胡椒 → 個人倉庫，照 普通 / 黑 / 香味濃厚 的順序存（取出時那格空了，存入會回到第一個空格 = 原位置）。
+    存完核對第 1~3 格；不對只印警告不停手。回傳沒放回 / 位置不對的數量。"""
+    import catchrun1920 as cr
+    todo = [n for n in PEPPERS if n in dn['bag']]
+    if not todo:
+        return 0
+    if not _open_depot_tab(cr, personal=True):
+        return len(todo)
+    bag = cr.bag_slots()
+    bad = 0
+    for nm in todo:
+        i = pick_slot(cr, bag, nm, dn['bag'].index(nm), dn['bag'])
+        if i is None:
+            print(f'{nm}：背包找不到（可能剛好用完）→ 那格會空著，請補貨')
+            dn['bag'][dn['bag'].index(nm)] = None
+            bad += 1
+            continue
+        cr.click(*cr.POP_BTN, wait=1300, note=f'daily 存入 {nm}（個人倉庫）')
+        dn['bag'][i] = None
+        print(f'已放回個人倉庫：{nm}')
+    slots = cr.depot_slots()
+    for k, nm in enumerate(PEPPERS):
+        cr.click(*slots[k], wait=900, note=f'daily 核對個人倉庫第 {k + 1} 格')
+        ok = _pop_is(cr, nm)
+        _close_pop(cr)
+        if not ok:
+            bad += 1
+            print(f'警告：個人倉庫第 {k + 1} 格不是 {nm}（用完了或順序亂了）→ 請補貨 / 排回 1 普通、2 黑、3 香味濃厚')
+    cr.gui('key', '{ESC}', note='daily ESC')
+    cr.click(*cr.CLOSE_BAG, wait=700, note='daily 關背包')
+    return bad
 
 
 def read_pages_from_panel(pd, uikit, winenv) -> list:
