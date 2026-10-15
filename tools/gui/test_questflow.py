@@ -32,6 +32,16 @@ check('only 強盜 → 不做整理背包 2', qf.bag_in_only('__BAG2__', ['強�
 check('only 彌生 → 整理背包 2', qf.bag_in_only('__BAG2__', ['彌生和日美子']), True)
 check('only bag → 兩次都做', (qf.bag_in_only('__BAG__', ['bag']), qf.bag_in_only('__BAG2__', ['bag'])), (True, True))
 
+# 任務詳情白名單（2026-10-15 22222 夢德洞窟：進行中的任務那顆鈕是「重置任務」花 50000 石幣；實測 OCR 字串）
+check('進行中', qf.is_in_progress('|進行中進行中'), True)
+check('待接取不是進行中', qf.is_in_progress('待接取待接取'), False)
+check('待接取', qf.is_pending('|待接取'), True)
+check('空白不是待接取', qf.is_pending('|'), False)
+check('重置鈕不放行', qf.is_go_text('重倕務置倕務|~…重置蓩“'), False)
+check('傳送鈕放行', qf.is_go_text('|傳送傳送'), True)
+check('讀不到不放行', qf.is_go_text('|'), False)
+check('重置提示窗', qf.is_reset_text('你是否願意花費50000重置此任務？'), True)
+
 # 別名
 check('別名 mazu', qf.ALIAS['mazu'], '馬祖快遞')
 check('別名 fourjade', qf.ALIAS['fourjade'], '四寶玉之謎')

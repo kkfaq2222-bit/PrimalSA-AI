@@ -34,6 +34,7 @@ DETAIL_BTN = (230, 205)          # 追蹤欄右側「詳情」
 TAB_SIDE = (237, 129)            # 任務詳情「支線」分頁
 TAB_MAIN = (160, 129)            # 「主線」分頁（2026-10-12 從任務詳情截圖量：主線 x≈162、支線 x≈237）
 GO_BTN = (420, 414)              # 任務詳情「傳送」
+GO_TXT_OCR = (340, 390, 170, 50)  # 那顆鈕的文字：待接取 =「傳送」（-Dark 200 才讀得到）、進行中 =「重置任務」（花 50000 石幣，絕不按）
 OPT1 = (650, 283)                # NPC 對話框第一個選項
 OK_BTN = (480, 352)              # 「獲得物品」確認
 TEAM_BTN = (598, 465)            # 主畫面「組隊」
@@ -748,6 +749,21 @@ def unique_keys(name: str) -> list:
     return [name[k:k + 2] for k in range(len(name) - 1) if not any(name[k:k + 2] in o for o in others)]
 
 
+def is_reset_text(txt: str) -> bool:
+    """按鈕 / 提示窗文字是不是「重置任務 / 花費石幣」類（這類絕不按；實測「重置任務」常讀成「重倕務」）"""
+    return any(k in txt for k in ('重', '花費', '花费'))
+
+
+def is_go_text(txt: str) -> bool:
+    """白名單：按鈕要讀到「傳 / 送」才按（讀不到 / 讀到別的一律不按）"""
+    return ('傳' in txt or '送' in txt) and not is_reset_text(txt)
+
+
+def go_button_text() -> str:
+    """任務詳情下方大按鈕文字：一般讀法（讀得到「重倕務」）+ -Dark 200（讀得到「傳送」）合起來（2026-10-15 22222 實測）"""
+    return ''.join(uk().ocr(GO_TXT_OCR, '-Zooms', '3,4')) + '|' + ''.join(uk().ocr(GO_TXT_OCR, '-Zooms', '3,4', '-Dark', '200'))
+
+
 def accept(name: str, side: bool = True) -> None:
     """左邊「詳情」→ 分頁 → 清單 OCR 找任務名 → 點 → 傳送 → 對話選項（組隊狀態 5 人一起領）"""
     if not TRUST_TEAM:
@@ -774,6 +790,10 @@ def accept(name: str, side: bool = True) -> None:
     if not found:
         raise Halt(EXIT_NOQUEST, f'任務詳情清單找不到「{name}」（可能已接 / 分頁不對）')
     click((200, found[1]), wait_ms=900, note=f'q1920 選任務 {name}')
+    go = go_button_text()
+    if not is_go_text(go):
+        key('{ESC}')
+        raise Halt(EXIT_HALT, f'「{name}」下方按鈕是「{go}」不是傳送（任務已在進行中？）：不按、停手，避免花石幣重置任務')
     click(GO_BTN, wait_ms=3500, note='q1920 傳送')
     s = wait_state(('DIALOG', 'REWARD'), timeout=15)
     if s != 'DIALOG':
