@@ -1314,11 +1314,14 @@ def read_pages_from_panel(pd, uikit, winenv) -> list:
     out = []
     for pg in range(1, 6):
         time.sleep(0.8)
-        r = winenv.run_ps('ocr.ps1', '200', '130', '360', '130', '-Zooms', '3,4')
-        try:
-            lines = json.loads((r.stdout.strip().splitlines() or [''])[-1]).get('lines', [])
-        except Exception:
-            lines = []
+        lines = []
+        # 舊讀法 + -Dark 0（淺色字；2026-10-15 11111 第 4 頁「肉粽」清單讀成空白、快速合成視窗只讀到「肉」）
+        for opts in (('-Zooms', '3,4'), ('-Zooms', '3,4', '-Dark', '0')):
+            r = winenv.run_ps('ocr.ps1', '200', '130', '360', '130', *opts)
+            try:
+                lines += json.loads((r.stdout.strip().splitlines() or [''])[-1]).get('lines', [])
+            except Exception:
+                pass
         rows = {0: '', 1: ''}
         for ln in lines:
             y = int(ln['y'])
@@ -1333,7 +1336,7 @@ def read_pages_from_panel(pd, uikit, winenv) -> list:
                 continue
             # 不是完整讀到名稱 → 開「快速合成」視窗讀成品名（字較大較清楚；2026-10-14 第 1 頁讀成「酸海台」）
             pd.click(490, y, wait=1500, note=f'daily read 第 {pg} 頁第 {k + 1} 項 開快速合成確認名稱')
-            pop = ''.join(''.join(uikit.ocr((270, 248, 125, 24), '-Zooms', z)) for z in ('2,3', '3,4'))
+            pop = uikit.ocr_name((270, 248, 125, 24))        # 舊讀法 + -Dark 0
             pd.click(707, 92, wait=800, note='daily read 關快速合成')
             b2 = best(pop)
             print(f'  第 {pg} 頁第 {k + 1} 項：清單讀到 {rows[k]!r} → 快速合成視窗讀到 {pop!r} → {b2 or "（還是認不出）"}')
