@@ -482,9 +482,16 @@ TRACK_SCROLL = 'drag 130 255 130 215; wait 1200'     # 往下拉一點點（約 
 TRACK_SCROLL_UP = 'drag 130 215 130 255; wait 1200'   # 往上滑一點點（猜謎三兄弟接完後追蹤欄要「小幅往上滑」才出現：2026-10-11 22222 實測）
 
 
-def _track_lines():
+# 補讀：現行讀法（-Zooms 2,3，隱含 -Dark 150）會把細筆畫吃掉（'礦工的比賽' → '工的比賽'、'碧青洞窟' → '碧洞窟'、'成人儀式' 整條讀不到；
+# ocrbench --track 2026-10-15）。locate() 找不到時再用 -Dark 0（不二值化）讀一次；-Dark 0 連淺色副標題也讀得到 → 只認標題列（match_track_light）。
+TRACK_LIGHT_OPTS = ('-Zooms', '3,4', '-Dark', '0')
+TRACK_SUB_DY = (14, 26)          # 副標題在標題下方約 20px（960 截圖座標；標題列間距約 73px）
+TRACK_LIGHT_COVER = 0.6          # 補讀只看關鍵字不夠：還要涵蓋名稱 6 成的字（擋「進入夢德」這種提到別的任務的副標題）
+
+
+def _track_lines(*opts):
     import json
-    r = winenv_run('ocr.ps1', *map(str, TRACK_BOX), '-Zooms', '2,3')
+    r = winenv_run('ocr.ps1', *map(str, TRACK_BOX), *(opts or ('-Zooms', '2,3')))
     try:
         d = json.loads(r.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -506,6 +513,78 @@ def winenv_run(*a):
 TRACK_SUB_VISIBLE_Y = 238         # 任務標題 y 超過這個，副標題（約 +20）會被下方聊天按鈕列遮住（可見範圍約到 y 280）
 
 
+def locate_track(name: str, read, read_light) -> int | None:
+    """追蹤欄找任務標題 → y（未夾上限）或 None。read() / read_light(*TRACK_LIGHT_OPTS) 回 OCR 行 [(文字, y)]（ocrbench 用截圖檔代入）。
+    順序：① 現行讀法比名稱 / 關鍵字 → ② 找不到才補讀（-Dark 0，只認標題列）→ ③ 都沒有才用「最上面那格含任一個字」的保底，
+    但補讀已經認出最上面那格是別的任務（含漆黑）就不用保底。
+    （2026-10-15 前沒有 ② 且 ③ 不設限：'漆黑' 被讀掉只剩 '洞窟(一轉)' 時，畫面上沒有的「XX洞窟」都會被保底認成最上面那格；
+    ocrbench --track 237 張誤判 1113 次）"""
+    lines = read()
+    y = match_track(name, lines, fallback=False)
+    if y is not None:
+        return y
+    light = read_light(*TRACK_LIGHT_OPTS)
+    y = match_track_light(name, light)
+    if y is None and not top_is_other(name, light):
+        y = match_track(name, lines)
+    return y
+
+
+def top_is_other(name: str, light_lines) -> bool:
+    """補讀的最上面那格標題已認得是別的任務（漆黑 / 成人儀式 / 支線）→ True"""
+    others = ['漆黑洞窟', '成人儀式'] + list(q.SIDE_ORDER)
+    for text, y in track_titles(light_lines):
+        if abs(y - q.TRACK[1]) > 14:
+            continue
+        if '漆黑' in text and not name.startswith('漆黑'):
+            return True
+        if any(o != name and match_track_light(o, [(text, y)]) is not None for o in others):
+            return True
+    return False
+
+
+def match_track(name: str, lines, fallback: bool = True) -> int | None:
+    """現行讀法的 OCR 行 [(文字, y)] 裡找任務標題 → y（未夾上限）或 None；fallback=False 不用最上面那格的保底"""
+    keys = track_keys(name)
+    skip = ('漆黑',) if not name.startswith('漆黑') else ()
+    for text, y in lines:
+        if any(k in text for k in skip):
+            continue
+        if any(k in text for k in keys):
+            return y
+    # 保底（2026-10-13 猜謎三兄弟：標題在深色橫幅上，OCR 讀成 '4--0' / '兄' 這種碎字，完整名稱和關鍵字都比對不到）：
+    # 剛接的新任務會排在追蹤欄最上面那一格；那一格有字、不是漆黑、且含任務名稱的任一個字 → 當作它
+    first_y = q.TRACK[1]
+    if fallback and not name.startswith('漆黑'):
+        for text, y in lines:
+            if abs(y - first_y) <= 14 and not any(k in text for k in skip) and any(ch in text for ch in set(name) if ch not in '之的'):
+                return y
+    return None
+
+
+def track_titles(lines) -> list:
+    """去掉副標題列：正上方 TRACK_SUB_DY 範圍內有另一行字的就是副標題（標題上方是卡片邊框，沒有字）"""
+    lo, hi = TRACK_SUB_DY
+    return [(t, y) for t, y in lines if not any(lo <= y - y2 <= hi for t2, y2 in lines if t2.strip())]
+
+
+def match_track_light(name: str, lines) -> int | None:
+    """補讀（-Dark 0）的 OCR 行裡找任務標題 → y 或 None。比 match_track 嚴：只看標題列；要完整名稱，
+    或「含關鍵字且涵蓋名稱 TRACK_LIGHT_COVER 以上的字」；沒有「最上面那格任一個字」的保底。漆黑只比「漆黑洞窟」4 字（不分 N 轉，同 match_track）。"""
+    keys = track_keys(name)
+    skip = ('漆黑',) if not name.startswith('漆黑') else ()
+    base = '漆黑洞窟' if name.startswith('漆黑') else name
+    chars = {c for c in base if c not in '之的()（）'}
+    for text, y in track_titles(lines):
+        if any(k in text for k in skip):
+            continue
+        if base in text:
+            return y
+        if any(k in text for k in keys) and chars and sum(c in text for c in chars) / len(chars) >= TRACK_LIGHT_COVER:
+            return y
+    return None
+
+
 def find_track_row(name: str, scroll: bool = True, reveal: bool = True):
     """追蹤欄 OCR 找任務名稱的實際位置（任務可能在第 2 或第 3 格，漆黑永遠佔第 1 條）。
     1) 看不到標題就「往下拉一點點」再找（最多 4 次）；
@@ -515,26 +594,12 @@ def find_track_row(name: str, scroll: bool = True, reveal: bool = True):
     reveal=False：找到就好，不為了露出副標題再往下拉（只有要讀副標題時才需要）。"""
     if name not in TRAIN_STEPS:                  # 一次只解一個任務：只點追蹤欄，不拉（只有英雄島後傳要讀副標題才個別處理；使用者 2026-10-12）
         scroll = reveal = False
-    keys = track_keys(name)
-    skip = ('漆黑',) if not name.startswith('漆黑') else ()
     prev = q.TRACK_Y_OVERRIDE
     q.TRACK_Y_OVERRIDE = None
 
     def locate():
-        lines = _track_lines()
-        for text, y in lines:
-            if any(k in text for k in skip):
-                continue
-            if any(k in text for k in keys):
-                return max(y, q.TRACK[1] - 20)
-        # 保底（2026-10-13 猜謎三兄弟：標題在深色橫幅上，OCR 讀成 '4--0' / '兄' 這種碎字，完整名稱和關鍵字都比對不到）：
-        # 剛接的新任務會排在追蹤欄最上面那一格；那一格有字、不是漆黑、且含任務名稱的任一個字 → 當作它
-        first_y = q.TRACK[1]
-        if not name.startswith('漆黑'):
-            for text, y in lines:
-                if abs(y - first_y) <= 14 and not any(k in text for k in skip) and any(ch in text for ch in set(name) if ch not in '之的'):
-                    return max(y, q.TRACK[1] - 20)
-        return None
+        y = locate_track(name, _track_lines, _track_lines)
+        return y if y is None else max(y, q.TRACK[1] - 20)
 
     y = None
     rounds = 3 if scroll else 1

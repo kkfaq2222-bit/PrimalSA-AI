@@ -155,10 +155,13 @@ def _hit(name: str, k: str) -> bool:
 
 
 def classify(name: str) -> str:
-    for group, label in ((KEEP_FOREVER, 'keep'), (PUBLIC_STORE, 'public'), (STORE, 'store'), (DELETE, 'delete')):
-        hits = [k for k in group if k and _hit(name, k)]
-        if hits:
-            return label
+    """原字串先比；都對不上才用 ocrfix 修正後的字串再比一次（拆開的三點水 / 形近字）"""
+    import ocrfix
+    for t in dict.fromkeys((name, ocrfix.fix(name))):
+        for group, label in ((KEEP_FOREVER, 'keep'), (PUBLIC_STORE, 'public'), (STORE, 'store'), (DELETE, 'delete')):
+            hits = [k for k in group if k and _hit(t, k)]
+            if hits:
+                return label
     return 'unknown' if name else 'empty'
 
 
