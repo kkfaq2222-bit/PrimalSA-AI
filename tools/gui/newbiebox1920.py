@@ -195,15 +195,28 @@ def candidates(kind: str, names: list, occupied=None) -> list:
 KNOWN_OTHER_NAMES = ('龍王', '守護', '千年龜', '祝福', '秘藥', '人龍', '隨機蛋', '棍棒', '誘餌', '物誘', '安撫', '撫之')
 
 
+PROBE_MAX = 4
+
+
+def name_score(nm: str, kind: str) -> float:
+    """名稱與某種道具的相似度：該種任一關鍵字的字有幾成出現在名稱裡（0~1）"""
+    nm = nm or ''
+    return max((sum(c in nm for c in k) / len(k) for k in KINDS.get(kind, ())), default=0.0)
+
+
 def probe_unknown(names: list, kind: str, n: int = None):
     """名稱 OCR 認不出（空白 / 讀歪）的有道具格，逐一點開看浮窗標題找某種道具（例：角色 5 的 2 轉禮盒被紅色 NEW 標籤蓋住，名稱讀不到）。
     只點「名稱認不出」的格；認得是別的東西的格不點。找到回格號（浮窗已關）。"""
     import bag1920 as b
     occ = slots_occupied()
-    for j in occ:
-        nm = names[j] if j < len(names) else ''
-        if kind_of(nm) is not None or any(k in (nm or '') for k in KNOWN_OTHER_NAMES):
-            continue
+    unk = [j for j in occ if not (kind_of(names[j] if j < len(names) else '') is not None
+                                  or any(k in (names[j] if j < len(names) else '') for k in KNOWN_OTHER_NAMES))]
+    # 相似度門檻（使用者 2026-10-15：像寵物倉庫一樣，像了才點）：名稱含目標字的格先點；名稱完全讀不到的格（NEW 標籤蓋住）其次；
+    # 讀得到字但一個目標字都沒有 = 別的東西，不點。最多點 PROBE_MAX 格
+    order = sorted((j for j in unk if name_score(names[j] if j < len(names) else '', kind) > 0),
+                   key=lambda j: -name_score(names[j], kind))
+    order += [j for j in unk if not (names[j] if j < len(names) else '').strip()]
+    for j in order[:PROBE_MAX]:
         x, y = slot_xy(j)
         b.click(x, y, wait=800, note=f'newbiebox 名稱認不出 → 點開看標題 格{j}')
         t = pop_title()
@@ -383,7 +396,8 @@ def open_box(n: int, dry: bool, role_idx: int = 0) -> str:
 
 def slots_occupied() -> list:
     import bag1920 as b
-    return b.slots_with_item() or list(range(15))
+    occ = b.slots_with_item()
+    return list(range(15)) if occ is None else occ          # 讀不到才當 15 格都有；空背包就是空的
 
 
 def store_items(role_idx: int, names: list, occ) -> None:

@@ -97,11 +97,12 @@ ICON_OFFS = [(dx, dy) for dy in (-8, 0, 8) for dx in (-10, 0, 10)]
 
 
 def slots_with_item() -> list:
-    """背包 15 格哪些有道具（格心附近 9 點與空格底色差 > 45）；讀不到回 []"""
+    """背包 15 格哪些有道具（格心附近 9 點與空格底色差 > 45）；背包是空的回 []、像素讀不到回 None
+    （2026-10-15：以前兩種都回 []，newbiebox 把空背包當成「讀不到 → 15 格都有」→ 一格一格點開檢查）"""
     pts = [(SLOT_X[j % 5] + dx, SLOT_Y[j // 5] + dy) for j in range(15) for dx, dy in ICON_OFFS]
     cols = px(pts) or []
     if len(cols) != len(pts):
-        return []
+        return None
     n = len(ICON_OFFS)
     return [j for j in range(15) if any(max(abs(a - b) for a, b in zip(c, EMPTY_SLOT)) > 45 for c in cols[j * n:(j + 1) * n])]
 
