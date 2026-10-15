@@ -119,6 +119,29 @@ def build_plan(pages):
     return plan, stores
 
 
+def shop_route(shops, start):
+    """店家照位置排路線（總走路距離最短，純函式）：shops = [(店資料 (名, id, 地圖, x, y), 品項)]；start = (x, y)。
+    店 ≤ 8 間就試遍所有順序取最短（2009 的店幾乎在同一直線 x=27，「每次挑最近」會走到底又折回）；更多才用最近優先。"""
+    import itertools
+    start = start or (0, 0)
+
+    def cost(seq):
+        cur, tot = start, 0
+        for st, _its in seq:
+            tot += abs(st[3] - cur[0]) + abs(st[4] - cur[1])
+            cur = (st[3], st[4])
+        return tot
+    if len(shops) <= 8:
+        return list(min(itertools.permutations(shops), key=cost)) if shops else []
+    cur, rem, out = start, list(shops), []
+    while rem:
+        nxt = min(rem, key=lambda s: abs(s[0][3] - cur[0]) + abs(s[0][4] - cur[1]))
+        rem.remove(nxt)
+        out.append(nxt)
+        cur = (nxt[0][3], nxt[0][4])
+    return out
+
+
 def keep_list(plan_all) -> list:
     """留身上的材料（使用者 2026-10-14）：第 1 頁全部留；第 2 頁（再來第 3 頁）依剩餘格數補到 BAG_KINDS_MAX 種；
     第 4、5 頁存倉，但與第 1 頁重複的材料一律留身上。胡椒不算（從個人倉庫拿，不用買、不佔名額；2026-10-15）"""
@@ -215,6 +238,7 @@ def main(argv=None) -> int:
     ap.add_argument('--client', default=os.environ.get('PSA_EXE_MATCH', 'kkfaq11111'))
     ap.add_argument('--skip', default='', help='已買過的材料名（逗號分隔），here 不再買')
     ap.add_argument('--page', type=int, default=0, help='craft：只做這一頁（0 = 第 1、2 頁）')
+    ap.add_argument('--craft-pages', default='', help='craft：一次開面板連續做這幾頁（例 4,5；材料要先全部領好）')
     ap.add_argument('--no-craft', action='store_true', help='craft：不合成（該頁已合成好，只提交委託）')
     ap.add_argument('--submit', action='store_true', help='craft：合成完該頁後按「提交委託」')
     ap.add_argument('--do', action='store_true', help='here：真的購買（預設只列出會做什麼）')
@@ -306,7 +330,8 @@ def main(argv=None) -> int:
         import winenv
         winenv.enable_server()
         _CTX.update(pd=__import__('petdepot1920'), uikit=__import__('uikit'))
-        return craft_pages([a.page] if a.page else [1, 2], a.submit, pages, a.no_craft)
+        pgs = [int(x) for x in a.craft_pages.split(',') if x.strip()] if a.craft_pages else ([a.page] if a.page else [1, 2])
+        return craft_pages(pgs, a.submit, pages, a.no_craft)
 
     # here：只買「目前所在地圖」有賣的材料
     os.environ['PSA_EXE_MATCH'] = a.client
@@ -381,14 +406,26 @@ def main(argv=None) -> int:
     skipped = []
     # 購買順序（使用者 2026-10-14）：先買「要存倉」的（買完一間就存），最後才買「留身上」的 → 背包從頭到尾都有空位。
     # 要存的材料若第 1 頁也有，以留身上為主（keep 已含第 1 頁全部材料，所以這裡會被排到第二輪）
-    queue = [(st, [it for it in its if it[0] not in p12]) for st, its in here.items()]
-    queue += [(st, [it for it in its if it[0] in p12]) for st, its in here.items()]
+    # 2026-10-15 加速（使用者要求 1、2）：每間店只去一次（存倉的先買、留身上的後買），店家照位置排最短路線；
+    # 存倉改成「背包空位不夠下一間店時才存」，整張地圖買完再存剩下的（原本每間店都開關背包存一次）。
+    # 背包滿了的舊保護（later → 存倉 → 回店）保留當備援。
+    queue = [(st, sorted(its, key=lambda it: it[0] in p12)) for st, its in shop_route(list(here.items()), pos)]
     queue = [(st, its) for st, its in queue if its]
-    print('購買順序：先存倉的 → ' + '、'.join(f'{st[0]}' for st, its in queue if its[0][0] not in p12)
-          + '；再留身上的 → ' + '、'.join(f'{st[0]}' for st, its in queue if its[0][0] in p12))
+    print('購買路線（照位置）：' + ' → '.join(f'{st[0]}' for st, _its in queue))
     stuck = 0
+    def store_pending(why):
+        mine = [n for n in dn['bought'] if n not in p12 and n not in dn['stored'] and n in dn['bag']]
+        if mine:
+            print(f'存倉（{why}）：' + '、'.join(mine))
+            got = store_items(mine, dn)
+            dn['stored'] += sorted(got)
+            save_dn()
+
     while queue:
         st, items = queue.pop(0)
+        need = len({n for n, _q in items if n not in dn['bag']})
+        if dn['bag'].count(None) < need:
+            store_pending(f'背包剩 {dn["bag"].count(None)} 格、{st[0]} 要 {need} 格')
         opened = False
         offscreen = False
         for _try in range(len(CLICK_JITTER)):
@@ -474,11 +511,8 @@ def main(argv=None) -> int:
                 pd.click(*SHOP_CLOSE, wait=700, note='daily 關便利店')
                 return rc
         pd.click(*SHOP_CLOSE, wait=800, note='daily 關便利店')
-        mine = [n for n in dn['bought'] if n not in p12 and n not in dn['stored'] and n in dn['bag']]
-        if mine:
-            got = store_items(mine, dn)
-            dn['stored'] += sorted(got)
-            save_dn()
+        if later or not queue:
+            store_pending('背包滿了' if later else '本地圖買完')
         if later:
             if None not in dn['bag']:
                 stuck += 1
@@ -486,6 +520,7 @@ def main(argv=None) -> int:
                     print('背包滿了、也沒有可以存倉的（都是要留身上的材料）→ 停手；請檢查背包是否先清空 15 格')
                     return 7
             queue.insert(0, (st, later))
+    store_pending('收尾（最後一間被跳過時）')
     exp_bag = [n for n in dn['bought'] if n in p12]
     exp_dep = list(dn['stored'])
     print('（背包 / 公共倉庫 OCR 驗證不可靠，已停用；請用 craft 前後的截圖或自己看）')
@@ -1023,11 +1058,29 @@ def craft_pages(pages_to_do, submit: bool, pages=None, no_craft: bool = False) -
             return 9
         if submit:
             pd.click(667, 423, wait=2000, note=f'daily craft 第 {pg} 頁 提交委託')
+            mark_crafted(pg)
             pass  # 例行截圖拿掉（只留失敗 / 完成驗證的圖，2026-10-15 加速）；原：uikit.gui('shot', f'craft-p{pg}-submit.png')
             if pg == 5 and not verify_all_done(pd, uikit):
                 return 10
     print('craft 完成（每項都確認綠色 1/1 才提交）')
     return 0
+
+
+def crafted_path() -> Path:
+    return ROOT / 'tools' / '.cache' / f'daily-crafted-{os.environ.get("PSA_EXE_MATCH", "")}{os.environ.get("PSA_DAILY_TAG", "")}.json'
+
+
+def mark_crafted(pg: int) -> None:
+    """每頁提交後記一筆（一次做好幾頁時，中途失敗重跑不會重做已提交的頁；dailyrun 讀它）"""
+    try:
+        d = json.loads(crafted_path().read_text(encoding='utf-8')) if crafted_path().exists() else {}
+    except (OSError, ValueError):
+        d = {}
+    if d.get('date') != time.strftime('%Y%m%d'):
+        d = {'date': time.strftime('%Y%m%d'), 'pages': []}
+    if pg not in d['pages']:
+        d['pages'].append(pg)
+    crafted_path().write_text(json.dumps(d), encoding='utf-8')
 
 
 def item_state(uikit, y) -> str:
