@@ -77,7 +77,18 @@ def take_first_personal(pd, uikit, r, tries=3) -> bool:
     if before >= 5:
         pd.log(f'角色{r} 寵物欄已滿 5 隻 → 不能領，停手')
         return False
+    if before >= 2:
+        # prep 前 clear 已清空、give / 抓寵只放 1 隻騎寵 → 已有 2 隻 = 戰寵已領（2026-10-15 333 角色 5：上一輪其實領到了，
+        # 只是寵物欄沒刷新被判失敗；重跑又去領 → 會多領一隻）
+        pd.log(f'角色{r} 寵物欄已有 {before} 隻（騎寵 + 戰寵）→ 視為已領過，不再領')
+        return True
     for k in range(tries):
+        if not pd.panel_open():                  # 重跑時面板可能沒開 → 點分頁全落空（2026-10-15 333「個人分頁切不過去」×3）
+            pd.log(f'角色{r} 寵物面板沒開 → 重開')
+            if not pd.open_panel():
+                pd.log(f'角色{r} 寵物面板打不開')
+                return False
+            pd.click(pd.ROLE_X, pd.ROLE_Y[r - 1], wait=1200, note=f'getgold 重開後選角色 {r}')
         pd.click(*pd.TAB_DEPOT, wait=1300, note='getgold 倉庫分頁')
         pd.click(*pd.DEPOT_PERSONAL, wait=900, note='getgold 個人分頁')
         for _ in range(3):              # 遊戲會吃掉分頁點擊 → 存 / 取進錯的倉庫：一定要確認亮黃才往下
@@ -103,6 +114,13 @@ def take_first_personal(pd, uikit, r, tries=3) -> bool:
         pd.click(pd.ROLE_X, pd.ROLE_Y[other], wait=800, note='getgold 先切別人（刷新）')
         pd.click(pd.ROLE_X, pd.ROLE_Y[r - 1], wait=1000, note=f'getgold 切回角色 {r}')
         now = sum(1 for i in range(5) if not pd.slot_empty(i))
+        for _ in range(2):                       # 寵物欄常還沒刷新（2026-10-15 333 角色 5 實際領到、讀到 1→1）：等一下再切別人 / 切回來重數
+            if now > before:
+                break
+            time.sleep(1.5)
+            pd.click(pd.ROLE_X, pd.ROLE_Y[other], wait=800, note='getgold 再切別人（刷新）')
+            pd.click(pd.ROLE_X, pd.ROLE_Y[r - 1], wait=1200, note=f'getgold 再切回角色 {r}')
+            now = sum(1 for i in range(5) if not pd.slot_empty(i))
         pd.log(f'角色{r} 領個人倉庫第 1 格（{nm.strip()}）寵物欄 {before}→{now}')
         if now > before:
             return True
