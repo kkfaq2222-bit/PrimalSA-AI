@@ -47,6 +47,13 @@ _st6 = [(i, 'talk', '', 0) for i in range(1, 7)]
 check('剛接存第 0 步 → 第 1 步', qf.pick_start_step({'quest': '夢德洞窟', 'step': 0}, '夢德洞窟', _st6, False, None)[0], 1)
 check('別的任務的存檔不用', qf.pick_start_step({'quest': '強恩一族', 'step': 0}, '夢德洞窟', _st6, False, None)[0], None)
 
+# 練寵等級累計：None 不覆蓋、只升不降（2026-10-15 22222 金布伊）
+_lv = {1: 80, 2: 77}
+qf.merge_levels(_lv, {2: None, 3: 80, 4: None})
+check('None 不蓋掉已達標', _lv, {1: 80, 2: 77, 3: 80})
+qf.merge_levels(_lv, {3: 2})
+check('等級只升不降', _lv[3], 80)
+
 # 別名
 check('別名 mazu', qf.ALIAS['mazu'], '馬祖快遞')
 check('別名 fourjade', qf.ALIAS['fourjade'], '四寶玉之謎')

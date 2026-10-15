@@ -1062,22 +1062,31 @@ def train_pets_slot(keyword: str, target: int, opts: dict) -> None:
             got = levels_at(keyword, slot, [1], fix_battle=True)
         except q.Halt:
             continue                                  # 戰鬥中開不了面板：下一輪再讀
-        last.update(got)
+        merge_levels(last, got)
         log(f'練寵進度（{int(q.clock() - t0)} 秒）：角色 1 = {got.get(1)}（目標 {target}）')
-        if got.get(1) is None or got[1] < target:
+        if last.get(1) is None or last[1] < target:
             continue
+        todo = [r for r in roles[1:] if last.get(r) is None or last[r] < target]   # 已達標的不再重讀
         try:
-            rest = levels_at(keyword, slot, roles[1:], fix_battle=True)   # 角色 1 達標 → 檢查角色 2~5
+            rest = levels_at(keyword, slot, todo, fix_battle=True) if todo else {}   # 角色 1 達標 → 檢查還沒達標的角色
         except q.Halt:
             continue
-        last.update(rest)
-        log(f'角色 1 達標，檢查角色 2~5：{rest}')
+        merge_levels(last, rest)
+        log(f'角色 1 達標，檢查角色 {todo}：{rest}；累計 {last}')
         if all(last.get(r) is not None and last[r] >= target for r in roles):
             break
     q.set_ass(encounter=False)
     q.wait_battle_end()
     log(f'「{keyword}」5 隻都到 {target} 級，已關原地遇敵')
     rest_quest_pets(keyword)
+
+
+def merge_levels(last: dict, new: dict) -> None:
+    """練寵等級累計：讀不到（None）不覆蓋、等級只升不降（2026-10-15 22222 金布伊：角色 2 先讀到 77，
+    下一輪名字 OCR 沒讀到 → 整個被 None 蓋掉 → 5 隻都到了還一直練）"""
+    for r, v in new.items():
+        if v is not None and (last.get(r) is None or v > last[r]):
+            last[r] = v
 
 
 def train_pets(keyword: str, target: int, opts: dict | None = None) -> None:
