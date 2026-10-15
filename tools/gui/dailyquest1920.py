@@ -423,7 +423,7 @@ def main(argv=None) -> int:
 
     while queue:
         st, items = queue.pop(0)
-        need = len({n for n, _q in items if n not in dn['bag']})
+        need = len({n for n, _q in items if n not in dn['bag']}) + BAG_MARGIN
         if dn['bag'].count(None) < need:
             store_pending(f'背包剩 {dn["bag"].count(None)} 格、{st[0]} 要 {need} 格')
         opened = False
@@ -448,7 +448,8 @@ def main(argv=None) -> int:
             jx, jy = CLICK_JITTER[_try]
             pd.click(*walk.PRIMER_XY, wait=NPC_PRIMER_GAP_MS, note='daily 引子（第一下會被吃掉）')
             pd.click(sx + jx, sy + jy, wait=1400, note=f'daily 點 {st[0]}（第 {_try + 1} 次，偏移 {jx},{jy}）')
-            for _w in range(4):                    # 對話框慢出來：多等最多 1.2 秒再判失敗（2026-10-15 加引子後「對話沒出現」仍 28 次 → 不是第一下被吃，是太早判）
+            dist = abs(st[3] - me[0]) + abs(st[4] - me[1])
+            for _w in range(min(16, 4 + dist // 2)):   # 對話框慢出來：角色要先走過去，依距離多等（每 2 格 +0.3 秒，最多 4.8 秒）（2026-10-15 遠的店「對話沒出現」17 次、每次多 18 秒）
                 if dialog_open(uikit):
                     break
                 time.sleep(0.3)
@@ -1095,6 +1096,8 @@ def item_state(uikit, y) -> str:
 
 
 REWARD = '裝備升級石'
+BAG_MARGIN = 2                  # 進店前背包要多留的空格（格位記憶偶爾比實際多空格 → 買到一半背包滿、關店存倉再開店，每次多 41 秒；2026-10-15）
+DRAG_BOTTOM = 'drag 360 400 360 115; wait 1200'   # 一次長拖到清單底（清單 y 112~413 內）；拖到底會夾住，位置從底往上數
 NPC_PRIMER_GAP_MS = 400         # 點 NPC 前的引子間隔（使用者 2026-10-15：不要 0.1 秒那麼近）
 
 
@@ -1514,8 +1517,13 @@ def buy_item_idx(pd, uikit, order, name, qty, state) -> int:
         while row < off:
             off = max(0, off - DRAG_ROWS)
             n_down += 1
-    for _ in range(n_up):
-        pd.gui('seq', DRAG_UP, note='daily 清單往下一段')
+    if bottom_mode:                                    # 要到最底部：長拖兩次夾到底（原本短拖 5~8 次、每次約 2 秒；2026-10-15 加速）
+        n_up = 2
+        for _ in range(2):
+            pd.gui('seq', DRAG_BOTTOM, note='daily 清單長拖到底')
+    else:
+        for _ in range(n_up):
+            pd.gui('seq', DRAG_UP, note='daily 清單往下一段')
     for _ in range(n_down):
         pd.gui('seq', 'drag 360 310 360 380; wait 1400', note='daily 清單往回一段')
     state['off'] = off
