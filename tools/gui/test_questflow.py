@@ -127,7 +127,9 @@ _o_seq, _o_guard = q.seq, q.TRACK_GUARD
 q.seq, q.TRACK_GUARD = (lambda c, note='': _seqs.append(c)), None
 q.track_click(right=2)
 q.seq, q.TRACK_GUARD = _o_seq, _o_guard
-check('追蹤欄點擊先點引子', _seqs[0].startswith(walk.PRIMER + '; '), True)
+check('追蹤欄點擊先點引子（1920 座標）、隔 0.4 秒', _seqs[0].startswith(f'click {walk.PRIMER_XY[0]} {walk.PRIMER_XY[1]}; wait {q.PRIMER_GAP_MS}; '), True)
+check('引子間隔 400ms', q.PRIMER_GAP_MS, 400)
+check('1920 版面引子不是 2880 的', walk.PRIMER_XY != (1215, 18) or walk.LAYOUT != '1920x1017', True)
 check('引子後右鍵 ×2 再左鍵', _seqs[0].count(' right'), 2)
 
 # 龍王的守護：照吃藥時間推算（Item 18544 = 10 分鐘），時間不明才讀 Buff 面板

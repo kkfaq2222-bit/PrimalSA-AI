@@ -568,11 +568,15 @@ def track_click(right: int = 0, note: str = 'q1920 點追蹤欄') -> None:
     seq('; '.join(parts), note)
 
 
+PRIMER_GAP_MS = 400              # 引子和追蹤欄兩下之間的間隔（使用者 2026-10-15：不要 0.1 秒那麼近，約 0.4 秒）
+
+
 def primer() -> str:
-    """換地圖後第一下左鍵會被遊戲吃掉 → 點追蹤欄前先點引子（walk.PRIMER，1920 版面是右上狀態列 822,11；
-    平常點它沒作用）。不點的話第一下常沒反應，要等 STILL_POLLS 秒才「畫面沒在動 → 重新點追蹤欄」"""
+    """換地圖後第一下左鍵會被遊戲吃掉 → 點追蹤欄前先點引子（walk.PRIMER_XY，1920 版面是右上狀態列 822,11，
+    實測點了沒副作用）。不點的話第一下常沒反應，要等 STILL_POLLS 秒才「畫面沒在動 → 重新點追蹤欄」"""
     import walk
-    return walk.PRIMER
+    x, y = walk.PRIMER_XY
+    return f'click {x} {y}; wait {PRIMER_GAP_MS}'
 
 
 def navigate(max_s: float = NAV_TIMEOUT_S) -> str:
