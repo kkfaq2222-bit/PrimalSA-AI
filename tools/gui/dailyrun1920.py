@@ -174,7 +174,7 @@ class _Tee:
         try:
             if data.strip():
                 with open(self._p, 'a', encoding='utf-8') as f:
-                    f.write(time.strftime('%H:%M:%S ') + data.rstrip(chr(10)) + chr(10))
+                    f.write(time.strftime('%m-%d %H:%M:%S ') + data.rstrip(chr(10)) + chr(10))
         except Exception:
             pass
 

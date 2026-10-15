@@ -209,7 +209,7 @@ def errors(since: str = '') -> None:
     if dl.exists():
         for ln in dl.read_text(encoding='utf-8', errors='replace').splitlines():
             if ('停手' in ln or '不提交' in ln) and not ln.startswith(' '):
-                body = re.sub(r'^\d\d:\d\d:\d\d\s*', '', ln)
+                body = re.sub(r'^(\d\d-\d\d )?\d\d:\d\d:\d\d\s*', '', ln)   # 2026-10-15 起每行有月-日
                 if body.startswith(('購買未完成', '角色 ')) or '停手；排除後' in body:
                     continue                         # 摘要行（原因在前一行）
                 add('每日任務（停手）', body, '')

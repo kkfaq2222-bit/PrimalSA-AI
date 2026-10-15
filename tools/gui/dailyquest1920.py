@@ -187,7 +187,7 @@ class _Tee:
         try:
             if data.strip():
                 with open(self._p, 'a', encoding='utf-8') as f:
-                    f.write(time.strftime('%H:%M:%S ') + data.rstrip(chr(10)) + chr(10))
+                    f.write(time.strftime('%m-%d %H:%M:%S ') + data.rstrip(chr(10)) + chr(10))
         except Exception:
             pass
 
@@ -409,6 +409,7 @@ def main(argv=None) -> int:
                     skipped.append(st[0])
                     break
             jx, jy = CLICK_JITTER[_try]
+            pd.click(*walk.PRIMER_XY, wait=NPC_PRIMER_GAP_MS, note='daily 引子（第一下會被吃掉）')
             pd.click(sx + jx, sy + jy, wait=1400, note=f'daily 點 {st[0]}（第 {_try + 1} 次，偏移 {jx},{jy}）')
             if dialog_open(uikit):
                 dt = npc_name(uikit)
@@ -971,6 +972,7 @@ def craft_pages(pages_to_do, submit: bool, pages=None, no_craft: bool = False) -
         return 3
     opened = False
     for k, (jx, jy) in enumerate(CLICK_JITTER[:6]):
+        pd.click(*walk.PRIMER_XY, wait=NPC_PRIMER_GAP_MS, note='daily craft 引子')
         pd.click(sx + jx, sy + jy, wait=2200, note=f'daily craft 點委託接取（第 {k + 1} 次）')
         t = ''.join(uikit.ocr((400, 35, 170, 45), '-Zooms', '2,3'))
         if '每日' in t or '任務' in t:
@@ -994,7 +996,7 @@ def craft_pages(pages_to_do, submit: bool, pages=None, no_craft: bool = False) -
             print(f'翻不到第 {pg} 頁 → 停手')
             return 5
         time.sleep(1.0)
-        uikit.gui('shot', f'craft-p{pg}-before.png')
+        pass  # 例行截圖拿掉（只留失敗 / 完成驗證的圖，2026-10-15 加速）；原：uikit.gui('shot', f'craft-p{pg}-before.png')
         for item, y in (() if no_craft else ((1, 160), (2, 226))):
             if item_state(uikit, y + 18) == 'green':     # 已經做出來（1/1 綠）就不要再做（重跑時會遇到）
                 print(f'第 {pg} 頁第 {item} 項已是 1/1 → 跳過')
@@ -1005,7 +1007,7 @@ def craft_pages(pages_to_do, submit: bool, pages=None, no_craft: bool = False) -
                 print(f'第 {pg} 頁第 {item} 項：沒開到「快速合成」彈窗 → 停手')
                 return 6
             pd.click(330, 340, wait=2000, note=f'daily craft 第 {pg} 頁第 {item} 項 合成（確認）')
-            uikit.gui('shot', f'craft-p{pg}-i{item}.png')
+            pass  # 例行截圖拿掉（只留失敗 / 完成驗證的圖，2026-10-15 加速）；原：uikit.gui('shot', f'craft-p{pg}-i{item}.png')
             if popup_open(uikit):
                 pd.click(707, 92, wait=800, note='daily craft 關彈窗')
         time.sleep(0.8)
@@ -1017,7 +1019,7 @@ def craft_pages(pages_to_do, submit: bool, pages=None, no_craft: bool = False) -
             return 9
         if submit:
             pd.click(667, 423, wait=2000, note=f'daily craft 第 {pg} 頁 提交委託')
-            uikit.gui('shot', f'craft-p{pg}-submit.png')
+            pass  # 例行截圖拿掉（只留失敗 / 完成驗證的圖，2026-10-15 加速）；原：uikit.gui('shot', f'craft-p{pg}-submit.png')
             if pg == 5 and not verify_all_done(pd, uikit):
                 return 10
     print('craft 完成（每項都確認綠色 1/1 才提交）')
@@ -1036,6 +1038,7 @@ def item_state(uikit, y) -> str:
 
 
 REWARD = '裝備升級石'
+NPC_PRIMER_GAP_MS = 400         # 點 NPC 前的引子間隔（使用者 2026-10-15：不要 0.1 秒那麼近）
 
 
 def verify_all_done(pd, uikit) -> bool:
