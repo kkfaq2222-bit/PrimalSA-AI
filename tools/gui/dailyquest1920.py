@@ -25,6 +25,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
+import ocrfix  # noqa: E402  OCR 修正表（雙字部首合併 + 單字混淆；2026-10-15 由本檔 OCR_FIX / STR_FIX 合併）
 
 BAG_KINDS_MAX = 13
 # 固定原位置（使用者 2026-10-14）：每次都從這裡點 NPC（可遠距離點），畫面座標固定；買完走回原位置
@@ -38,6 +39,26 @@ BUY_BTN = (653, 367)
 CONFIRM_BTN = (415, 343)
 TITLE_BOX = (580, 105, 150, 36)
 COIN_BOX = (210, 5, 110, 22)
+# 淺色字的讀法（ocrbench 2026-10-15，我們自己的 960×508 截圖）：預設 -Dark 150 只留深色描邊 → 部首拆字（'古亻古亻'、'有氵睪的地瓜'）。
+# -Dark 0（不二值化，只放大）在便利店標題（黃字紅底）24/24、NPC 對話名字框（淺色字棕底）37/37 讀得完整（舊讀法 9/24、22/37）；
+# 讀不到字才退回舊讀法。
+TITLE_OPTS = ('-Zooms', '2,3', '-Dark', '0')
+NAME_OPTS = TITLE_OPTS
+NAME_BOX = (590, 128, 200, 38)
+
+
+def shop_title(uikit) -> str:
+    """便利店右側標題（目前選到的商品名）：先 -Dark 0，沒字再用舊讀法（-Zooms 2,3，隱含 -Dark 150）"""
+    t = ''.join(uikit.ocr(TITLE_BOX, *TITLE_OPTS))
+    return t if t.strip() else ''.join(uikit.ocr(TITLE_BOX, '-Zooms', '2,3'))
+
+
+def npc_name(uikit, box=NAME_BOX) -> str:
+    """NPC 對話名字框：先 -Dark 0，沒字再用舊讀法"""
+    t = ''.join(uikit.ocr(box, *NAME_OPTS))
+    return t if t.strip() else ''.join(uikit.ocr(box, '-Zooms', '2,3'))
+
+
 LIST_BOX = (205, 95, 330, 330)
 DRAG_UP = 'drag 360 380 360 310; wait 1400'   # 清單小幅往下（約 70px）
 
@@ -353,7 +374,7 @@ def main(argv=None) -> int:
             jx, jy = CLICK_JITTER[_try]
             pd.click(sx + jx, sy + jy, wait=1400, note=f'daily 點 {st[0]}（第 {_try + 1} 次，偏移 {jx},{jy}）')
             if dialog_open(uikit):
-                dt = ''.join(uikit.ocr((590, 128, 200, 38), '-Zooms', '2,3'))
+                dt = npc_name(uikit)
                 if npc_title_ok(st[0], dt, ALL_STORE_NAMES):
                     opened = True
                     break
@@ -455,7 +476,7 @@ def recover():
 
 def match_known(t, known) -> str:
     """浮窗文字 → 已知材料名（字稀有度加權涵蓋率，同 title_matches；得分最高且 >= 0.4）"""
-    tt = ''.join(OCR_FIX.get(c, c) for c in t if c.strip() and c not in ',，.。|')
+    tt = ocrfix.fix(''.join(c for c in t if c.strip() and c not in ',，.。|'))
     if len(tt) < 2 or not known:
         return ''
     cnt = collections.Counter(c for n in known for c in set(n))
@@ -505,13 +526,48 @@ def bag_acquire(dn, name):
 PRICE_BOX = (610, 310, 120, 26)                  # 便利店花費欄（2026-10-14 實測 OCR 3 種縮放都穩定讀到 500）
 
 
-def price_reads(uikit) -> list:
-    """花費欄 3 種縮放各讀一次 → 數字字串清單（讀不到的是 ''）"""
+QTY_BOX = (600, 268, 110, 36)                    # 便利店數量框
+
+
+def shopnum(box):
+    """便利店數字框先用 digitmatch 字元樣板讀（< 0.1 s、不會少讀一位）→ (數字字串 or None, 二值化列 or None)。
+    樣板不在 / 認不出 → (None, rows)，呼叫端退回 OCR，OCR 讀值確認後用 rows 補學（digitmatch.learn_box）。
+    PSA_SHOPNUM_DM=0 關掉（只用 OCR，同 2026-10-15 前）。"""
+    if os.environ.get('PSA_SHOPNUM_DM', '1') == '0':
+        return None, None
+    try:
+        import digitmatch
+        rows = digitmatch.box_rows([box])
+        return (digitmatch.read_digits(rows[0]), rows[0]) if rows else (None, None)
+    except Exception as e:
+        print('digitmatch 讀數字失敗（改用 OCR）：', e)
+        return None, None
+
+
+def shopnum_learn(box, rows, label: str) -> None:
+    if rows is None:
+        return
+    try:
+        import digitmatch
+        if digitmatch.learn_box(box, rows, label):
+            print(f'digitmatch 學到便利店數字樣板：{label}')
+    except Exception as e:
+        print('digitmatch 補學失敗：', e)
+
+
+def price_reads(uikit, expect: int | None = None) -> list:
+    """花費欄 → 數字字串清單（讀不到的是 ''）。digitmatch 認得 → [值]；否則 OCR 3 種縮放各讀一次。
+    OCR 3 次都一樣、且等於 expect（有給時）→ 拿來補學 digitmatch 樣板。"""
+    v, rows = shopnum(PRICE_BOX)
+    if v:
+        return [v]
     # OCR 常把同一行回傳兩次（['1000', '1000']）→ 只取第一個有數字的，不要接起來（2026-10-14 讀成 10001000）
     out = []
     for z in ('2,3', '3,4', '4,5'):
         ds = [re.sub(r'\D', '', t) for t in uikit.ocr(PRICE_BOX, '-Zooms', z)]
         out.append(next((d for d in ds if d), ''))
+    if out[0] and all(r == out[0] for r in out) and (expect is None or out[0] == str(expect)):
+        shopnum_learn(PRICE_BOX, rows, out[0])
     return out
 
 
@@ -526,7 +582,7 @@ def bag_slot_has(dn, name) -> bool:
     cr.click(*cr.BAG_BTN, wait=1500, note='daily 開背包（核對購買）')
     x, y = cr.bag_slots()[i]
     t = ''.join(''.join(uikit.ocr((x - 36, y - 28, 72, 24), '-Zooms', z)) for z in ('2,3', '3,4'))
-    t = ''.join(OCR_FIX.get(c, c) for c in t)
+    t = ocrfix.fix(t)
     cover = sum(1 for c in set(name) if c in t) / len(set(name))
     print(f'背包第 {i + 1} 格讀到 {t!r}，與 {name} 字元涵蓋率 {cover:.2f}')
     uikit.gui('shot', 'daily-buycheck.png')
@@ -564,7 +620,7 @@ def sync_bag(dn, known) -> list:
     cr.click(*cr.BAG_BTN, wait=1600, note='daily 開背包（同步格位）')
     out = []
     for x, y in cr.bag_slots():
-        t = ''.join(OCR_FIX.get(c, c) for c in ''.join(uikit.ocr((x - 36, y - 28, 72, 24), '-Zooms', '2,3')))
+        t = ocrfix.fix(''.join(uikit.ocr((x - 36, y - 28, 72, 24), '-Zooms', '2,3')))
         if not t.strip():
             out.append(None)
             continue
@@ -604,13 +660,11 @@ def ensure_public(cr) -> bool:
     return False
 
 
-STR_FIX = {'氵罙': '深', '氵每': '海', '氵睪': '澤', '氵羊': '洋', '氵十': '汁'}   # OCR 把三點水拆開（2026-10-14 深海魚 → 氵罙氵每）
+STR_FIX = ocrfix.PAIR_FIX      # 舊名保留（2026-10-15 合併到 ocrfix.py）
 
 
 def fix_text(t: str) -> str:
-    for k, v in STR_FIX.items():
-        t = t.replace(k, v)
-    return ''.join(OCR_FIX.get(c, c) for c in t)
+    return ocrfix.fix(t)
 
 
 def _pop_is(cr, name) -> bool:
@@ -655,7 +709,7 @@ def pick_slot(cr, slots, name, first, mem):
         if k == first:
             continue
         box = (sx - 36, sy - 28, 72, 24) if big else (sx - 32, sy - 28, 64, 22)
-        t = ''.join(OCR_FIX.get(c, c) for c in ''.join(uikit.ocr(box, '-Zooms', '2,3')))
+        t = ocrfix.fix(''.join(uikit.ocr(box, '-Zooms', '2,3')))
         t = ''.join(c for c in t if '一' <= c <= '鿿')
         if len(t) < 2:
             continue
@@ -1072,7 +1126,7 @@ def read_pages_from_panel(pd, uikit, winenv) -> list:
                 rows[1] += ln['text']
         page = [best(rows[0]), best(rows[1])]
         for k, y in ((0, 160), (1, 226)):
-            t0 = ''.join(OCR_FIX.get(c, c) for c in re.sub(r'\d\s*/\s*\d', '', rows[k]) if c.strip())
+            t0 = ocrfix.fix(''.join(c for c in re.sub(r'\d\s*/\s*\d', '', rows[k]) if c.strip()))   # 套全表（2026-10-15 前只套單字：'蛋氵十' 沒修成蛋汁）
             if page[k] and page[k] in t0:
                 continue
             # 不是完整讀到名稱 → 開「快速合成」視窗讀成品名（字較大較清楚；2026-10-14 第 1 頁讀成「酸海台」）
@@ -1139,11 +1193,17 @@ def go_home(walk, mp) -> bool:
 
 
 def coins(uikit) -> int | None:
+    """石幣：先 digitmatch 樣板（OCR 偶爾少讀一位：2026-10-14 4838000→483500），認不出才 OCR。
+    OCR 兩個縮放讀到同一個數字（>= 4 位）才拿來補學樣板（少讀一位時切字數對不上，也不會學）。"""
     for _ in range(3):
-        for t in uikit.ocr(COIN_BOX, '-Zooms', '2,3'):
-            d = re.sub(r'\D', '', t)
-            if len(d) >= 4:
-                return int(d)
+        v, rows = shopnum(COIN_BOX)
+        if v and len(v) >= 4:
+            return int(v)
+        ds = [d for d in (re.sub(r'\D', '', t) for t in uikit.ocr(COIN_BOX, '-Zooms', '2,3')) if len(d) >= 4]
+        if ds:
+            if len(ds) >= 2 and all(d == ds[0] for d in ds):
+                shopnum_learn(COIN_BOX, rows, ds[0])
+            return int(ds[0])
         time.sleep(0.4)
     return None
 
@@ -1174,7 +1234,7 @@ def dialog_open(uikit) -> bool:
     body = ''.join(uikit.ocr((560, 165, 340, 40), '-Zooms', '2,3')).lower()
     if any(k in body for k in ('hello', 'welcome', 'here')):
         return True
-    title = ''.join(uikit.ocr((590, 130, 200, 34), '-Zooms', '2,3'))
+    title = npc_name(uikit, (590, 130, 200, 34))
     return len(title.replace(' ', '')) >= 3 and ('素材' in title or '店' in title or '賣' in title or '員' in title)
 
 
@@ -1200,13 +1260,13 @@ ROW_Y_LAST = 393                                  # 拖到底時最後一列中�
 DRAG_ROWS = 2                                    # 一次拖 70px 約捲 2 列（實測）
 
 
-OCR_FIX = {'盬': '鹽', '悔': '海', '梅': '海', '臽': '魚', '晋': '普', '曬': '曬', '幹': '幹', '淸': '清', '雞': '雞', '睪': '澤', '杮': '柿', '爓': '爛', '渘': '深', '晦': '海'}
+OCR_FIX = ocrfix.CHAR_FIX       # 舊名保留（2026-10-15 合併到 ocrfix.py）
 
 
 def title_matches(name, t, order) -> bool:
     """標題 OCR 常缺字 / 讀錯 / 重複 / 混逗號：先套已知混淆字，再用「字稀有度加權的涵蓋率」跟同店商品比，
     目標得分最高且 >= 0.4 才算（稀有字如 鹽 / 海星 的權重高，常見字如 的 / 普通 權重低）"""
-    tt = ''.join(OCR_FIX.get(c, c) for c in t if c.strip() and c not in ',，.。|')
+    tt = ocrfix.fix(''.join(c for c in t if c.strip() and c not in ',，.。|'))
     if not tt:
         return False
     cnt = collections.Counter(c for n in order for c in set(n))
@@ -1268,7 +1328,7 @@ def buy_item_idx(pd, uikit, order, name, qty, state) -> int:
         cy = y + dy
         pd.click(x, y + dy, wait=1100 + 400 * k, note=f'daily 選 {name}（第 {k + 1} 次）')
         for _ in range(2):
-            t = ''.join(uikit.ocr(TITLE_BOX, '-Zooms', '2,3'))
+            t = shop_title(uikit)
             if t.strip():
                 break
             time.sleep(0.6)
@@ -1285,7 +1345,7 @@ def buy_item_idx(pd, uikit, order, name, qty, state) -> int:
             ny = cy - (r_act - row) * ROW_PITCH
             if 112 <= ny <= 413:
                 pd.click(x, ny, wait=1300, note=f'daily 直接點目標列 {name}')
-                t2 = ''.join(uikit.ocr(TITLE_BOX, '-Zooms', '2,3'))
+                t2 = shop_title(uikit)
                 if title_matches(name, t2, order):
                     print(f'標題 {t!r} = {got[0]}（偏 {r_act - row:+d} 列）→ 直接點 y={ny} 選到 {name}')
                     state['off'] = min(max(0, off + (r_act - row)), max_off)
@@ -1309,13 +1369,17 @@ def buy_item_idx(pd, uikit, order, name, qty, state) -> int:
     before = coins(uikit)
     for _ in range(qty - 1):
         pd.click(727, 286, wait=500, note='daily 數量 +')
-    shown = ''.join(uikit.ocr((600, 268, 110, 36), '-Zooms', '2,3'))    # 數量框：不等於 qty 就不按購買（2026-10-14 炭一次買成 27 個）
+    shown, qrows = shopnum(QTY_BOX)                  # 數量框：不等於 qty 就不按購買（2026-10-14 炭一次買成 27 個）
+    if not shown:
+        shown = ''.join(uikit.ocr(QTY_BOX, '-Zooms', '2,3'))
+        if re.sub(r'\D', '', shown) == str(qty):
+            shopnum_learn(QTY_BOX, qrows, str(qty))
     digits = re.sub(r'\D', '', shown)
     if qty > 1 and digits and digits != str(qty):        # 讀得到數字才比對（讀不到不擋，購買後仍用石幣差核對）
         print(f'{name}：數量框讀到 {shown!r}，預期 {qty} → 不按購買、停手')
         return 6
     # 花費欄（數量下面那格，(667,322)）：按購買前要等於 500×數量；購買成功後會歸 0（使用者 2026-10-14）
-    pr = price_reads(uikit)
+    pr = price_reads(uikit, 500 * qty)
     price0 = next((r for r in pr if r), '')
     if price0 and price0 != str(500 * qty) and all(r == price0 for r in pr if r):
         print(f'{name}：花費欄讀到 {price0}，預期 {500 * qty}（數量不對）→ 不按購買、停手')
@@ -1381,7 +1445,7 @@ def buy_item(pd, uikit, winenv, name, qty) -> int:
                 continue
             tried.add(key)
             pd.click(x, y, wait=1100, note=f'daily 選 {name}')
-            t = ''.join(uikit.ocr(TITLE_BOX, '-Zooms', '2,3'))
+            t = shop_title(uikit)
             if not _title_ok(name, t):
                 continue                          # 不是這個：不買，換下一個候選
             before = coins(uikit)

@@ -4,9 +4,11 @@
 另外兩個子功能（純 Python、不跑 OCR）：
   --pixels         任務詳情狀態條 / 下方按鈕的像素判（questflow1920.classify_status、q1920.classify_go_button）對照表
   --make-fixture   把上面用到的像素抽成 fixtures/qdetail_px.json（給 test_ocrbench.py 離線測試；截圖不進 git）
+  --track          追蹤欄找任務標題命中率（fixtures/track_samples.json；現行讀法 vs 現行 → -Dark 0 補讀，questflow1920.locate_track）
 用法（專案根目錄）：
   uv run --no-project python tools/gui/ocrbench.py                 # OCR 讀法命中率表（Windows 原生自動走常駐 server，較快）
   uv run --no-project python tools/gui/ocrbench.py --pixels
+  uv run --no-project python tools/gui/ocrbench.py --track
   uv run --no-project python tools/gui/ocrbench.py --cache D:/AI/tools/.cache   # 截圖在別的資料夾（例：worktree）
 """
 import argparse
@@ -23,6 +25,7 @@ import pngread  # noqa: E402
 
 SAMPLES = HERE / 'fixtures' / 'ocr_samples.json'
 QDETAIL = HERE / 'fixtures' / 'qdetail_px.json'
+TRACK = HERE / 'fixtures' / 'track_samples.json'
 CACHE = HERE.parent / '.cache'
 
 # 任務詳情像素樣本（全部 960×508；列名 y = 162 + 50k；None = 該列不測）。答案是人工看圖標的。
@@ -58,14 +61,19 @@ def judge(match: str, expect: str, text: str) -> str:
     return 'hit' if expect in text.replace('|', '') else 'miss'
 
 
-def ocr_image(img: Path, box, opts) -> str:
+def ocr_lines(img: Path, box, opts) -> list:
+    """ocr.ps1 -Image → [(文字, y)]（y = 960 截圖座標）；失敗回 []"""
     import winenv
     r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts), '-Image', winenv.to_windows(img), timeout=60)
     try:
         d = json.loads((r.stdout.strip().splitlines() or [''])[-1])
     except json.JSONDecodeError:
-        return ''
-    return ''.join(ln['text'] for ln in d.get('lines', [])) if d.get('ok') else ''
+        return []
+    return [(ln['text'], ln['y']) for ln in d.get('lines', [])] if d.get('ok') else []
+
+
+def ocr_image(img: Path, box, opts) -> str:
+    return ''.join(t for t, _ in ocr_lines(img, box, opts))
 
 
 def width(s: str) -> int:
@@ -103,6 +111,55 @@ def bench(cache: Path, verbose: bool) -> int:
         print(f'| {pad(kind, w1)}| {pad(name, w2)}| {n:>4} | {c["hit"]:>4} | {c["wrong"]:>4} | {c["miss"]:>6} | {rate:>6} |')
     if missing:
         print('缺圖跳過：' + '、'.join(sorted(missing)))
+    return 0
+
+
+# ---- 追蹤欄 ----
+def track_found(names, read, read_light) -> dict:
+    """{讀法: 找到的任務名集合}；read() / read_light(*opts) 回 [(文字, y)]（同 questflow1920._track_lines）"""
+    import questflow1920 as qf
+    lines = read()
+    return {
+        '現行（-Zooms 2,3，含保底）': {n for n in names if qf.match_track(n, lines) is not None},
+        '只用 -Dark 0 補讀': {n for n in names if qf.match_track_light(n, read_light(*qf.TRACK_LIGHT_OPTS)) is not None},
+        '新：現行 → -Dark 0 補讀 → 保底': {n for n in names if qf.locate_track(n, lambda: lines, read_light) is not None},
+    }
+
+
+def track_bench(cache: Path, verbose: bool) -> int:
+    """每張截圖 × 每個任務名：該出現且找到 = 命中、該出現沒找到 = 讀不到、不該出現卻找到 = 誤判（會點錯任務）"""
+    import functools
+    import winenv
+    import questflow1920 as qf
+    os.environ.setdefault('PSA_GUI_SERVER', '1')
+    winenv.enable_server()
+    spec = json.loads(TRACK.read_text(encoding='utf-8'))
+    names = spec['names']
+    cnt, n_img, missing = {}, 0, []
+    for s in spec['samples']:
+        img = cache / s['img']
+        if not img.exists():
+            missing.append(s['img'])
+            continue
+        n_img += 1
+        read_light = functools.lru_cache(None)(lambda *o, _i=img: ocr_lines(_i, qf.TRACK_BOX, o))
+        got = track_found(names, lambda _i=img: ocr_lines(_i, qf.TRACK_BOX, ('-Zooms', '2,3')), read_light)
+        want = set(s['expect'])
+        for k, f in got.items():
+            c = cnt.setdefault(k, {'hit': 0, 'wrong': 0, 'miss': 0})
+            c['hit'] += len(f & want)
+            c['miss'] += len(want - f)
+            c['wrong'] += len(f - want)
+            if verbose and f != want:
+                print(f'  {k} {s["img"]} 期望 {sorted(want)} → 讀不到 {sorted(want - f)} 誤判 {sorted(f - want)}')
+    print(f'追蹤欄 {n_img} 張（任務名 {len(names)} 個；每張每個名字算一次）')
+    print('| 讀法 | 該出現 | 命中 | 讀不到 | 誤判 | 命中率 |')
+    print('|---|---|---|---|---|---|')
+    for k, c in cnt.items():
+        n = c['hit'] + c['miss']
+        print(f'| {k} | {n} | {c["hit"]} | {c["miss"]} | {c["wrong"]} | {c["hit"] * 100 // max(n, 1)}% |')
+    if missing:
+        print(f'缺圖跳過 {len(missing)} 張')
     return 0
 
 
@@ -176,12 +233,15 @@ def main() -> int:
     ap.add_argument('--cache', type=Path, default=CACHE, help='截圖資料夾（預設 tools/.cache）')
     ap.add_argument('--pixels', action='store_true', help='任務詳情像素判對照表（不跑 OCR）')
     ap.add_argument('--make-fixture', action='store_true', help='抽像素存 fixtures/qdetail_px.json')
+    ap.add_argument('--track', action='store_true', help='追蹤欄找任務標題命中率')
     ap.add_argument('-v', '--verbose', action='store_true', help='逐筆印 OCR 結果')
     a = ap.parse_args()
     if a.make_fixture:
         return make_fixture(a.cache)
     if a.pixels:
         return pixels(a.cache)
+    if a.track:
+        return track_bench(a.cache, a.verbose)
     return bench(a.cache, a.verbose)
 
 

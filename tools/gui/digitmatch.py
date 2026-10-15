@@ -305,6 +305,77 @@ def live_pos(cap: dict | None = None) -> str | None:
     return None
 
 
+# ---------- 自訂框（便利店石幣 / 花費 / 數量；dailyquest1920 用）----------
+# 便利店數字都是「白字黑描邊」（2026-10-15 量 shop1.png：石幣 / 花費欄 / 數量框字 ≈ (224~255,224~255,224~255)）→ mode 1（亮字）。
+# 字型與 HUD 不同 → 樣板另存 <版面>-shopnum.json，不混進 HUD 樣板。目前只支援 1920x1017（截圖 960×508，框座標 ×2）。
+SHOP_LAYOUT = '1920x1017'
+SHOP_TPL = SHOP_LAYOUT + '-shopnum'
+
+
+def box_rows(boxes, image: str | None = None) -> list | None:
+    """截圖座標（960×508）的框 → 各框二值化列（亮白字）；版面不是 1920x1017 / 截圖失敗 → None"""
+    spec = ';'.join(f'{x * 2},{y * 2},{w * 2},{h * 2},1' for x, y, w, h in boxes)
+    args = ['-Boxes', spec] + (['-Image', winenv.to_windows(Path(image).resolve())] if image else [])
+    try:
+        cap = parse_capture(winenv.run_ps('digitmatch.ps1', *args).stdout)
+    except Exception:           # TimeoutExpired / OSError：讀不到就交給 OCR
+        return None
+    if not cap.get('ok') or cap.get('layout') != SHOP_LAYOUT:
+        return None
+    rows = [cap['fields'].get(f'b{i}') for i in range(len(boxes))]
+    return rows if all(rows) else None
+
+
+def read_digits(rows, tpl: dict | None = None) -> str | None:
+    """一個框的二值化列 → 純數字字串；沒樣板 / 有字認不出 / 不是純數字 / 整框沒墨 → None（呼叫端退回 OCR）"""
+    tpl = tpl if tpl is not None else load_tpl(SHOP_TPL)
+    if not tpl or not rows:
+        return None
+    t = read_text(Matcher(tpl), rows)
+    return t if t and t.isdigit() else None
+
+
+def learn_digits(rows, label: str, tpl: dict) -> int:
+    """用「已確認的」數字標籤補樣板（就地改 tpl），回新增數。規則同 learn_from：
+    切出字數 == 標籤字數；已被既有樣板認成別的字 → 整欄不學；已以 KNOWN_IOU 認對的字不存；每字最多 MAX_VARIANTS 個、IoU >= SAME_IOU 視為重複。"""
+    if not rows or not label.isdigit():
+        return 0
+    segs = segment(rows)
+    if len(segs) != len(label):
+        return 0
+    m = Matcher(tpl)
+    known = []
+    for (_, _, g), ch in zip(segs, label):
+        c2, sc, _ = m.classify(g)
+        if c2 is not None and c2 != ch:
+            return 0
+        known.append(c2 == ch and sc >= KNOWN_IOU)
+    added = 0
+    for (_, _, g), ch, kn in zip(segs, label, known):
+        if kn:
+            continue
+        v, _, _, n = glyph_int(g)
+        vs = tpl.setdefault(ch, [])
+        if len(vs) < MAX_VARIANTS and not any(iou(v, n, xv, xn) >= SAME_IOU for xv, _, _, xn in map(glyph_int, vs)):
+            vs.append(g)
+            added += 1
+    return added
+
+
+def learn_box(box, rows, label: str) -> int:
+    """OCR 讀到的數字經呼叫端確認（多次讀值一致 / 等於預期值）後補學：再截一次，跟 rows 一樣（畫面沒在變）才學；回新增數"""
+    if not rows or not label.isdigit():
+        return 0
+    again = box_rows([box])
+    if not again or again[0] != rows:
+        return 0
+    tpl = load_tpl(SHOP_TPL)
+    added = learn_digits(rows, label, tpl)
+    if added:
+        save_tpl(SHOP_TPL, tpl)
+    return added
+
+
 # ---------- 學習 ----------
 def labels_from_stat(st: dict) -> dict:
     """stat.ps1 結果 → {欄位: 標籤字串}（只收看起來合理的）"""

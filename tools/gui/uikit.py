@@ -288,6 +288,10 @@ def snap_pet(text, names=None, cutoff: float = SNAP_CUTOFF):
     table = names if names is not None else pet_names()
     if key in table:
         return table[key]
+    import ocrfix
+    fixed = _pet_key(ocrfix.fix(text))          # 拆字 / 形近字修正後再比一次（原字串優先：修正表是材料名用的，不先套）
+    if fixed != key and fixed in table:
+        return table[fixed]
     if len(key) < 3:                  # 太短的片段（例「金布」）相似度不可靠，除非完全相同
         return None
     best: dict = {}
