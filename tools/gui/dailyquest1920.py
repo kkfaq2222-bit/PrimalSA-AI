@@ -119,6 +119,49 @@ def build_plan(pages):
     return plan, stores
 
 
+def reconcile_memory(mem: list, occ) -> list:
+    """背包格位記憶 vs 像素實際（occ = 有東西的格號）→ 回傳修正後的記憶（純函式，離線測試用）：
+    記憶空、實際有 → '?'（有東西、名字不確定）；記憶有、實際空 → None；其餘照舊"""
+    if occ is None:
+        return list(mem)
+    occ = set(occ)
+    return [('?' if v is None else v) if k in occ else None for k, v in enumerate(mem)]
+
+
+def reconcile_bag(dn) -> None:
+    """存倉 / 領料時背包本來就開著（倉庫分頁也看得到背包 15 格）：像素看一次哪幾格有東西（約 0.3 秒），校正格位記憶。
+    使用者 2026-10-15：背包記憶要能修正，不是每次繞過去數空格"""
+    import bag1920
+    try:
+        occ = bag1920.slots_with_item()
+    except Exception:
+        return
+    new = reconcile_memory(dn['bag'], occ)
+    diff = [k + 1 for k, (a, b) in enumerate(zip(dn['bag'], new)) if a != b]
+    if diff:
+        print(f'背包記憶校正：第 {diff} 格（像素實際 vs 記憶不同）')
+        dn['bag'][:] = new
+
+
+def bag_free_actual():
+    """開背包用像素實際數空格（bag1920.slots_with_item：格心像素和空格底色比，不靠 OCR）→ 空格數；讀不到回 None"""
+    import catchrun1920 as cr
+    import bag1920
+    try:
+        for _ in range(2):
+            cr.gui('key', '{ESC}', note='daily 數空格前 ESC')
+            time.sleep(0.5)
+        cr.open_bag()
+        cr.click(*cr.TAB_BAG, wait=900, note='daily 背包分頁（數空格）')
+        occ = bag1920.slots_with_item()
+        return None if occ is None else 15 - len(occ)
+    except SystemExit:
+        return None
+    finally:
+        if cr.bag_open():                              # 背包真的開著才點關閉（沒開時那個位置是遊戲畫面，點了會走路）
+            cr.click(*cr.CLOSE_BAG, wait=700, note='daily 關背包（數空格）')
+
+
 def shop_route(shops, start):
     """店家照位置排路線（總走路距離最短，純函式）：shops = [(店資料 (名, id, 地圖, x, y), 品項)]；start = (x, y)。
     店 ≤ 8 間就試遍所有順序取最短（2009 的店幾乎在同一直線 x=27，「每次挑最近」會走到底又折回）；更多才用最近優先。"""
@@ -423,9 +466,16 @@ def main(argv=None) -> int:
 
     while queue:
         st, items = queue.pop(0)
+        # 這間店要的格數（要買、背包還沒有的種類）。記憶有「?」（不確定的格）才開背包實際數空格（約 3 秒）；
+        # 實際數過就不加餘裕，沒數就多留 BAG_MARGIN 格吸收記憶誤差（使用者 2026-10-15：智慧判斷要存多少）
         need = len({n for n, _q in items if n not in dn['bag']})
-        if dn['bag'].count(None) < need:
-            store_pending(f'背包剩 {dn["bag"].count(None)} 格、{st[0]} 要 {need} 格')
+        free, how = dn['bag'].count(None), '記憶'
+        if '?' in dn['bag']:
+            af = bag_free_actual()
+            if af is not None:
+                free, how = af, '實際數'
+        if free < need + (0 if how == '實際數' else BAG_MARGIN):
+            store_pending(f'背包剩 {free} 格（{how}）、{st[0]} 要 {need} 格')
         opened = False
         offscreen = False
         for _try in range(len(CLICK_JITTER)):
@@ -448,7 +498,8 @@ def main(argv=None) -> int:
             jx, jy = CLICK_JITTER[_try]
             pd.click(*walk.PRIMER_XY, wait=NPC_PRIMER_GAP_MS, note='daily 引子（第一下會被吃掉）')
             pd.click(sx + jx, sy + jy, wait=1400, note=f'daily 點 {st[0]}（第 {_try + 1} 次，偏移 {jx},{jy}）')
-            for _w in range(4):                    # 對話框慢出來：多等最多 1.2 秒再判失敗（2026-10-15 加引子後「對話沒出現」仍 28 次 → 不是第一下被吃，是太早判）
+            dist = abs(st[3] - me[0]) + abs(st[4] - me[1])
+            for _w in range(min(16, 4 + dist // 2)):   # 對話框慢出來：角色要先走過去，依距離多等（每 2 格 +0.3 秒，最多 4.8 秒）（2026-10-15 遠的店「對話沒出現」17 次、每次多 18 秒）
                 if dialog_open(uikit):
                     break
                 time.sleep(0.3)
@@ -838,6 +889,7 @@ def store_items(names, dn) -> set:
             dn['depot'][dn['depot'].index(None)] = nm
         stored.add(nm)
         print(f'已存公共倉庫：{nm}（背包第 {i + 1} 格）')
+    reconcile_bag(dn)
     cr.gui('key', '{ESC}', note='daily ESC')
     cr.click(*cr.CLOSE_BAG, wait=700, note='daily 關背包')
     return stored
@@ -1095,6 +1147,8 @@ def item_state(uikit, y) -> str:
 
 
 REWARD = '裝備升級石'
+BAG_MARGIN = 2                  # 進店前背包要多留的空格（格位記憶偶爾比實際多空格 → 買到一半背包滿、關店存倉再開店，每次多 41 秒；2026-10-15）
+DRAG_BOTTOM = 'drag 360 400 360 115; wait 1200'   # 一次長拖到清單底（清單 y 112~413 內）；拖到底會夾住，位置從底往上數
 NPC_PRIMER_GAP_MS = 400         # 點 NPC 前的引子間隔（使用者 2026-10-15：不要 0.1 秒那麼近）
 
 
@@ -1161,6 +1215,7 @@ def withdraw_items(names, dn) -> set:
         bag_acquire(dn, nm)
         got.add(nm)
         print(f'已從公共倉庫取出：{nm}（倉庫第 {i + 1} 格）')
+    reconcile_bag(dn)
     cr.gui('key', '{ESC}', note='daily ESC')
     cr.click(*cr.CLOSE_BAG, wait=700, note='daily 關背包')
     return got
@@ -1514,8 +1569,13 @@ def buy_item_idx(pd, uikit, order, name, qty, state) -> int:
         while row < off:
             off = max(0, off - DRAG_ROWS)
             n_down += 1
-    for _ in range(n_up):
-        pd.gui('seq', DRAG_UP, note='daily 清單往下一段')
+    if bottom_mode:                                    # 要到最底部：長拖兩次夾到底（原本短拖 5~8 次、每次約 2 秒；2026-10-15 加速）
+        n_up = 2
+        for _ in range(2):
+            pd.gui('seq', DRAG_BOTTOM, note='daily 清單長拖到底')
+    else:
+        for _ in range(n_up):
+            pd.gui('seq', DRAG_UP, note='daily 清單往下一段')
     for _ in range(n_down):
         pd.gui('seq', 'drag 360 310 360 380; wait 1400', note='daily 清單往回一段')
     state['off'] = off
@@ -1539,8 +1599,10 @@ def buy_item_idx(pd, uikit, order, name, qty, state) -> int:
             time.sleep(0.6)
         if t.strip():
             break
-    middle = idx >= 8 and not (max_off > 0 and row >= max_off)   # 拖動幅度不保證每次一樣 → 中間段（第 9 項起、且不在最後 5 列）一定驗證商品
-    if middle and not title_matches(name, t, order):   # 前 8 項 / 最後 5 列用固定位置，不驗；中間段驗證標題
+    # 第 9 項起（有捲動）一律驗證商品標題：中間段（拖動幅度不保證）＋ 最後 5 列（長拖到底，使用者 2026-10-15：拖到底也要核對）。
+    # 標題本來就讀了（確認點選生效），比對不花時間；對不上 → 用點到的那列推算、直接點目標或校正捲動，推不出就停手不買
+    middle = idx >= 8
+    if middle and not title_matches(name, t, order):
         got = [n for n in order if n != name and title_matches(n, t, order)]
         rows = {order.index(n) // 2 for n in got}
         if len(rows) == 1:
