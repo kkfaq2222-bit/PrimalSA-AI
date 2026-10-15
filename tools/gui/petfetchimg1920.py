@@ -304,8 +304,13 @@ def selected_is_short_or_numeric(tries: int = 3) -> tuple:
     return best[:4]
 
 
-def depot_numeric_slots(shape_tpls: list = None) -> list:
-    """倉庫目前這一頁，名稱是 WW / 數字名的格（0 起算）：逐隻點選後量名稱區（舊的靠格子上緣小字 OCR，WW 讀不到）"""
+STRONG_SCORE = 1.0     # 相似度 <= 此值 = 非常像，倉庫掃描可以提早停（實測 2026-10-15 333：目標 0.18、其他寵物最低 4.39）
+
+
+def depot_numeric_slots(shape_tpls: list = None, stop_at: float = None) -> list:
+    """倉庫目前這一頁，名稱是 WW / 數字名的格（0 起算）：逐隻點選後量名稱區（舊的靠格子上緣小字 OCR，WW 讀不到）。
+    stop_at：碰到相似度 <= stop_at 的格就不再往下點（外型像的排前面，通常第 1 格就中；
+    2026-10-15 使用者：333 每領一隻都把 16 格全點一遍、約 40 秒，太浪費時間）"""
     import petdepot1920 as pd
     import uikit
     pts, spans = [], []
@@ -335,6 +340,9 @@ def depot_numeric_slots(shape_tpls: list = None) -> list:
         if hit:
             out.append((sc, i))
         pd.log(f'  倉庫第 {i + 1} 格：白點 {ink}、寬 {width}、OCR {txt!r}、外型 {sh:.2f} → 相似度 {sc:.2f}{"（像）" if hit else ""}')
+        if hit and stop_at is not None and sc <= stop_at:
+            pd.log(f'  第 {i + 1} 格非常像（{sc:.2f} <= {stop_at}）→ 不再往下看')
+            break
     return [i for _, i in sorted(out)]       # 最像的排前面（同分取格序小的）
 
 
@@ -642,7 +650,7 @@ def cmd_fetch_numeric(a):
         return 4
     taken = 0
     for k in range(1, need + 1):
-        hits = depot_numeric_slots(dtpls)
+        hits = depot_numeric_slots(dtpls, stop_at=STRONG_SCORE)
         names = [''] * (COLS * ROWS)
         if not hits:
             print(f'找不到數字名稱的寵物 → 停手（已領 {taken} 隻）')
