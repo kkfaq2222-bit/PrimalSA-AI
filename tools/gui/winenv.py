@@ -130,7 +130,7 @@ SERVER_SCRIPTS = {'gui', 'ocr', 'stat', 'findmark', 'titlematch', 'digitmatch'}
 # 腳本改 param 時要同步這裡（test_winenv_server.py 的「白名單與 ps1 param 區塊同步」會檢查；_selftest 只測路徑換算）。
 SERVER_NAMED = {
     'gui': ('Scale', 'Note', 'NoRestore'),
-    'ocr': ('X', 'Y', 'Wd', 'Ht', 'Zoom', 'Dark', 'Zooms', 'Light'),
+    'ocr': ('X', 'Y', 'Wd', 'Ht', 'Zoom', 'Dark', 'Zooms', 'Light', 'Green', 'Key', 'Image'),
     'stat': ('Shot', 'ShotWidth'),
     'findmark': ('Crop', 'Out', 'Zoom'),
     'titlematch': ('Mode', 'Dir', 'Image', 'Out', 'Y', 'Thr'),
