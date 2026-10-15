@@ -208,12 +208,16 @@ def pick(which: str, target: str, ctx: str = '') -> bool:
         for _ in range(2):
             scroll_list(which, down=True, px=60)
         rows = visible_rows(which)
-        for i, t in enumerate(rows):
-            if '老虎' in t or ('虎' in t and '系' in t):
-                click(x_click, row_y(i), wait=1000, note=f'catch 選 {target}（第 {i + 1} 列，拉兩次）')
-                if '虎' in read_field(box):
-                    return True
-                break
+        hit = [i for i, t in enumerate(rows) if '老虎' in t or ('虎' in t and '系' in t)]
+        if not hit:
+            # 2026-10-15 22222：rows=['兔子系',…,'茄子系','','犀午糸','鯊魚系'] → 老虎那列讀不到。
+            # 夾在茄子系與犀牛系中間的空白列就是老虎系（點完照樣讀回欄位驗證「虎」）
+            hit = [i for i in range(1, len(rows) - 1)
+                   if not rows[i].strip() and '茄' in rows[i - 1] and ('犀' in rows[i + 1] or '牛' in rows[i + 1])]
+        for i in hit[:1]:
+            click(x_click, row_y(i), wait=1000, note=f'catch 選 {target}（第 {i + 1} 列，拉兩次）')
+            if '虎' in read_field(box):
+                return True
         log(f'拉兩次後沒找到老虎；rows={rows}')
         gui('key', '{ESC}', note='catch 關下拉'); sleep(0.6)
         return False

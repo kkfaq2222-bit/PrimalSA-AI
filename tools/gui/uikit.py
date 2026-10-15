@@ -224,7 +224,21 @@ def safe_click(x: int, y: int, panel: Panel, note: str = '', allow=()) -> bool:
 
 # ---- OCR ----
 def ocr(box, *opts) -> list:
-    """ocr.ps1 → 文字行清單；逾時 / 失敗回 []（同 petwatch.ocr）"""
+    """ocr.ps1 → 文字行清單；逾時 / 失敗回 []（同 petwatch.ocr）。
+    保底（2026-10-15 使用者：全部都要搞正確）：舊讀法（隱含 / 指定 -Dark N）一行都沒讀到時，改 -Dark 0（不二值化）再讀一次。
+    淺色字被 -Dark 二值化拆成部首是 OCR 失準主因（notes/ocr-improvement-plan.md）；讀得到的呼叫結果完全不變。"""
+    lines = _ocr_once(box, *opts)
+    o = [str(x) for x in opts]
+    if lines or '-Key' in o or '-Image' in o or '-Light' in o:
+        return lines
+    k = o.index('-Dark') if '-Dark' in o else -1
+    if k >= 0 and k + 1 < len(o) and o[k + 1] == '0':
+        return lines
+    alt = (o[:k] + o[k + 2:] if k >= 0 else o) + ['-Dark', '0']
+    return _ocr_once(box, *alt)
+
+
+def _ocr_once(box, *opts) -> list:
     import subprocess
     try:
         r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
