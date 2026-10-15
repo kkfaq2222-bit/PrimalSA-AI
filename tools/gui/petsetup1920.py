@@ -41,15 +41,16 @@ def main():
                 pd.log(f'角色{r} 寵物欄前兩格讀不到寵物名（{names}）→ 可能沒領到，不按騎乘 / 出戰')
                 rc = 5
                 continue
-            # 只對朵拉比斯按「出戰」；騎乘已在 lock 階段鎖定，這裡不再按（再按可能變成取消騎乘）
-            if '朵拉比斯' not in names:
-                pd.log(f'角色{r} 前兩格沒讀到朵拉比斯（{names}）→ 不按出戰')
+            # 戰寵 = 第 2 格（使用者 2026-10-14 改成領個人倉庫第 1 隻，不一定是朵拉比斯；2026-10-15 333 全部被「沒讀到朵拉比斯」擋下）。
+            # 騎乘已在 lock 階段鎖定，這裡不再按（再按可能變成取消騎乘）。護欄：第 2 格要有寵物，且不是騎寵格魯西斯
+            if pd.slot_empty(1) or names[1] == '格魯西斯':
+                pd.log(f'角色{r} 第 2 格沒有戰寵（{names}）→ 不按出戰')
                 rc = 5
                 continue
-            i = names.index('朵拉比斯')
+            i = 1
             pd.click(pd.SLOT_X, pd.SLOT_Y[i], wait=1500, note=f'petsetup 第 {i + 1} 格')
-            pd.click(*FIGHT_BTN, wait=1000, note=f'petsetup 第 {i + 1} 格 朵拉比斯 出戰')
-            pd.log(f'角色{r} 朵拉比斯（第 {i + 1} 格）已按出戰')
+            pd.click(*FIGHT_BTN, wait=1000, note=f'petsetup 第 {i + 1} 格 戰寵出戰')
+            pd.log(f'角色{r} 第 2 格戰寵（{names[1] or "名字讀不到"}）已按出戰')
             if a.shot:
                 uikit.gui('shot', f'{a.shot}{r}.png')
             continue
