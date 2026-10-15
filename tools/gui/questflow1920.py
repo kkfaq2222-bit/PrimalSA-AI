@@ -110,6 +110,7 @@ def last_boss_step(steps) -> int:
 
 TIP_OCR = (345, 190, 270, 80)      # 「提示」視窗內文（例：你是否願意花費 50000 重置此任務？）
 is_reset_text, is_go_text, go_button_text = q.is_reset_text, q.is_go_text, q.go_button_text   # 任務詳情下方大按鈕白名單（q1920）
+go_button_kind = q.go_button_kind                                                              # 顏色 + OCR 合判（只有 'transfer' 才按）
 
 
 def is_in_progress(txt: str) -> bool:
@@ -121,9 +122,89 @@ def is_pending(txt: str) -> bool:
     return '待接' in txt or '接取' in txt
 
 
+# ---- 任務詳情每列下方狀態條：像素計數判（OCR 降為備援）----
+# 2026-10-15 從我們自己的 960×508 截圖量（detail_main / detail_side / qd1 / qd2；列名 y = 162 + 50k）：
+#   狀態條棕底 ≈ (160,128,96)；字色 進行中 = 黃 ≈ (240,220,0)、待接取 = 白 ≈ (245,245,245)、已完成 = 綠 ≈ (0~40,170~255,0~26)。
+#   全解析度 96×18 框：黃 111 點、白 99～118 點、綠 154～171 點，其他兩色 0～1 點；棕底佔 64～71%。
+#   被「提示」窗壓暗（fail/20261015-103618）棕底變 (64,64,32) → 0%；其他非任務詳情畫面 ≤ 14% → 不判。
+#   進行中那列右邊的白色箭頭（x≈255）不在框內（x 150～245）。
+#   「已完成」綠字：只有上面 2 張截圖的樣本（待量更多實機樣本）；流程維持舊邏輯（已完成 = 不是待接取 → 視為已接），沒有新增依賴綠色的動作。
+#   列名 y 是 OCR 給的、會偏幾 px（偏 ±3 時固定框會壓到框線 → 誤當壓暗）→ 讀 y+6～y+35 一條（15 列 × 48 欄 = 720 點），
+#   在裡面滑 9 列高的窗（相當於 y 偏 -6～+6）各判一次：判得出的窗意見一致才算數。
+STATUS_XS = range(150, 246, 2)                 # 48 欄
+STATUS_DY = range(6, 36, 2)                    # 15 列
+STATUS_WIN = 9                                 # 每個窗 9 列（= 原本 y+12～y+29 那一格高）
+STATUS_INK_MIN, STATUS_OTHER_MAX, STATUS_GREEN_MIN, STATUS_BG_MIN = 15, 6, 20, 0.5
+STATUS_TEXT = {'progress': '進行中', 'pending': '待接取', 'done': '已完成', 'dim': '（不判：畫面被壓暗 / 不是任務詳情）'}
+
+
+def status_pts(y: int) -> list:
+    return [(x, y + dy) for dy in STATUS_DY for x in STATUS_XS]
+
+
+def _st_yellow(c) -> bool:
+    return c[0] >= 190 and c[1] >= 160 and c[2] <= 110 and c[0] - c[2] >= 110
+
+
+def _st_white(c) -> bool:
+    return min(c) >= 190 and max(c) - min(c) <= 40
+
+
+def _st_green(c) -> bool:
+    return c[1] >= 150 and c[1] - c[0] >= 80 and c[1] - c[2] >= 80
+
+
+def _st_bg(c) -> bool:
+    r, g, b = c
+    return 140 <= r <= 190 and 110 <= g <= 150 and 70 <= b <= 120 and r > g > b
+
+
+def classify_status(cols) -> str | None:
+    """status_pts(y) 的顏色（15 列 × 48 欄）→ 'progress' / 'pending' / 'done' / 'dim'（每個窗棕底都不夠 = 被壓暗或不是任務詳情，不判）
+    / None（字色判不出、或各窗意見矛盾 → 交給 OCR）"""
+    nx, ny = len(STATUS_XS), len(STATUS_DY)
+    if not cols or len(cols) != nx * ny:
+        return None
+    got = {_classify_win(cols[k * nx:(k + STATUS_WIN) * nx]) for k in range(ny - STATUS_WIN + 1)}
+    sure = got - {None, 'dim'}
+    if len(sure) == 1:
+        return sure.pop()
+    return 'dim' if got == {'dim'} else None
+
+
+def _classify_win(cols) -> str | None:
+    """一個 9 列高的窗"""
+    if sum(map(_st_bg, cols)) / len(cols) < STATUS_BG_MIN:
+        return 'dim'
+    yl, wh, gr = sum(map(_st_yellow, cols)), sum(map(_st_white, cols)), sum(map(_st_green, cols))
+    if yl >= STATUS_INK_MIN and wh <= STATUS_OTHER_MAX and gr <= STATUS_OTHER_MAX:
+        return 'progress'
+    if wh >= STATUS_INK_MIN and yl <= STATUS_OTHER_MAX and gr <= STATUS_OTHER_MAX:
+        return 'pending'
+    if gr >= STATUS_GREEN_MIN and yl <= STATUS_OTHER_MAX and wh <= STATUS_OTHER_MAX:
+        return 'done'
+    return None
+
+
+def row_status_ocr(y: int) -> str:
+    """備援：狀態格單獨 OCR。-Dark 0（不二值化）先讀、再併舊讀法（隱含 -Dark 150 會把黃 / 白字拆成描邊）；
+    ocrbench 2026-10-15：16 個狀態樣本 舊讀法 0/16、-Dark 0 13/16，兩者都 0 誤判"""
+    box = (135, y + 10, 130, 24)
+    return ''.join(q.uk().ocr(box, '-Zooms', '3,4', '-Dark', '0')) + '|' + ''.join(q.uk().ocr(box, '-Zooms', '3,4'))
+
+
+def row_kind(y: int) -> str | None:
+    """任務詳情某列（名稱 y）的狀態（像素判）；讀不到像素回 None"""
+    return classify_status(q.px(status_pts(y)))
+
+
 def row_status(y: int) -> str:
-    """任務詳情某列（名稱 y）下方狀態格單獨 OCR：清單整塊 OCR 常漏掉黃色「進行中」/ 部分「待接取」（2026-10-15 22222 實測）"""
-    return ''.join(q.uk().ocr((135, y + 10, 130, 24), '-Zooms', '3,4'))
+    """任務詳情某列（名稱 y）下方狀態：先像素計數（黃 = 進行中、白 = 待接取、綠 = 已完成），判不出才 OCR。
+    被提示窗壓暗 / 不是任務詳情 → 回 STATUS_TEXT['dim']（不 OCR；呼叫端當作不是待接取，不會去按）"""
+    k = row_kind(y)
+    if k in STATUS_TEXT:
+        return STATUS_TEXT[k]
+    return row_status_ocr(y)
 
 
 def bag_in_only(bag: str, only) -> bool:
@@ -717,7 +798,9 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
         raise q.Halt(q.EXIT_NOQUEST, f'任務詳情「{"支線" if side else "主線"}」清單找不到「{name}」（讀到：{[r[0] for r in rows][:6]}）：停手，不接其他任務')
     top = hit[nth]
     below = [r for r in rows if top[1] + 8 <= r[1] <= top[1] + 45]
-    btxt = ''.join(r[0] for r in below) + '|' + row_status(top[1])
+    st = row_status(top[1])
+    # 像素判得出（或明確不判）就只看像素；判不出才把清單 OCR 那列下方文字也併進來（舊邏輯）
+    btxt = st if st in STATUS_TEXT.values() else ''.join(r[0] for r in below) + '|' + st
     if is_in_progress(btxt):
         # 「進行中」= 正在解（使用者 2026-10-15）：絕不按下方按鈕 —— 進行中的任務那顆鈕是「重置任務」（花 50000 石幣），
         # 不是傳送（2026-10-15 22222 夢德洞窟：帳本 paused → 回來重接 → 連按重置）。回 False，呼叫端去追蹤欄找來解
@@ -730,11 +813,11 @@ def accept_top(name: str, side: bool = True, nth: int = 0) -> bool:
         q.key('{ESC}')
         return False
     q.click((200, top[1]), wait_ms=900, note=f'questflow 選「{top[0]}」')
-    go = go_button_text()
-    if not is_go_text(go):
+    kind, why = go_button_kind()
+    if kind != 'transfer':
         failshot.pre('questflow')
         q.key('{ESC}')
-        raise q.Halt(q.EXIT_HALT, f'「{name}」下方按鈕是「{go}」不是傳送（任務已在進行中？）：不按、停手，避免花石幣重置任務')
+        raise q.Halt(q.EXIT_HALT, f'「{name}」下方按鈕不是傳送（{why}；任務已在進行中？）：不按、停手，避免花石幣重置任務')
     q.click(q.GO_BTN, wait_ms=3500, note='questflow 傳送')
     s = q.wait_state(('DIALOG', 'REWARD'), timeout=15)
     if s == 'REWARD':                            # 「獲得物品」畫面擋在前面：關掉再等對話窗，不算失敗

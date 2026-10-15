@@ -42,6 +42,29 @@ check('傳送鈕放行', qf.is_go_text('|傳送傳送'), True)
 check('讀不到不放行', qf.is_go_text('|'), False)
 check('重置提示窗', qf.is_reset_text('你是否願意花費50000重置此任務？'), True)
 
+# row_status：像素判優先，判不出才 OCR；壓暗不 OCR（2026-10-15 OCR 改善階段 1a）
+_px, _ocr, _calls = q.px, qf.row_status_ocr, []
+qf.row_status_ocr = lambda y: _calls.append(y) or '|待接取'
+_n = len(qf.status_pts(0))
+q.px = lambda pts, tries=3: [(240, 220, 0)] * 30 + [(160, 128, 96)] * (_n - 30)
+check('像素黃 → 進行中、不 OCR', (qf.row_status(162), _calls), ('進行中', []))
+q.px = lambda pts, tries=3: [(64, 64, 32)] * _n
+check('壓暗 → 不判、不 OCR、不是待接取', (qf.is_pending(qf.row_status(162)), _calls), (False, []))
+q.px = lambda pts, tries=3: [(160, 128, 96)] * _n
+check('像素判不出 → OCR 備援', (qf.row_status(162), _calls), ('|待接取', [162]))
+q.px = lambda pts, tries=3: None
+check('讀不到像素 → OCR 備援', qf.row_status(212), '|待接取')
+# go_button_kind：不是藍色就不 OCR
+_gbt, _ocrs = q.go_button_text, []
+q.go_button_text = lambda: _ocrs.append(1) or '|傳送'
+q.px = lambda pts, tries=3: [(192, 128, 64)] * len(q.GO_BTN_PTS) + [(215, 165, 135)] * len(q.GO_PANEL_PTS)
+check('金鈕 → reset、不 OCR', (q.go_button_kind()[0], _ocrs), ('reset', []))
+q.px = lambda pts, tries=3: [(64, 96, 160)] * len(q.GO_BTN_PTS) + [(215, 165, 135)] * len(q.GO_PANEL_PTS)
+check('藍鈕 + 傳送字 → transfer', (q.go_button_kind()[0], len(_ocrs)), ('transfer', 1))
+q.go_button_text = lambda: '重倕務|'
+check('藍鈕 + 重置字 → 不按', q.go_button_kind()[0], None)
+q.px, qf.row_status_ocr, q.go_button_text = _px, _ocr, _gbt
+
 # 剛接的任務存「第 0 步」→ 下次從第 1 步開始（2026-10-15 22222 夢德洞窟：沒存檔 → 副標題 OCR 猜成第 3 步）
 _st6 = [(i, 'talk', '', 0) for i in range(1, 7)]
 check('剛接存第 0 步 → 第 1 步', qf.pick_start_step({'quest': '夢德洞窟', 'step': 0}, '夢德洞窟', _st6, False, None)[0], 1)

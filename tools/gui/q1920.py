@@ -764,6 +764,67 @@ def go_button_text() -> str:
     return ''.join(uk().ocr(GO_TXT_OCR, '-Zooms', '3,4')) + '|' + ''.join(uk().ocr(GO_TXT_OCR, '-Zooms', '3,4', '-Dark', '200'))
 
 
+# ---- 任務詳情下方大按鈕：顏色判（OCR 只當第二道確認）----
+# 2026-10-15 從我們自己的 960×508 截圖量（tools/.cache detail_main / detail_side / qd1 / qd2 / fail/*）：
+#   傳送鈕 = 藍底 ≈ (64,96,160)：按鈕格點約 82% 符合 b-r>=60 且 b>=140；
+#   重置任務鈕 = 金底 ≈ (192,128,64)：約 70% 符合 r>g>b、r-b>=80、r>=150；
+#   按鈕左右兩側面板底色 ≈ (208~223,160~175,128~143)；被「提示」窗壓暗時變 (96,80,64) → 不判；
+#   地圖畫面（fail/20261015-103949 河流有 40% 藍點）兩側面板點不符 → 不判。
+GO_BTN_PTS = [(x, y) for y in range(398, 432, 3) for x in range(370, 472, 3)]          # 按鈕本體格點（12 × 34 = 408 點）
+GO_PANEL_PTS = [(300, 405), (320, 415), (340, 425), (500, 405), (525, 415), (550, 425)]   # 按鈕兩側面板底色
+GO_BLUE_MIN, GO_GOLD_MIN, GO_OTHER_MAX = 0.6, 0.5, 0.05
+
+
+def _is_blue(c) -> bool:
+    return c[2] - c[0] >= 60 and c[2] >= 140
+
+
+def _is_gold(c) -> bool:
+    return c[0] > c[1] > c[2] and c[0] - c[2] >= 80 and c[0] >= 150
+
+
+def _is_panel(c) -> bool:
+    r, g, b = c
+    return 195 <= r <= 235 and 145 <= g <= 190 and 110 <= b <= 160 and r > g > b
+
+
+def classify_go_button(cols) -> str | None:
+    """cols = GO_BTN_PTS + GO_PANEL_PTS 的顏色 → 'transfer'（藍）/ 'reset'（金）/ None（面板不在、被壓暗、判不出）"""
+    if not cols or len(cols) != len(GO_BTN_PTS) + len(GO_PANEL_PTS):
+        return None
+    btn, panel = cols[:len(GO_BTN_PTS)], cols[len(GO_BTN_PTS):]
+    if not all(_is_panel(c) for c in panel):
+        return None
+    n = len(btn)
+    blue = sum(map(_is_blue, btn)) / n
+    gold = sum(map(_is_gold, btn)) / n
+    if blue >= GO_BLUE_MIN and gold <= GO_OTHER_MAX:
+        return 'transfer'
+    if gold >= GO_GOLD_MIN and blue <= GO_OTHER_MAX:
+        return 'reset'
+    return None
+
+
+def go_button_decide(color: str | None, text: str | None) -> str | None:
+    """顏色 + OCR 合判：顏色是藍（傳送）且 OCR 白名單也放行（讀到傳 / 送、沒有重 / 花費）才回 'transfer'；
+    金色回 'reset'；其他（判不出、顏色與文字矛盾）回 None。比舊的只看 is_go_text 更嚴：兩道都要過。"""
+    if color == 'reset':
+        return 'reset'
+    if color == 'transfer' and text is not None and is_go_text(text):
+        return 'transfer'
+    return None
+
+
+def go_button_kind() -> tuple:
+    """任務詳情下方大按鈕 → (kind, 說明)；kind == 'transfer' 才可以按（2026-10-15 22222 誤按重置任務花 50000 石幣的事故後加嚴）。
+    先讀像素（便宜）；不是藍色就不 OCR 直接回；藍色才讀文字確認。"""
+    color = classify_go_button(px(GO_BTN_PTS + GO_PANEL_PTS))
+    if color != 'transfer':
+        return go_button_decide(color, None), f'顏色 {color or "判不出"}'
+    text = go_button_text()
+    return go_button_decide(color, text), f'顏色 藍、文字 {text!r}'
+
+
 def accept(name: str, side: bool = True) -> None:
     """左邊「詳情」→ 分頁 → 清單 OCR 找任務名 → 點 → 傳送 → 對話選項（組隊狀態 5 人一起領）"""
     if not TRUST_TEAM:
@@ -790,10 +851,10 @@ def accept(name: str, side: bool = True) -> None:
     if not found:
         raise Halt(EXIT_NOQUEST, f'任務詳情清單找不到「{name}」（可能已接 / 分頁不對）')
     click((200, found[1]), wait_ms=900, note=f'q1920 選任務 {name}')
-    go = go_button_text()
-    if not is_go_text(go):
+    kind, why = go_button_kind()
+    if kind != 'transfer':
         key('{ESC}')
-        raise Halt(EXIT_HALT, f'「{name}」下方按鈕是「{go}」不是傳送（任務已在進行中？）：不按、停手，避免花石幣重置任務')
+        raise Halt(EXIT_HALT, f'「{name}」下方按鈕不是傳送（{why}；任務已在進行中？）：不按、停手，避免花石幣重置任務')
     click(GO_BTN, wait_ms=3500, note='q1920 傳送')
     s = wait_state(('DIALOG', 'REWARD'), timeout=15)
     if s != 'DIALOG':

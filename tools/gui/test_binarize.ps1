@@ -24,6 +24,18 @@ public class RefBin {
     for (int y = 0; y < b.Height; y++) for (int x = 0; x < b.Width; x++) {
       var c = b.GetPixel(x, y); int mx = Math.Max(c.R, Math.Max(c.G, c.B));
       b.SetPixel(x, y, mx < dark ? Color.Black : Color.White); } }
+  // 2026-10-15 以前 ocr.ps1 的 BinarizeGreen（GetPixel 版）
+  public static void Green(Bitmap b, int th) {
+    for (int y = 0; y < b.Height; y++) for (int x = 0; x < b.Width; x++) {
+      var c = b.GetPixel(x, y); bool ink = c.G > th && c.G - c.R > 50 && c.G - c.B > 90;
+      b.SetPixel(x, y, ink ? Color.Black : Color.White); } }
+  // -Key 參考：與任一組 (r,g,b,tol) 各通道差都 <= tol 為字
+  public static void Key(Bitmap b, int[] k) {
+    for (int y = 0; y < b.Height; y++) for (int x = 0; x < b.Width; x++) {
+      var c = b.GetPixel(x, y); bool ink = false;
+      for (int i = 0; i + 3 < k.Length; i += 4)
+        if (Math.Abs(c.R - k[i]) <= k[i + 3] && Math.Abs(c.G - k[i + 1]) <= k[i + 3] && Math.Abs(c.B - k[i + 2]) <= k[i + 3]) ink = true;
+      b.SetPixel(x, y, ink ? Color.Black : Color.White); } }
   public static void Stat(Bitmap b, bool light) {
     for (int y = 0; y < b.Height; y++) for (int x = 0; x < b.Width; x++) {
       var c = b.GetPixel(x, y); int mx = Math.Max(c.R, Math.Max(c.G, c.B)), mn = Math.Min(c.R, Math.Min(c.G, c.B));
@@ -63,8 +75,15 @@ $vals = 0, 1, 40, 100, 108, 109, 110, 111, 148, 149, 150, 151, 189, 190, 191, 19
 $px = @()
 foreach ($m in 148, 149, 150, 151, 152) { $px += , @(255, $m, 10, 10); $px += , @(255, 10, $m, 10); $px += , @(255, 10, 10, $m); $px += , @(255, $m, $m, $m) }
 foreach ($m in 198, 199, 200, 201, 202) { $px += , @(255, $m, 255, 255); $px += , @(255, 255, $m, 255); $px += , @(255, 255, 255, $m) }
-Cmp 'ocr Dark150 邊界 max=148..152' (Synth $px) { param($b) [WO]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
-Cmp 'ocr Light200 邊界 min=198..202' (Synth $px) { param($b) [WO]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
+Cmp 'ocr Dark150 邊界 max=148..152' (Synth $px) { param($b) [WO2]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
+Cmp 'ocr Light200 邊界 min=198..202' (Synth $px) { param($b) [WO2]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
+# Green 120：G = 120 / 121、G-R = 50 / 51、G-B = 90 / 91；Key (240,220,0,50)+(245,245,245,45)：各通道差 = tol / tol+1
+$px = @()
+foreach ($gv in 119, 120, 121, 122, 200) { foreach ($d in 49, 50, 51) { $px += , @(255, ($gv - $d), $gv, 0); $px += , @(255, 0, $gv, ($gv - $d - 40)) } }
+foreach ($d in 49, 50, 51) { $px += , @(255, (240 - $d), 220, 0); $px += , @(255, 240, (220 - $d), 0); $px += , @(255, 240, 220, $d); $px += , @(255, 245, 245, (245 - $d + 5)) }
+$script:keys = [int[]]@(240, 220, 0, 50, 245, 245, 245, 45)
+Cmp 'ocr Green120 邊界' (Synth $px) { param($b) [WO2]::BinarizeGreen($b, 120) } { param($b) [RefBin]::Green($b, 120) }
+Cmp 'ocr Key 邊界' (Synth $px) { param($b) [WO2]::BinarizeKey($b, $script:keys) } { param($b) [RefBin]::Key($b, $script:keys) }
 # stat：mn = 190 / 191、mx−mn = 39 / 40、mx = 109 / 110
 $px = @()
 foreach ($mn in 189, 190, 191, 192) { foreach ($d in 0, 38, 39, 40, 41) { $px += , @(255, $mn, ($mn + $d), $mn); $px += , @(255, ($mn + $d), $mn, ($mn + $d)); $px += , @(255, $mn, $mn, ($mn + $d)) } }
@@ -74,8 +93,8 @@ Cmp 'stat dark 邊界 (mx 109/110)' (Synth $px) { param($b) [WS]::Binarize($b, $
 # alpha < 255（推測 HighQualityBicubic 放大後邊緣可能半透明）：所有輸入通道值 × 數種 alpha
 $px = @()
 foreach ($a in 0, 1, 127, 128, 254, 255) { foreach ($v in $vals) { $px += , @($a, $v, $v, $v); $px += , @($a, $v, (255 - $v), 7) } }
-Cmp 'ocr Dark150 alpha<255' (Synth $px) { param($b) [WO]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
-Cmp 'ocr Light200 alpha<255' (Synth $px) { param($b) [WO]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
+Cmp 'ocr Dark150 alpha<255' (Synth $px) { param($b) [WO2]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
+Cmp 'ocr Light200 alpha<255' (Synth $px) { param($b) [WO2]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
 Cmp 'stat light alpha<255' (Synth $px) { param($b) [WS]::Binarize($b, $true) } { param($b) [RefBin]::Stat($b, $true) }
 Cmp 'stat dark alpha<255' (Synth $px) { param($b) [WS]::Binarize($b, $false) } { param($b) [RefBin]::Stat($b, $false) }
 
@@ -84,8 +103,10 @@ $rnd = New-Object Random 12345
 $bm = New-Object System.Drawing.Bitmap 97, 61, ([System.Drawing.Imaging.PixelFormat]'Format32bppArgb')
 for ($y = 0; $y -lt 61; $y++) { for ($x = 0; $x -lt 97; $x++) {
   $bm.SetPixel($x, $y, [System.Drawing.Color]::FromArgb($rnd.Next(0, 256), $rnd.Next(0, 256), $rnd.Next(0, 256), $rnd.Next(0, 256))) } }
-Cmp 'ocr Dark 隨機' $bm { param($b) [WO]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
-Cmp 'ocr Light 隨機' $bm { param($b) [WO]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
+Cmp 'ocr Dark 隨機' $bm { param($b) [WO2]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
+Cmp 'ocr Light 隨機' $bm { param($b) [WO2]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
+Cmp 'ocr Green 隨機' $bm { param($b) [WO2]::BinarizeGreen($b, 120) } { param($b) [RefBin]::Green($b, 120) }
+Cmp 'ocr Key 隨機' $bm { param($b) [WO2]::BinarizeKey($b, $script:keys) } { param($b) [RefBin]::Key($b, $script:keys) }
 Cmp 'stat light 隨機' $bm { param($b) [WS]::Binarize($b, $true) } { param($b) [RefBin]::Stat($b, $true) }
 Cmp 'stat dark 隨機' $bm { param($b) [WS]::Binarize($b, $false) } { param($b) [RefBin]::Stat($b, $false) }
 # 亮灰區塊（stat light 的 mx-mn 與 mn 同時落在邊界附近）
@@ -97,8 +118,9 @@ Cmp 'stat light 近邊界雜訊' $bm2 { param($b) [WS]::Binarize($b, $true) } { 
 foreach ($fmt in 'Format24bppRgb', 'Format32bppPArgb', 'Format32bppRgb') {
   $o = New-Object System.Drawing.Bitmap 40, 20, ([System.Drawing.Imaging.PixelFormat]$fmt)
   for ($y = 0; $y -lt 20; $y++) { for ($x = 0; $x -lt 40; $x++) { $o.SetPixel($x, $y, [System.Drawing.Color]::FromArgb(255, $rnd.Next(0, 256), $rnd.Next(0, 256), $rnd.Next(0, 256))) } }
-  Cmp "ocr Dark 退路 $fmt" $o { param($b) [WO]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
-  Cmp "ocr Light 退路 $fmt" $o { param($b) [WO]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
+  Cmp "ocr Dark 退路 $fmt" $o { param($b) [WO2]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
+  Cmp "ocr Light 退路 $fmt" $o { param($b) [WO2]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
+  Cmp "ocr Green 退路 $fmt" $o { param($b) [WO2]::BinarizeGreen($b, 120) } { param($b) [RefBin]::Green($b, 120) }
   Cmp "stat light 退路 $fmt" $o { param($b) [WS]::Binarize($b, $true) } { param($b) [RefBin]::Stat($b, $true) }
   Cmp "stat dark 退路 $fmt" $o { param($b) [WS]::Binarize($b, $false) } { param($b) [RefBin]::Stat($b, $false) }
   $o.Dispose()
@@ -114,8 +136,10 @@ foreach ($f in $Samples) {
     $g = [System.Drawing.Graphics]::FromImage($crop); $g.InterpolationMode = 'HighQualityBicubic'
     $g.DrawImage($img, (New-Object System.Drawing.Rectangle 0, 0, $crop.Width, $crop.Height), 0, 0, $w, $h, 'Pixel'); $g.Dispose()
     $nm = [IO.Path]::GetFileName($f) + " x$z"
-    Cmp "樣本 $nm ocr Dark" $crop { param($b) [WO]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
-    Cmp "樣本 $nm ocr Light" $crop { param($b) [WO]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
+    Cmp "樣本 $nm ocr Dark" $crop { param($b) [WO2]::Binarize($b, 150) } { param($b) [RefBin]::Dark($b, 150) }
+    Cmp "樣本 $nm ocr Light" $crop { param($b) [WO2]::BinarizeLight($b, 200) } { param($b) [RefBin]::Light($b, 200) }
+    Cmp "樣本 $nm ocr Green" $crop { param($b) [WO2]::BinarizeGreen($b, 120) } { param($b) [RefBin]::Green($b, 120) }
+    Cmp "樣本 $nm ocr Key" $crop { param($b) [WO2]::BinarizeKey($b, $script:keys) } { param($b) [RefBin]::Key($b, $script:keys) }
     Cmp "樣本 $nm stat light" $crop { param($b) [WS]::Binarize($b, $true) } { param($b) [RefBin]::Stat($b, $true) }
     Cmp "樣本 $nm stat dark" $crop { param($b) [WS]::Binarize($b, $false) } { param($b) [RefBin]::Stat($b, $false) }
     $crop.Dispose()
