@@ -786,8 +786,12 @@ def store_items(names, dn) -> set:
             print(f'{nm}：背包裡找不到（每格都核對過浮窗名稱）→ 不存，略過')
             continue
         if dn['bag'][i] != nm:
-            print(f'{nm}：格位記憶說在第 {dn["bag"].index(nm) + 1} 格，實際在第 {i + 1} 格 → 已修正')
-            dn['bag'][dn['bag'].index(nm)], dn['bag'][i] = dn['bag'][i], nm
+            j = dn['bag'].index(nm)
+            print(f'{nm}：格位記憶說在第 {j + 1} 格，實際在第 {i + 1} 格 → 已修正')
+            # 記憶那格實際有別的東西（不知道是什麼）→ 標「?」佔用，不要換成空格：
+            # 2026-10-15 333 對調把 None 換回第 2 格 → 之後每買一樣都猜第 2 格、每樣都要多找一輪
+            old = dn['bag'][i]
+            dn['bag'][j], dn['bag'][i] = (old if old is not None else '?'), nm
         cr.click(*cr.POP_BTN, wait=1300, note=f'daily 存入 {nm}')
         dn['bag'][i] = None
         if None in dn['depot']:
