@@ -76,11 +76,17 @@ def first_read_ok(s: dict) -> bool:
 def is_misread_down(good_trans, good_level, trans, level) -> bool:
     """已確認 good_trans 轉 good_level 級，這次讀到 trans 轉 level 級 → 是不是「往下掉」的誤讀（只升不降）。
     轉數不明（-1 / None）就只比等級；轉數變小 = 讀錯；轉數變大 = 真的轉生，不擋（純函式，離線測試用）"""
-    if good_trans in (None, -1) or trans in (None, -1):
+    if good_trans in (None, -1) or trans in (None, -1) or trans < good_trans:
+        # 轉數讀不到 / 讀成比較小（2026-10-15 22222 4轉 被讀成「0轉100級」）：只把轉數當讀錯，等級照比
         return level < good_level
-    if trans < good_trans:
-        return True
     return trans == good_trans and level < good_level
+
+
+def keep_trans(good_trans, trans):
+    """採信新等級時要記的轉數：讀不到或比已確認的小 → 保留已確認的（轉數只升不降）"""
+    if trans in (None, -1) or (good_trans not in (None, -1) and trans < good_trans):
+        return good_trans
+    return trans
 
 
 def target_for(level: int, stages=None) -> str | None:
@@ -321,7 +327,7 @@ def main() -> int:
                 pending = level
                 time.sleep(3)
                 continue
-            good_level, good_trans = level, trans
+            good_level, good_trans = level, keep_trans(good_trans, trans)
             now = time.time()
             m_map = re.match(r'(\d+):', str(s.get('pos') or ''))
             cur_map = m_map.group(1) if m_map else '?'

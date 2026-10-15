@@ -33,7 +33,11 @@ check('parse 單位數不算', lw.parse_level({'level': '7', 'petLevel': None}),
 # 等級 / 轉數只升不降（2026-10-15 22222 4轉37級 → 讀成 4 級、轉數不同 → 傳回 1 級練功點）
 check('同轉降級 = 誤讀', lw.is_misread_down(4, 37, 4, 4), True)
 check('轉數讀不到降級 = 誤讀', lw.is_misread_down(4, 37, -1, 4), True)
-check('轉數變小 = 誤讀', lw.is_misread_down(4, 37, 1, 40), True)
+check('轉數讀小、等級降 = 誤讀', lw.is_misread_down(4, 37, 1, 30), True)
+check('轉數讀小、等級升 = 採信等級', lw.is_misread_down(4, 99, 0, 100), False)
+check('記轉數不降', lw.keep_trans(4, 0), 4)
+check('記轉數讀不到保留', lw.keep_trans(4, -1), 4)
+check('記轉數轉生升上去', lw.keep_trans(4, 5), 5)
 check('真的轉生（轉數變大）不擋', lw.is_misread_down(4, 131, 5, 1), False)
 check('同轉升級不擋', lw.is_misread_down(4, 37, 4, 38), False)
 check('已確認轉數不明只比等級', lw.is_misread_down(-1, 37, 4, 4), True)
