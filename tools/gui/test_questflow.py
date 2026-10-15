@@ -120,5 +120,48 @@ threading.Timer(0.6, lambda: (tmp / 'PAUSE').unlink()).start()
 waited = pausegate.wait(lambda m: None, poll_s=0.1)
 check('刪檔後繼續（等了 0.5~3 秒）', 0.4 < waited < 3, True)
 
+# 點追蹤欄前先點引子（換地圖後第一下左鍵會被吃掉，2026-10-15 加速）
+import walk  # noqa: E402
+_seqs = []
+_o_seq, _o_guard = q.seq, q.TRACK_GUARD
+q.seq, q.TRACK_GUARD = (lambda c, note='': _seqs.append(c)), None
+q.track_click(right=2)
+q.seq, q.TRACK_GUARD = _o_seq, _o_guard
+check('追蹤欄點擊先點引子', _seqs[0].startswith(walk.PRIMER + '; '), True)
+check('引子後右鍵 ×2 再左鍵', _seqs[0].count(' right'), 2)
+
+# 龍王的守護：照吃藥時間推算（Item 18544 = 10 分鐘），時間不明才讀 Buff 面板
+check('效果時間 600 秒', qf.POTION_DURATION_S, 600)
+_now = 1_000_000.0
+check('沒紀錄 → 時間不明', qf.potion_expire([], None, _now), None)
+check('2 小時前的紀錄不信', qf.potion_expire([_now - 7300], None, _now), None)
+check('吃後 100 秒 → 到期 = 吃 + 600', qf.potion_expire([_now - 100], None, _now), _now + 500)
+check('面板讀到的到期較晚 → 用它', qf.potion_expire([_now - 500], _now + 300, _now), _now + 300)
+check('不明 → read', qf.potion_decision(None, _now), ('read', None))
+check('剩 500 → skip', qf.potion_decision(_now + 500, _now), ('skip', 500))
+check('剩 100 → eat', qf.potion_decision(_now + 100, _now), ('eat', 100))
+check('已過期 → eat', qf.potion_decision(_now - 50, _now), ('eat', 0))
+
+_pt = Path(tempfile.mkdtemp()) / 'potion.json'
+_o = (qf._potion_state_path, qf.buff_remaining, qf.eat_potion, qf.log)
+_reads, _eats = [], []
+qf._potion_state_path = lambda: _pt
+qf.buff_remaining = lambda: (_reads.append(1), 400)[1]
+qf.eat_potion = lambda: (_eats.append(1), True)[1]
+qf.log = lambda m: None
+qf.potion_check(force=True)
+check('時間不明 → 開面板讀、夠用不吃', (len(_reads), len(_eats)), (1, 0))
+qf.potion_check(force=True)
+check('讀過一次就記下到期，第二次不再開面板', (len(_reads), len(_eats)), (1, 0))
+import json  # noqa: E402
+_pt.write_text(json.dumps({'eats': [time.time() - 500]}))
+qf.potion_check()
+check('推算剩 100 秒 → 直接吃、不開面板', (len(_reads), len(_eats)), (1, 1))
+qf.potion_check(force=True)
+check('剛吃完 → 推算夠用，不讀不吃', (len(_reads), len(_eats)), (1, 1))
+_pt.write_text(json.dumps({'eats': [time.time() - 1700 + i * 10 for i in range(4)]}))
+qf.potion_check(force=True)
+check('30 分鐘 4 顆上限仍有效', len(_eats), 1)
+qf._potion_state_path, qf.buff_remaining, qf.eat_potion, qf.log = _o
 print(f'\n失敗 {fails}')
 sys.exit(1 if fails else 0)

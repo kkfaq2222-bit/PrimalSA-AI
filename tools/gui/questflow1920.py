@@ -328,33 +328,67 @@ def eat_potion() -> bool:
 _POTION_EMPTY_AT = 0.0
 
 
-POTION_COOLDOWN_S = 480         # 上次吃之後這麼久內一律視為還有效（Buff 持續 10 分鐘），不重讀也不再吃（使用者 2026-10-13：有經驗加倍等其他 Buff，圖示位置 / 時間會讀錯 → 一直吃）
+POTION_DURATION_S = 600         # 龍王的守護效果時間：Item 18544 arg ["13","10"] = RoleBuff 13「龍王守護」10 分鐘（knowledge/data/tables/Item.jsonl）
 POTION_HARD_GAP_S = 120         # 就算讀到剩餘時間很短，兩次吃之間至少隔這麼久
 POTION_MAX_PER_30MIN = 4        # 30 分鐘內最多吃幾顆，超過就不吃並提醒（異常保險絲）
 POTION_STATE_NAME = 'potion-{client}.json'
+POTION_KNOWN_S = 7200           # 吃藥 / 讀到剩餘時間的紀錄只信這麼久；更舊 = 時間不明，才開 Buff 面板讀
 
 
 def _potion_state_path():
     return q.STATE_DIR / POTION_STATE_NAME.format(client=q.CLIENT)
 
 
-def _potion_eats() -> list:
-    """這個帳號最近吃藥的時間戳（epoch 秒，只留 2 小時內）；存檔，重啟腳本也記得"""
+def _potion_load() -> dict:
     import json
     try:
-        d = json.loads(_potion_state_path().read_text(encoding='utf-8'))
-        return [t for t in d.get('eats', []) if time.time() - t < 7200]
+        return json.loads(_potion_state_path().read_text(encoding='utf-8'))
     except (OSError, ValueError):
-        return []
+        return {}
+
+
+def _potion_save(d: dict) -> None:
+    import json
+    try:
+        _potion_state_path().write_text(json.dumps(d), encoding='utf-8')
+    except OSError:
+        pass
+
+
+def _potion_eats() -> list:
+    """這個帳號最近吃藥的時間戳（epoch 秒，只留 2 小時內）；存檔，重啟腳本也記得"""
+    return [t for t in _potion_load().get('eats', []) if time.time() - t < POTION_KNOWN_S]
 
 
 def _potion_record() -> None:
-    import json
-    eats = _potion_eats() + [time.time()]
-    try:
-        _potion_state_path().write_text(json.dumps({'eats': eats}), encoding='utf-8')
-    except OSError:
-        pass
+    d = _potion_load()
+    d['eats'] = _potion_eats() + [time.time()]
+    d['expire'] = time.time() + POTION_DURATION_S
+    _potion_save(d)
+
+
+def _potion_note_remaining(sec: int) -> None:
+    """Buff 面板讀到剩餘秒數 → 記成到期時間，之後照時間推算、不用再開面板"""
+    d = _potion_load()
+    d['expire'] = time.time() + sec
+    _potion_save(d)
+
+
+def potion_expire(eats, saved_expire, now):
+    """推算到期時間（epoch 秒）：最後一次吃 + 效果時間，或 Buff 面板讀到的到期時間，取較晚者；
+    兩者都沒有（或太舊）→ None = 時間不明（純函式，離線測試用）"""
+    cands = [t + POTION_DURATION_S for t in eats if now - t < POTION_KNOWN_S]
+    if saved_expire and now - saved_expire < POTION_KNOWN_S:
+        cands.append(saved_expire)
+    return max(cands) if cands else None
+
+
+def potion_decision(expire, now):
+    """→ ('skip', 剩餘秒) 還夠用 / ('eat', 剩餘秒) 快到期或已過期，直接吃 / ('read', None) 時間不明，開 Buff 面板讀"""
+    if expire is None:
+        return 'read', None
+    rem = max(0, int(expire - now))
+    return ('skip' if rem >= POTION_MIN_S else 'eat'), rem
 
 
 q.LIST_OCR = (120, 140, 160, 330)       # 任務詳情只讀左邊清單欄（2026-10-13：右邊任務描述被當成任務名稱列，進行中的任務被誤判已完成）
@@ -438,8 +472,8 @@ def buff_remaining():
 
 
 def potion_check(force: bool = False) -> None:
-    """不會無限吃：①上次吃後 POTION_COOLDOWN_S 內直接略過（存檔，重啟也記得）②讀不到 / 讀到別的 Buff 時只看時間戳
-    ③兩次吃間隔 >= POTION_HARD_GAP_S ④30 分鐘最多 POTION_MAX_PER_30MIN 顆"""
+    """照吃藥時間推算效果（10 分鐘），快到期（剩 < POTION_MIN_S）才吃；只有時間不明（沒紀錄）才開 Buff 面板讀剩餘秒數。
+    不會無限吃：①兩次吃間隔 >= POTION_HARD_GAP_S ②30 分鐘最多 POTION_MAX_PER_30MIN 顆（存檔，重啟也記得）"""
     global _last_check
     now = time.time()
     if _POTION_EMPTY_AT and now - _POTION_EMPTY_AT < 1800:
@@ -447,30 +481,30 @@ def potion_check(force: bool = False) -> None:
     eats = _potion_eats()
     last = max(eats) if eats else 0
     since = now - last if last else None
-    if since is not None and since < POTION_COOLDOWN_S:
+    act, r = potion_decision(potion_expire(eats, _potion_load().get('expire'), now), now)
+    if act == 'skip':
         if force:
-            log(f'龍王的守護：上次吃在 {int(since)} 秒前（< {POTION_COOLDOWN_S}），視為還有效，略過')
+            log(f'龍王的守護：推算還剩 {r} 秒（>= {POTION_MIN_S}），略過')
         return
-    if not force and q.clock() - _last_check < CHECK_GAP_S:
-        return
-    r = buff_remaining()
-    _last_check = q.clock()
-    if r is not None and r >= POTION_MIN_S:
-        log(f'龍王的守護剩餘 {r} 秒，夠用')
-        return
-    if r is None:
-        # 讀不準（例：畫面上方 NEW 圖示的星星柱蓋住 Buff 名稱）：距離上次吃已久才補一顆，避免 Buff 過期後永遠不補（使用者 2026-10-13）
-        if since is not None and since < 1200:
-            log(f'Buff 清單讀不準 → 這次不吃（上次吃在 {int(since)} 秒前，未滿 1200 秒）')
+    if act == 'read':
+        if not force and q.clock() - _last_check < CHECK_GAP_S:
             return
-        log('Buff 清單讀不準，且距離上次吃已超過 20 分鐘（或沒有紀錄）→ 保險補吃一顆')
+        r = buff_remaining()
+        _last_check = q.clock()
+        if r is not None and r >= POTION_MIN_S:
+            log(f'龍王的守護剩餘 {r} 秒，夠用（記下到期時間，之後不再開面板）')
+            _potion_note_remaining(r)
+            return
+        if r is None:
+            log('Buff 清單讀不準，且沒有吃藥紀錄 → 保險補吃一顆')
+    else:
+        log(f'龍王的守護：推算剩 {r} 秒（< {POTION_MIN_S}）→ 吃一顆（不開 Buff 面板）')
     recent = [t for t in eats if now - t < 1800]
     if len(recent) >= POTION_MAX_PER_30MIN:
         log(f'龍王的守護：30 分鐘內已吃 {len(recent)} 顆（上限 {POTION_MAX_PER_30MIN}）→ 不吃，請檢查 Buff 偵測')
         return
     if since is not None and since < POTION_HARD_GAP_S:
         return
-    log(f'龍王的守護剩餘 {r} 秒 → 吃一顆')
     if eat_potion():
         _potion_record()
         _last_check = q.clock()
@@ -1390,8 +1424,8 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
         if use_potion:
             potion_check()
         log(f'=== {name} 步{st}（{j}/{len(steps)}）{"BOSS" if kind == "boss" else "對話"}：{desc} ===')
-        if j > 1 and find_track_row(name, scroll=False, reveal=False) is None:
-            log('追蹤欄這一輪找不到任務名稱，沿用上次位置')
+        # 同一個任務的後續步驟不再每步 OCR 追蹤欄（2026-10-15 量測 52 次約 13 分）：沿用上次位置。
+        # 換任務時上面會重新定位；點了沒反應由 q.navigate → NAV_ADJUST 重新定位；點之前 TRACK_GUARD 仍擋漆黑那一列
         for attempt in range(3):
             try:
                 q.step_team(fight=(kind == 'boss'))
