@@ -1013,7 +1013,9 @@ def read_level_text() -> int | None:
 def read_pet(i: int):
     """選第 i 格 → (名稱, 等級)"""
     q.click((PET_SLOT_X, PET_SLOT_Y[i]), wait_ms=800, note=f'questflow 選寵物第 {i + 1} 格')
-    name = ''.join(_ocr(PET_NAME_BOX, *o) for o in (('-Zooms', '2,3'), ('-Zooms', '3,4'), ('-Zooms', '4,5'), ('-Zooms', '3,4', '-Dark', '170')))
+    # 名稱框是淺色字：加 -Dark 0（不二值化）讀法（2026-10-15 11111 金布伊讀成「二·二··布伊龍」；OCR 改善計畫同一原因）
+    name = ''.join(_ocr(PET_NAME_BOX, *o) for o in (('-Zooms', '2,3'), ('-Zooms', '3,4'), ('-Zooms', '4,5'), ('-Zooms', '3,4', '-Dark', '170'),
+                                                     ('-Zooms', '2,3', '-Dark', '0'), ('-Zooms', '3,4', '-Dark', '0')))
     return name, read_level_text()
 
 
@@ -1149,6 +1151,10 @@ def levels_at(keyword: str, slot: int, roles, fix_battle: bool = False) -> dict:
         for r in roles:
             q.click((PET_ROLE_X, PET_ROLE_Y[r - 1]), wait_ms=900, note=f'questflow 讀第 {slot} 格：角色 {r}')
             name, lvl = read_pet(slot - 1)
+            if not name_match(name, keyword):
+                # 點格子那一下常被吃掉、名稱框還停在上一隻（2026-10-15 11111 角色 2 讀到「寵物格魯西…」= 第 1 格騎寵）→ 重選角色 + 格子再讀一次
+                q.click((PET_ROLE_X, PET_ROLE_Y[r - 1]), wait_ms=900, note=f'questflow 重選角色 {r}')
+                name, lvl = read_pet(slot - 1)
             if not name_match(name, keyword):
                 log(f'角色 {r} 第 {slot} 格名稱讀到「{name}」，不是「{keyword}」→ 當作沒讀到')
                 lvl = None
