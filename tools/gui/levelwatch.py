@@ -37,7 +37,6 @@ from walk import log, stat
 
 # (等級門檻, 練功點名稱) 由高到低；0～5 轉都用同一組門檻（使用者 2026-10-12：每次轉生都從 1 級重練，只看人物等級）
 END_LEVEL = 131      # 到這個等級才結束監測
-FIRST_STREAK = 3     # 第一次確認：隊長與寵物等級不一致時，隊長同一等級連續讀到這麼多次就採信
 PANEL_FROM = 128      # --stop-at-end：HUD 確認讀到這個等級後，開始定期開人物資訊面板確認 5 人等級
 PANEL_EVERY_S = 300   # 面板確認的間隔（秒）
 HEARTBEAT_S = 600    # 練功中每 10 分鐘印一行心跳，讓看門狗知道還活著（不然升級間隔 > 看門狗卡住門檻會被誤重啟）
@@ -68,14 +67,10 @@ def parse_level(s: dict) -> tuple[int, int] | None:
 
 
 def first_read_ok(s: dict) -> bool:
-    """啟動後第一次確認等級用：隊長等級要讀到；寵物等級也讀到時等級差 ≤ 2（不一致不採信；轉生數不比，寵物的轉數跟人物無關）。
-    寵物等級讀不到（1920 的寵物欄常讀不到）就只靠隊長等級 + 後面「連續兩次相同」的確認。
-    只升不降的保護要有「已確認的等級」才擋得住；第一次若兩次都漏讀同樣位數（112 讀成 2）就會傳錯地圖。"""
-    a, b = _one_level(s.get('level')), _one_level(s.get('petLevel'))
-    if not a:
-        return False
-    # 只比等級：寵物的轉生數跟人物無關（人 2 轉、寵 0 轉很正常；舊版要求同轉生數 → 轉生後永遠「不一致」、只觀察不傳送，2026-10-13）
-    return bool(not b or abs(a[1] - b[1]) <= 2)
+    """啟動後第一次確認等級用：只看隊長（人物）等級有沒有讀到，不跟寵物核對（使用者 2026-10-15：
+    轉生後戰寵是個人倉庫領的，等級跟人物無關 → 舊版要求差 ≤ 2，333 隊長 1 級 / 寵物 7 級永遠不一致、不傳送不組隊）。
+    防 OCR 漏讀位數（112 讀成 2）靠後面「連續兩次讀到同一個數字才採信」+ 只升不降。"""
+    return bool(_one_level(s.get('level')))
 
 
 def target_for(level: int, stages=None) -> str | None:
@@ -226,7 +221,6 @@ def main() -> int:
     if not log_path.exists():
         log_path.write_text('time,level,pos,note\n', encoding='utf-8')
     good_level = None    # 已確認的等級（只升不降；轉生數變了就重新算）
-    first_streak, first_last = 0, None   # 第一次確認：隊長同一等級連續讀到幾次（轉生後寵物等級對不上用）
     good_trans = None
     pending = None       # 上一次讀到、等第二次確認的等級
     bad = 0
@@ -306,18 +300,11 @@ def main() -> int:
                 time.sleep(a.every)
                 continue
             if good_level is None and not first_read_ok(s):
-                # 第一次確認：隊長與寵物等級要讀到且一致才採信，否則只觀察不傳送（見 first_read_ok）。
-                # 轉生後戰寵是個人倉庫領的（7 級）、隊長 1 級 → 永遠不一致（2026-10-15 333 卡住不傳送、不組隊）：
-                # 隊長等級連續 FIRST_STREAK 次讀到同一個數字就採信（OCR 漏讀位數不會每次都漏成同一個數）
-                first_streak = first_streak + 1 if first_last == (trans, level) else 1
-                first_last = (trans, level)
-                if first_streak < FIRST_STREAK:
-                    log(f'啟動後第一次確認：隊長 {s.get("level")} / 寵物 {s.get("petLevel")} 讀不到隊長或兩者不一致，先觀察不傳送'
-                        f'（隊長同一等級第 {first_streak}/{FIRST_STREAK} 次）')
-                    pending = None
-                    time.sleep(a.every)
-                    continue
-                log(f'隊長等級連續 {FIRST_STREAK} 次都是 {s.get("level")}（寵物 {s.get("petLevel")} 不一致，轉生後正常）→ 採信')
+                # 第一次確認：隊長（人物）等級要讀到才採信，否則只觀察不傳送（見 first_read_ok）
+                log(f'啟動後第一次確認：隊長 {s.get("level")} 讀不到，先觀察不傳送')
+                pending = None
+                time.sleep(a.every)
+                continue
             if level != pending:
                 pending = level
                 time.sleep(3)
