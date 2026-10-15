@@ -478,7 +478,7 @@ def main(argv=None) -> int:
             store_pending(f'背包剩 {free} 格（{how}）、{st[0]} 要 {need} 格')
         opened = False
         offscreen = False
-        for _try in range(len(CLICK_JITTER)):
+        for _try in range(len(SHOP_JITTER)):
             # 可遠距離點 NPC：用「目前座標」換算畫面位置；NPC 換算後不在畫面可點範圍才走回固定原位置
             cur = walk.wait_pos(tries=4)
             me = (cur[1], cur[2]) if cur and cur[0] == mp else pos
@@ -495,7 +495,7 @@ def main(argv=None) -> int:
                     print(f'{st[0]}：換算畫面 ({sx},{sy}) 仍在可點範圍外 → 跳過（換個站位再跑一次）')
                     skipped.append(st[0])
                     break
-            jx, jy = CLICK_JITTER[_try]
+            jx, jy = SHOP_JITTER[_try]
             pd.click(*walk.PRIMER_XY, wait=NPC_PRIMER_GAP_MS, note='daily 引子（第一下會被吃掉）')
             pd.click(sx + jx, sy + jy, wait=1400, note=f'daily 點 {st[0]}（第 {_try + 1} 次，偏移 {jx},{jy}）')
             dist = abs(st[3] - me[0]) + abs(st[4] - me[1])
@@ -740,15 +740,43 @@ def learn_alias(text: str, name: str) -> None:
         print(f'學到格子名稱對照：{text!r} → {name}')
 
 
+def _grid_texts(slots):
+    """背包格子名稱整塊一次 OCR：每行文字依中心座標分到最近的格子（名稱在格子中心上方約 4~28px，長名稱折兩行）。
+    每種縮放各自串起來、取最長的一個（不把兩種縮放的讀法串在一起，免得拼出別的名稱）。OCR 失敗回 None（呼叫端逐格讀）。"""
+    import uikit
+    xs = sorted({x for x, _ in slots})
+    ys = sorted({y for _, y in slots})
+    box = (xs[0] - 36, ys[0] - 28, xs[-1] - xs[0] + 72, ys[-1] - ys[0] + 24)
+    try:
+        r = uikit.winenv.run_ps('ocr.ps1', *map(str, box), '-Zooms', '2,3')
+        d = json.loads((r.stdout.strip().splitlines() or [''])[-1])
+    except Exception:
+        return None
+    if not d.get('ok'):
+        return None
+    per = [{} for _ in slots]                # 格子 → {縮放: [(y, 文字)]}
+    for ln in d.get('lines', []):
+        x, y, t = int(ln['x']), int(ln['y']), ln['text']
+        k = min(range(len(slots)), key=lambda i: abs(x - slots[i][0]) + 2 * abs(y - (slots[i][1] - 16)))
+        sx, sy = slots[k]
+        if abs(x - sx) <= 36 and -28 <= y - sy <= -4:
+            per[k].setdefault(ln.get('zoom'), []).append((y, t))
+    return [max((''.join(t for _y, t in sorted(v)) for v in p.values()), key=len, default='') for p in per]
+
+
 def sync_bag(dn, known) -> list:
-    """開背包讀 15 格名稱（每格 OCR 一次），對照 known（今天會用到的材料 / 成品名）重建 dn['bag']；看完關背包。
+    """開背包讀 15 格名稱（整塊一次 OCR，讀成空的格子再逐格確認），對照 known（今天會用到的材料 / 成品名）重建 dn['bag']；看完關背包。
     讀不到字 = 空格；讀到字但對不上 known → 記 '?名稱'（佔格，不會被當空格放新東西）。"""
     import catchrun1920 as cr
     import uikit
     cr.click(*cr.BAG_BTN, wait=1600, note='daily 開背包（同步格位）')
     out = []
-    for x, y in cr.bag_slots():
-        t = ocrfix.fix(''.join(uikit.ocr((x - 36, y - 28, 72, 24), '-Zooms', '2,3')))
+    slots = cr.bag_slots()
+    texts = _grid_texts(slots)            # 整塊背包一次 OCR（原本 15 格各一次約 8 秒）；整塊讀成空的格子再逐格讀確認
+    for k, (x, y) in enumerate(slots):
+        t = ocrfix.fix(texts[k]) if texts and texts[k] else ''
+        if not t.strip():
+            t = ocrfix.fix(''.join(uikit.ocr((x - 36, y - 28, 72, 24), '-Zooms', '2,3')))
         if not t.strip():
             out.append(None)
             continue
@@ -1469,6 +1497,8 @@ def coins(uikit) -> int | None:
 
 
 # 點不到時換幾個點位（人物身體比座標公式約大 ±10px）；順序 = 正中 → 往下（腳）→ 往上 → 左右 → 斜
+# 商店 NPC（1009 / 2009）：2026-10-14 統計 10 個角色，先點 (0,-8) 第一下沒開 44 次、第二下 (0,0) 幾乎都開 → 商店先點正中
+SHOP_JITTER = [(0, 0), (0, -8), (0, 8), (-8, 0), (8, 0), (0, -16), (-10, -8), (10, -8), (0, 16), (-14, 0)]
 CLICK_JITTER = [(0, -8), (0, 0), (0, 8), (-8, 0), (8, 0), (0, -16), (-10, -8), (10, -8), (0, 16), (-14, 0)]   # 實測（1009 / 醫院）：往上 8px 最常命中人物身體
 
 

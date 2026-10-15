@@ -268,6 +268,15 @@ def run_roles(a) -> int:
     return 0
 
 
+def crafted_today(cache, client, tag) -> list:
+    """今天已提交的頁（dailyquest 每頁提交後寫 daily-crafted-*.json）；讀不到回 []。"""
+    try:
+        cd = json.loads((cache / f'daily-crafted-{client}{tag}.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+    return cd.get('pages', []) if cd.get('date') == time.strftime('%Y%m%d') else []
+
+
 def main() -> int:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -434,6 +443,17 @@ def main() -> int:
                 t0 = time.time()
                 rc = run_dq(['craft', '--craft-pages', ','.join(map(str, grp)), '--submit'] + pf, a.client)
                 record_step(a.client, a.role, ','.join(map(str, grp)), 'craft', t0, rc)
+                if rc == 9 and [pg for pg in grp if pg not in crafted_today(cache, a.client, tag)]:
+                    # 沒兩項都變綠（常見：格位記憶跟實際不同、料沒領到）→ 還沒提交的頁重新同步背包領料、再合成一次（已綠的項目會跳過）
+                    left = [pg for pg in grp if pg not in crafted_today(cache, a.client, tag)]
+                    log(f'[craft] 第 {left} 頁沒做出來 → 重新同步背包領料、再試一次')
+                    for pg in left:
+                        rc = run_dq(['withdraw', '--page', str(pg)] + pf, a.client)
+                        if rc != 0:
+                            return rc
+                    t0 = time.time()
+                    rc = run_dq(['craft', '--craft-pages', ','.join(map(str, left)), '--submit'] + pf, a.client)
+                    record_step(a.client, a.role, ','.join(map(str, left)), 'craft-retry', t0, rc)
                 if rc != 0:
                     log(f'第 {grp} 頁合成 / 提交失敗（退出碼 {rc}）→ 停手；看 tools/.cache/craft-p*-fail.png（已提交的頁重跑不會重做）')
                     return rc
