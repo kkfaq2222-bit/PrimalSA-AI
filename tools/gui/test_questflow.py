@@ -42,6 +42,11 @@ check('傳送鈕放行', qf.is_go_text('|傳送傳送'), True)
 check('讀不到不放行', qf.is_go_text('|'), False)
 check('重置提示窗', qf.is_reset_text('你是否願意花費50000重置此任務？'), True)
 
+# 剛接的任務存「第 0 步」→ 下次從第 1 步開始（2026-10-15 22222 夢德洞窟：沒存檔 → 副標題 OCR 猜成第 3 步）
+_st6 = [(i, 'talk', '', 0) for i in range(1, 7)]
+check('剛接存第 0 步 → 第 1 步', qf.pick_start_step({'quest': '夢德洞窟', 'step': 0}, '夢德洞窟', _st6, False, None)[0], 1)
+check('別的任務的存檔不用', qf.pick_start_step({'quest': '強恩一族', 'step': 0}, '夢德洞窟', _st6, False, None)[0], None)
+
 # 別名
 check('別名 mazu', qf.ALIAS['mazu'], '馬祖快遞')
 check('別名 fourjade', qf.ALIAS['fourjade'], '四寶玉之謎')

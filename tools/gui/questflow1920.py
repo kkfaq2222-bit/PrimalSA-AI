@@ -1176,7 +1176,22 @@ def run_quest(name: str, key=None, stop_after_last_boss: bool = False, use_potio
             row = find_track_row(name, scroll=False, reveal=False)
     fresh = False
     if row is None:
-        fresh = accept_top(name, side=name not in ADULT and not stop_after_last_boss)    # 成人儀式、漆黑都在任務詳情「主線」分頁
+        try:
+            fresh = accept_top(name, side=name not in ADULT and not stop_after_last_boss)    # 成人儀式、漆黑都在任務詳情「主線」分頁
+        except q.Halt as h:
+            # 正在解的任務（帳本 doing / paused）追蹤欄、任務詳情都找不到 → 多半是剛解完（2026-10-15 22222 夢德洞窟：
+            # 起始步猜錯多做幾輪，最後一輪任務已完成 → 找不到就停手、看門狗重啟）。任務詳情判讀為「已完成」才記完成繼續，否則照停手
+            if h.code != q.EXIT_NOQUEST or led.get('status') not in ('doing', 'paused') or stop_after_last_boss:
+                raise
+            st = detail_status(name, side=name not in ADULT)
+            if st != '已完成':
+                raise
+            log(f'「{name}」追蹤欄、任務詳情都找不到，任務詳情判讀為已完成（帳本原本 {led.get("status")}）→ 記完成，接著做下一個')
+            q.ledger_mark(name, 'done', 'questflow：解到一半後追蹤欄 / 任務詳情都找不到 → 判讀已完成')
+            q.save_state({'quest': name, 'step': None, 'done': True, 'at': time.strftime('%F %T')})
+            return
+        if fresh:                                # 剛接：先記「做完第 0 步」，這次中途停手的話下次從第 1 步開始，不靠副標題 OCR 猜
+            q.save_state({'quest': name, 'step': 0, 'at': time.strftime('%F %T')})
         # 回 False = 任務詳情顯示「進行中」/ 不是待接取 → 正在解的任務：追蹤欄往下拉找出來接著解（不重接、不重置）
         row = find_track_row(name, reveal=name in TRAIN_STEPS) if fresh else find_track_row(name, scroll=True, reveal=True)
         if row is None:
