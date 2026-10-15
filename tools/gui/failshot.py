@@ -148,6 +148,38 @@ def shot(src: str, reason: str):
     return p
 
 
+WATCH_KEYS = ('停手',)
+
+
+class _Watch:
+    """包住 sys.stdout：印出含「停手」的那一行就當下存圖（子程式自己的面板還開著；2026-10-15 使用者要求：
+    以前子程式結束後才由上層 fullrun 拍，只拍到主畫面）。上層 20 秒內再拍會沿用這張（DEDUP_S）"""
+
+    def __init__(self, stream, src):
+        self._s, self._src, self._buf = stream, src, ''
+
+    def write(self, data):
+        n = self._s.write(data)
+        self._buf += data
+        while '\n' in self._buf:
+            line, self._buf = self._buf.split('\n', 1)
+            if any(k in line for k in WATCH_KEYS):
+                shot(self._src, line.strip()[:200])
+        return n
+
+    def flush(self):
+        self._s.flush()
+
+    def __getattr__(self, k):
+        return getattr(self._s, k)
+
+
+def watch_stdout(src: str) -> None:
+    """子程式入口（if __name__ == '__main__'）呼叫一次：之後 print 出「停手」就當下存圖。只在直接執行時裝，測試 import 不受影響"""
+    if not isinstance(sys.stdout, _Watch):
+        sys.stdout = _Watch(sys.stdout, src)
+
+
 def latest_by_reason(log: Path = None) -> dict:
     """stats.py 用：norm(原因) → 最新一張還在的截圖路徑"""
     log = LOG if log is None else log

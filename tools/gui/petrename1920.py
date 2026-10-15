@@ -90,4 +90,6 @@ def main():
 
 
 if __name__ == '__main__':
+    import failshot
+    failshot.watch_stdout('petrename1920')       # 印出「停手」就當下存圖（面板還開著）
     sys.exit(main())
