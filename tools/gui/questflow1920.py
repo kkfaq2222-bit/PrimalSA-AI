@@ -108,6 +108,13 @@ def last_boss_step(steps) -> int:
     return max([st for st, kind, _, _ in steps if kind == 'boss'] or [0])
 
 
+def bag_in_only(bag: str, only) -> bool:
+    """--only 時這次整理背包要不要做：點名 'bag'，或它前面那組（__BAG__ ← GROUP_A、__BAG2__ ← GROUP_B）有任務被點名"""
+    if 'bag' in only:
+        return True
+    return any(n in only for n in (GROUP_A if bag == '__BAG__' else GROUP_B))
+
+
 def track_keys(name: str) -> list:
     k = q.unique_keys(name)
     if name.startswith('漆黑'):
@@ -1402,6 +1409,11 @@ def main(argv=None) -> int:
                 started = name == from_name
                 if not started:
                     continue
+            if only and name.startswith('__BAG') and not bag_in_only(name, only):
+                # --only 只做部分任務（例：一條龍 adult 階段 --only 成人儀式）時，整理背包只在它前面那組任務有被點名才做；
+                # 不然會在成人儀式後就跑掉並標 done，quests 階段解完強盜 / 彌生後反而「帳本已完成，跳過」
+                # （2026-10-15 22222 第 2 輪：08:55 / 08:57 兩次整理背包都在成人儀式後跑掉）
+                continue
             if only and name not in only and not name.startswith('__BAG'):
                 continue
             if name.startswith('__BAG'):

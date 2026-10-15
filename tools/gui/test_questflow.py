@@ -23,6 +23,15 @@ def check(name, got, want):
     print(('PASS ' if ok else 'FAIL ') + name + ('' if ok else f'  got={got!r} want={want!r}'))
 
 
+# --only 時整理背包只跟著前面那組任務（2026-10-15 22222：--only 成人儀式 把兩次整理背包都跑掉並標 done）
+check('only 成人儀式 不整理背包 1', qf.bag_in_only('__BAG__', ['成人儀式']), False)
+check('only 成人儀式 不整理背包 2', qf.bag_in_only('__BAG2__', ['成人儀式']), False)
+check('only 猜謎 不整理背包', qf.bag_in_only('__BAG2__', ['猜謎三兄弟']), False)
+check('only 強盜 → 整理背包 1', qf.bag_in_only('__BAG__', ['強盜的洞穴']), True)
+check('only 強盜 → 不做整理背包 2', qf.bag_in_only('__BAG2__', ['強盜的洞穴']), False)
+check('only 彌生 → 整理背包 2', qf.bag_in_only('__BAG2__', ['彌生和日美子']), True)
+check('only bag → 兩次都做', (qf.bag_in_only('__BAG__', ['bag']), qf.bag_in_only('__BAG2__', ['bag'])), (True, True))
+
 # 別名
 check('別名 mazu', qf.ALIAS['mazu'], '馬祖快遞')
 check('別名 fourjade', qf.ALIAS['fourjade'], '四寶玉之謎')
