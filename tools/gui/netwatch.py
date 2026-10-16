@@ -2,20 +2,27 @@
 """網路異常自動重連（只用標準函式庫）。遊戲跳出「提示：網路異常，是否重連?」時點「確定」。
 
 實測（2026-10-10）：點確定後遊戲**直接回到登入畫面**（帳號 / 密碼欄由遊戲自動帶入、登錄 / 註冊鈕），不會自動重連。
-使用者授權（2026-10-10，AGENTS.md 鐵則 2 的例外，只限這樣）：登入畫面**只點「登錄」**（用遊戲自動帶入的帳密），
-之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 檢查隊伍 / 原地遇敵。絕不輸入 / 修改 / 清除帳密欄、不點鑰匙 / 註冊、
-不讀 savepwd.txt 或登錄檔、不把帳號寫進任何 log。帳密欄空的 / 登錄後出現提示視窗 / 連續 3 次登錄失敗 / 看不懂的畫面 → halt 停手通知使用者。
+使用者授權（AGENTS.md 鐵則 2 的例外，只限這樣）：
+  - 2026-10-10：登入畫面點「登錄」（用遊戲自動帶入的帳密），之後「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 檢查隊伍 / 原地遇敵。
+  - 2026-10-16：本視窗在 tools/gui/accounts.local.json 有帳號對照時（多視窗共用遊戲記住的「上次帳號」，帳號欄可能是別的視窗的），
+    拿全視窗共用的登入輸入鎖 → 點帳號欄 → 清空 → 像素確認已空 → gui.ps1 typeacct 打入本視窗帳號 → 按登錄（retype_account）。
+    只在量過座標的 2880×1659 版面做；其他版面停手通知。
+**密碼欄絕不點、不清、不打、不讀內容**（只數深色像素判斷「有沒有字」）；不點鑰匙 / 註冊；不讀 savepwd.txt 或登錄檔；帳號不寫進任何 log。
+沒有對照的視窗：單一視窗照舊只按登錄（帳密欄要都有字）；多視窗時不自動登入，只通知人。
+停手：密碼欄空 / 帳號欄清不掉 / 打完帳號欄還是空 / 登錄後出現提示視窗（密碼錯、封號、維護、驗證碼）/ 連續 3 次登錄失敗 / 看不懂的畫面 → halt。
 
   import netwatch
   r = netwatch.guard('quest')            # 腳本迴圈每輪呼叫；要停手時直接 sys.exit(10 / 11)，否則回傳 dict
   r = netwatch.check_and_reconnect()     # 不 exit 的版本，回傳 {'status': ...}
 status：ok（沒事）/ reconnected（重連 / 重新登錄成功，已恢復）/ halt（要人類）/ fatal（連續失敗 3 次）
+多視窗：PSA_EXE_MATCH 選視窗（clients.py）；halt / 狀態 / 動作鎖各視窗一份（主視窗 tools/.cache/，其他 tools/.cache/clients/<資料夾名>/），
+只停出事的視窗；登入輸入鎖 tools/.cache/login-input.lock 全視窗共用（同時只有一個視窗在登入畫面打字）。
 命令列：
   python tools/gui/netwatch.py --once                 檢查一次
   python tools/gui/netwatch.py --watch [--interval 10]  常駐（沒有其他腳本在跑、只是掛機時用）
   python tools/gui/netwatch.py --status                印目前 halt / 失敗計數
 退出碼：0 正常、10 需要人類登入（halt）、11 連續重連失敗、2 版面不支援。
-狀態檔（tools/.cache/，不進 git）：netwatch.halt（存在 = 已停手，等人類登入；HUD 回來後自動刪除）、
+狀態檔（本視窗狀態資料夾，不進 git）：netwatch.halt（存在 = 已停手，等人類登入；HUD 回來後自動刪除）、
 netwatch.json（連續失敗計數）、netwatch.act.lock（動作鎖：同時只有一支腳本在處理重連，不會互相亂點）、netwatch.lock（--watch 單例）。
 """
 import argparse
@@ -28,6 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import actlog  # noqa: E402
+import clients  # noqa: E402
 import errlog  # noqa: E402
 import layout  # noqa: E402
 import screen_sigs  # noqa: E402
@@ -37,11 +45,13 @@ from walk import gui, log  # noqa: E402
 PS_TIMEOUT = 40                      # 單次 PowerShell 呼叫上限（秒）；逾時當讀取失敗
 READ_FAIL_MAX = 5                    # 登入畫面連續 N 輪讀不到帳密欄 / 遊戲畫面 → halt
 
-CACHE = Path(__file__).resolve().parents[1] / '.cache'
+CACHE = clients.state_dir()                             # 本視窗狀態資料夾（主視窗 = tools/.cache/）
 HALT = CACHE / 'netwatch.halt'
 STATE = CACHE / 'netwatch.json'
 ACT_LOCK = CACHE / 'netwatch.act.lock'
 WATCH_LOCK = CACHE / 'netwatch.lock'
+LOGIN_LOCK = clients.CACHE / 'login-input.lock'         # 全視窗共用：同時只有一個視窗在登入畫面打字
+LOGIN_LOCK_STALE = 90                                   # 秒；持有者當掉的舊鎖超過就接手
 
 EXIT_HALT = 10
 EXIT_FATAL = 11
@@ -70,6 +80,18 @@ QUICK_TEAM_SEQ = ('click 520 578; wait 500; click 549 320; wait 400; click 549 5
                   'click 815 520; wait 150; click 948 520; wait 300; click 720 665; wait 1500')
 LOGIN_TIMEOUT = 120                  # 登錄後等進遊戲的上限（秒）
 CARDS_BOX = (560, 280, 450, 230)     # 切換角色面板的角色卡片（讀「單人 / 隊長 / 隊員」）
+ACCT_CLICK = (800, 412)              # 帳號欄中間（點了讓輸入框取得焦點）；離密碼欄 > 50 px
+ACCT_EMPTY_MAX = 10                  # 帳號欄深色像素 < 這個數 = 空
+CLEAR_KEYS = '{END}' + '{BS}' * 40 + '{HOME}' + '{DEL}' * 40
+RETYPE_LAYOUT = '2880x1659'          # 帳號欄座標只量過這個版面
+
+
+def _in_box(pt, box, margin: int = 20) -> bool:
+    x0, x1, y0, y1 = box
+    return x0 - margin <= pt[0] <= x1 + margin and y0 - margin <= pt[1] <= y1 + margin
+
+
+assert not _in_box(ACCT_CLICK, PWD_BOX), '帳號欄點擊點太靠近密碼欄'
 
 
 def _scale_sig(sig: str) -> str:
@@ -134,6 +156,18 @@ def _ocr(box, *opts) -> list:
     except ValueError:
         return []
     return [l['text'] for l in d.get('lines', [])] if d.get('ok') else []
+
+
+def _acct_info() -> dict | None:
+    """gui.ps1 acctinfo：本視窗有沒有帳號對照（只有 yes/no 與長度，不經手帳號）、PrimalSA 程序數。讀不到回 None"""
+    rc, out = _ps('acctinfo')
+    if rc != 0:
+        return None
+    kv = dict(t.split('=', 1) for t in out.split() if '=' in t)
+    try:
+        return {'has': kv.get('acct') == 'yes', 'len': int(kv.get('len', 0)), 'procs': int(kv.get('procs', 0))}
+    except ValueError:
+        return None
 
 
 def hud_ok() -> bool:
@@ -239,7 +273,8 @@ def login_fields_filled() -> bool | None:
 
 
 def halt(reason: str, src: str) -> dict:
-    """停手：寫 halt 檔、errlog、大聲警告。絕不輸入帳密"""
+    """停手（只停本視窗）：寫本視窗 halt 檔、errlog、大聲警告。reason 不准含帳號"""
+    reason = f'[{clients.label()}] {reason}'                 # 視窗名稱（資料夾名，不是帳號）
     try:
         CACHE.mkdir(parents=True, exist_ok=True)
         HALT.write_text(f'{time.strftime("%Y-%m-%d %H:%M:%S")} {reason}\n', encoding='utf-8')
@@ -249,7 +284,7 @@ def halt(reason: str, src: str) -> dict:
     actlog.add('netwatch', f'HALT {reason}')
     bar = '!' * 64
     print(f'\n{bar}\n!!! 遊戲回到登入畫面 / 需要人類登入：{reason}\n'
-          f'!!! 所有自動化已停止（退出碼 {EXIT_HALT}）。請使用者自己登入並進入遊戲，不要讓 AI 輸入帳密（鐵則 2）。\n'
+          f'!!! 這個視窗的自動化已停止（退出碼 {EXIT_HALT}）。請使用者自己登入並進入遊戲（AI 不碰密碼欄，鐵則 2）。\n'
           f'!!! 人類登入後恢復：確認 5 人同隊（/psa-quick-team）、原地遇敵開著，再重新啟動腳本。\n{bar}\n', flush=True)
     return {'status': 'halt', 'reason': reason}
 
@@ -329,7 +364,15 @@ def relogin(src: str) -> dict:
         st = _load()
         if st.get('login_fails', 0) >= MAX_FAILS:
             return halt(f'連續 {MAX_FAILS} 次登錄失敗', src) | {'status': 'fatal'}
-        filled = login_fields_filled()
+        info = _acct_info()
+        if info is None:
+            filled = None                    # 讀不到 acctinfo 跟讀不到欄位一樣：下輪重試
+        elif info['has']:
+            return retype_account(src, st)
+        elif info['procs'] > 1:
+            return halt(f'多視窗（{info["procs"]} 個客戶端）且本視窗沒有帳號對照（accounts.local.json），不自動登入', src)
+        else:
+            filled = login_fields_filled()
         if filled is None:
             # 讀取失敗：不點登錄、不以「欄位空」halt；下輪再試，連續 READ_FAIL_MAX 輪讀不到才 halt
             st['read_fails'] = st.get('read_fails', 0) + 1
@@ -345,38 +388,118 @@ def relogin(src: str) -> dict:
             return halt('登入畫面的帳號 / 密碼欄是空的（遊戲沒自動帶入），不自己填', src)
         i = errlog.add('斷線回到登入畫面，自動按「登錄」重新登入（使用者授權）', source=src)
         log('netwatch：登入畫面，帳密欄已有內容 → 按登錄')
-        gui('click', str(LOGIN_BTN[0]), str(LOGIN_BTN[1]), note='按登錄')
-        deadline = time.time() + LOGIN_TIMEOUT
-        picked = 0                       # 一鍵全登最多點 2 次
-        t0 = time.time()
-        while time.time() < deadline:
-            time.sleep(2)
-            if hud_ok():
-                st['login_fails'] = 0
-                st['fails'] = 0
-                _save(st)
-                _release(HALT)
-                errlog.fix(i, '登錄 → 一鍵全登 → 進遊戲成功，已做恢復檢查（netwatch.relogin）')
-                actlog.add('netwatch', '自動登錄成功')
-                log(f'netwatch：登錄成功，{int(time.time() - t0)} 秒回到遊戲')
-                time.sleep(2)
-                return {'status': 'reconnected', 'relogin': True, 'recover': recover(src, True, True)}
-            if _match(SIG_CHARSEL) is True:
-                if picked >= 2:
-                    break
-                picked += 1
-                log('netwatch：選擇角色面板 → 一鍵全登')
-                gui('click', str(ALL_LOGIN_BTN[0]), str(ALL_LOGIN_BTN[1]), note='一鍵全登')
-                continue
-            if _match(SIG_DIALOG) is True:
-                # 登錄後的提示視窗（密碼錯誤 / 封停 / 維護 / 驗證…）：不點、不重試
-                return halt('登錄後出現提示視窗（可能是密碼錯誤 / 封停 / 維護 / 驗證），不處理', src)
-        st['login_fails'] = st.get('login_fails', 0) + 1
-        _save(st)
-        errlog.fix(i, f'登錄後 {LOGIN_TIMEOUT} 秒沒進遊戲（失敗 {st["login_fails"]}/{MAX_FAILS}），停手')
-        return halt(f'登錄後 {LOGIN_TIMEOUT} 秒沒進遊戲 / 畫面不明（第 {st["login_fails"]} 次）', src)
+        out = gui('click', str(LOGIN_BTN[0]), str(LOGIN_BTN[1]), note='按登錄')
+        if 'locktimeout' in out:
+            errlog.fix(i, '點擊鎖逾時，登錄沒按到，下輪再試')
+            return {'status': 'ok', 'failed': True}
+        return _after_login(src, st, i)
     finally:
         _release(ACT_LOCK)
+
+
+def _read_fail(st: dict, src: str, what: str) -> dict:
+    """讀不到畫面：不點、不 halt；連續 READ_FAIL_MAX 輪才 halt"""
+    st['read_fails'] = st.get('read_fails', 0) + 1
+    _save(st)
+    if st['read_fails'] >= READ_FAIL_MAX:
+        return halt(f'連續 {READ_FAIL_MAX} 輪讀不到{what}（不是欄位空）', src)
+    log(f'netwatch：登入畫面讀不到{what}（{st["read_fails"]}/{READ_FAIL_MAX}），本輪不動作')
+    return {'status': 'ok', 'failed': True}
+
+
+def retype_account(src: str, st: dict) -> dict:
+    """本視窗有帳號對照：清空帳號欄 → 打入本視窗帳號 → 按登錄。呼叫端已持有本視窗 ACT_LOCK。
+    密碼欄絕不點 / 清 / 打 / 讀內容（只數深色像素）。帳號不經手（gui.ps1 typeacct 自己讀設定檔）。"""
+    if layout.resolve() != RETYPE_LAYOUT:
+        return halt(f'帳號欄座標只量過 {RETYPE_LAYOUT}，目前 {layout.resolve()}，不自動打帳號', src)
+    pwd = _dark_count(PWD_BOX)
+    if pwd is None:
+        return _read_fail(st, src, '密碼欄')
+    if pwd < 10:
+        return halt('登入畫面的密碼欄是空的（遊戲沒記住密碼），不自己填', src)
+    if not _take(LOGIN_LOCK, LOGIN_LOCK_STALE):
+        log('netwatch：別的視窗正在登入畫面打字（login-input.lock），本輪等待')
+        return {'status': 'ok', 'busy': True}
+    try:
+        if _match(SIG_LOGIN) is not True:
+            return _read_fail(st, src, '登入畫面（拿到鎖後確認）')
+        p1 = _dark_count(PWD_BOX)
+        if p1 is None or p1 < 10:
+            return halt('拿到登入鎖後密碼欄變空 / 讀不到，不打字', src)
+        a = _dark_count(ACCT_BOX)
+        if a is None:
+            return _read_fail(st, src, '帳號欄')
+        if st.get('read_fails'):
+            st['read_fails'] = 0
+            _save(st)
+        if a >= ACCT_EMPTY_MAX:
+            out = gui('seq', f'click {ACCT_CLICK[0]} {ACCT_CLICK[1]}; wait 200; key {CLEAR_KEYS}', note='清空帳號欄')
+            if 'locktimeout' in out:
+                return {'status': 'ok', 'failed': True}
+            a = _dark_count(ACCT_BOX)
+            if a is None:
+                return _read_fail(st, src, '帳號欄（清空後）')
+            if a >= ACCT_EMPTY_MAX:
+                return halt('帳號欄清不掉（清空後仍有字），不打字', src)
+        else:
+            out = gui('click', str(ACCT_CLICK[0]), str(ACCT_CLICK[1]), note='點帳號欄')
+            if 'locktimeout' in out:
+                return {'status': 'ok', 'failed': True}
+        if _match(SIG_LOGIN) is not True:
+            return halt('清空帳號欄後畫面不是登入畫面，不打字', src)
+        p2 = _dark_count(PWD_BOX)
+        if p2 is None or p2 < 10:
+            return halt('清空帳號欄後密碼欄變空 / 讀不到（可能點錯欄位），不打字', src)
+        out = gui('typeacct', note='打入本視窗帳號')
+        if 'noacct' in out:
+            return halt('打字時找不到本視窗帳號對照', src)
+        if 'locktimeout' in out or not out.startswith('typeacct'):
+            return halt('打帳號沒有確認完成（點擊鎖逾時 / 輸出異常），帳號欄狀態不明', src)
+        a = _dark_count(ACCT_BOX)
+        if a is None or a < ACCT_EMPTY_MAX:
+            return halt('打完帳號後帳號欄還是空的 / 讀不到', src)
+        i = errlog.add('斷線回到登入畫面，改回本視窗帳號後按「登錄」（使用者授權）', source=src)
+        log('netwatch：已打入本視窗帳號 → 按登錄')
+        out = gui('click', str(LOGIN_BTN[0]), str(LOGIN_BTN[1]), note='按登錄')
+        if 'locktimeout' in out:
+            errlog.fix(i, '點擊鎖逾時，登錄沒按到，下輪再試')
+            return {'status': 'ok', 'failed': True}
+    finally:
+        _release(LOGIN_LOCK)
+    return _after_login(src, st, i)
+
+
+def _after_login(src: str, st: dict, i) -> dict:
+    """按了登錄之後：選角一鍵全登 → 等 HUD → recover；提示視窗 / 逾時 → halt"""
+    deadline = time.time() + LOGIN_TIMEOUT
+    picked = 0                       # 一鍵全登最多點 2 次
+    t0 = time.time()
+    while time.time() < deadline:
+        time.sleep(2)
+        if hud_ok():
+            st['login_fails'] = 0
+            st['fails'] = 0
+            _save(st)
+            _release(HALT)
+            errlog.fix(i, '登錄 → 一鍵全登 → 進遊戲成功，已做恢復檢查（netwatch.relogin）')
+            actlog.add('netwatch', '自動登錄成功')
+            log(f'netwatch：登錄成功，{int(time.time() - t0)} 秒回到遊戲')
+            time.sleep(2)
+            return {'status': 'reconnected', 'relogin': True, 'recover': recover(src, True, True)}
+        if _match(SIG_CHARSEL) is True:
+            if picked >= 2:
+                break
+            picked += 1
+            log('netwatch：選擇角色面板 → 一鍵全登')
+            gui('click', str(ALL_LOGIN_BTN[0]), str(ALL_LOGIN_BTN[1]), note='一鍵全登')
+            continue
+        if _match(SIG_DIALOG) is True:
+            # 登錄後的提示視窗（密碼錯誤 / 封停 / 維護 / 驗證…）：不點、不重試
+            return halt('登錄後出現提示視窗（可能是密碼錯誤 / 封停 / 維護 / 驗證），不處理', src)
+    st['login_fails'] = st.get('login_fails', 0) + 1
+    _save(st)
+    errlog.fix(i, f'登錄後 {LOGIN_TIMEOUT} 秒沒進遊戲（失敗 {st["login_fails"]}/{MAX_FAILS}），停手')
+    return halt(f'登錄後 {LOGIN_TIMEOUT} 秒沒進遊戲 / 畫面不明（第 {st["login_fails"]} 次）', src)
 
 
 # ---------------- 主流程 ----------------
@@ -459,7 +582,7 @@ def main() -> int:
         print(json.dumps(r, ensure_ascii=False, default=str))
         return {'halt': EXIT_HALT, 'fatal': EXIT_FATAL}.get(r['status'], 0)
     if not _take(WATCH_LOCK, 120):
-        log('已有另一支 netwatch --watch 在跑（tools/.cache/netwatch.lock）')
+        log(f'已有另一支 netwatch --watch 在跑（{WATCH_LOCK}）')
         return 3
     log(f'netwatch 常駐：每 {a.interval} 秒檢查網路異常提示（其他腳本在跑時它們自己會檢查，這支只在單獨掛機時用）')
     try:
