@@ -24,6 +24,51 @@ def fail_shot(pd, r, why):
         pass
 
 
+def battle_level(uikit, *img):
+    """寵物分頁中間下方黃字「0轉N」的 N（選中的那一格）；多種二值化讀，取出現最多的值，讀不到 None"""
+    import collections
+    import re
+    vals = []
+    for box in ((310, 380, 110, 26), (320, 382, 90, 22)):
+        for opts in (('-Zooms', '3,4', '-Dark', '170'), ('-Zooms', '3,4', '-Dark', '130'), ('-Zooms', '3,4')):
+            for t in uikit.ocr(box, *opts, *img):
+                m = re.search(r'\d\s*轉\s*(\d+)', t)
+                if m and 1 <= int(m[1]) <= 200:
+                    vals.append(int(m[1]))
+    return collections.Counter(vals).most_common(1)[0][0] if vals else None
+
+
+STAT_ROWS = (143, 171, 199)       # 寵物分頁右邊 攻擊 / 防禦 / 敏捷 數值列中心 y（數值 x≈560~640，格式「275+(0)」）
+STAT_SUM_MIN = 35                 # 第二道防呆（使用者 2026-10-16）：三項合計要超過這個才算戰寵；1 級寵物約 20（實測 1 級鳥 7+4+8）
+
+
+def battle_pet_ok(lv, sm) -> bool:
+    """第 2 格格魯西斯是不是戰寵（使用者 2026-10-16：有順序，不互相驗證）：
+    ①等級 > 1 → 出戰；②等級讀不到 / 讀到 1（可能讀錯）才看攻防敏合計 > STAT_SUM_MIN → 出戰；都不成立才擋"""
+    if lv is not None and lv > 1:
+        return True
+    return sm is not None and sm > STAT_SUM_MIN
+
+
+def stat_sum(uikit, *img):
+    """攻擊 + 防禦 + 敏捷（「+」前的基礎值）；每列分開讀、兩種讀法取出現最多的值，任一列讀不到回 None。
+    img：測試用，傳 ('-Image', 截圖檔) 改讀檔案"""
+    import collections
+    import re
+    tot = 0
+    for y in STAT_ROWS:
+        vals = []
+        for opts in (('-Zooms', '2,3', '-Dark', '150'), ('-Zooms', '3,4', '-Dark', '0')):
+            for t in uikit.ocr((545, y - 12, 110, 24), *opts, *img):
+                m = re.match(r'(\d+)\+', t)
+                if m:
+                    vals.append(int(m[1]))
+        if not vals:
+            return None
+        tot += collections.Counter(vals).most_common(1)[0][0]
+    return tot
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--client', default='kkfaq22222')
@@ -55,7 +100,17 @@ def main():
                 continue
             # 戰寵 = 第 2 格（使用者 2026-10-14 改成領個人倉庫第 1 隻，不一定是朵拉比斯；2026-10-15 333 全部被「沒讀到朵拉比斯」擋下）。
             # 騎乘已在 lock 階段鎖定，這裡不再按（再按可能變成取消騎乘）。護欄：第 2 格要有寵物，且不是騎寵格魯西斯
-            if pd.slot_empty(1) or names[1] == '格魯西斯':
+            # 2026-10-16 333：個人倉庫第 1 隻本身就是格魯西斯（127 級戰寵）→ 被當成騎寵擋下。剛抓的騎寵是 1 級，
+            # 所以第 2 格是格魯西斯時看等級（此時選取的就是第 2 格）：> 1 級 = 領出來的戰寵；1 級 / 讀不到才擋
+            # 第二道防呆（使用者 2026-10-16：等級可能讀錯）：攻擊 + 防禦 + 敏捷合計 > STAT_SUM_MIN；等級 > 1 不成立時才用它決定
+            ok2 = True
+            if names[1] == '格魯西斯':
+                lv2 = battle_level(uikit)
+                sm2 = None if (lv2 and lv2 > 1) else stat_sum(uikit)      # 等級過了就不用讀合計
+                ok2 = battle_pet_ok(lv2, sm2)
+                pd.log(f'角色{r} 第 2 格是格魯西斯：等級 {lv2}、攻防敏合計 {sm2} → {"戰寵" if ok2 else "不確定是戰寵"}'
+                       f'（先看等級 > 1；不成立才看合計 > {STAT_SUM_MIN}）')
+            if pd.slot_empty(1) or not ok2:
                 pd.log(f'角色{r} 第 2 格沒有戰寵（{names}）→ 不按出戰')
                 fail_shot(pd, r, f'角色{r} 第 2 格沒有戰寵 {names}')
                 rc = 5
