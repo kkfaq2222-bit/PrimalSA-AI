@@ -136,7 +136,7 @@ SERVER_NAMED = {
     'titlematch': ('Mode', 'Dir', 'Image', 'Out', 'Y', 'Thr'),
     'digitmatch': ('Image', 'Boxes'),
 }
-INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'max', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
+INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'typeacct', 'max', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
 START_TIMEOUT = 20.0
 IDLE_MARGIN = 15.0          # client 閒置超過 (SERVER_IDLE_MIN*60 − 此秒數) 就先重開 server
 SERVER_IDLE_MIN = 3         # serve.ps1 閒置看門狗（分鐘）：長程序每秒都有請求，不會誤殺；殘留的 server 最多活這麼久

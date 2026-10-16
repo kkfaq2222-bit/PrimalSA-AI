@@ -14,3 +14,6 @@ tools/mods/*/.claude-plugin/types/
 
 # 誤存的遊戲截圖
 /*.png
+
+# 每視窗帳號對照（本機設定，含帳號，絕不 commit）
+accounts.local.json

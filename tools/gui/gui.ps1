@@ -19,6 +19,13 @@
 #   -Note "用途"                       任何指令後面可加，附註寫進操作 log（gui.sh 用環境變數 PSA_NOTE）
 #   操作 log：click / dclick / drag / key / max / end 會寫一行到 tools/.cache/actions.log（只留最新 100 行，psa-hud pane 顯示）；shot / pixel / wait* 不記
 #   gui.ps1 fg <指令> ...             用舊的前景模式執行（背景模式失靈時的備案），例：fg click 763 760、seq "fg; click ..."
+#   gui.ps1 typeacct                  在目前焦點的輸入框打入「本視窗的帳號」（accounts.local.json；帳號不經參數、不印、不寫 log，只記長度）
+#   gui.ps1 acctinfo                  唯讀：印 client=<資料夾名> acct=yes|no len=<長度> procs=<PrimalSA 程序數>（不印帳號）
+# 點擊鎖（psawin.ps1）：click / dclick / drag / key / typeacct / max / end 每一下先拿全域具名 Mutex（Local\PrimalSA-AI-Input），
+#   移游標 → 送訊息 → 還原游標 → 放鎖；等超過 5 秒（PSA_INPUT_LOCK_MS）就不點，印 locktimeout、exit 4、寫 actions.log。
+#   shot / pixel / waitpix / info 不拿鎖。前一個持有者沒放就結束（abandoned）會接手並寫 actions.log。
+# 多視窗：PSA_EXE_MATCH 選視窗（見 psaclient.ps1）；fg 模式的 gui-session.txt 依視窗分開（主視窗 tools/.cache/，其他 tools/.cache/clients/<資料夾名>/）。
+# 退出碼：0 正常、1 遊戲沒在跑 / 截圖失敗、3 最小化（-NoRestore 1）、4 點擊鎖逾時（沒點）、5 typeacct 本視窗沒有帳號設定。
 # 座標系：縮圖座標 × Scale = 客戶區像素座標。Scale 預設 2。
 # 背景模式（預設，2026-10-09 實測可用）：不把遊戲拉到前景，使用者可以繼續用其他視窗。
 #   - 滑鼠：先 PostMessage WM_ACTIVATEAPP / WM_ACTIVATE / WM_SETFOCUS 讓 Unity 以為有焦點
@@ -123,7 +130,9 @@ public class Guard {
 # 視窗 handle 快取（只給唯讀的 pixel / info 用；常駐 serve.ps1 以 & 呼叫、同一 runspace，$global: 跨次保留；一次性執行每次新行程，等於沒快取）。
 # 命中條件：IsWindow 且該視窗所屬行程 PID == 快取的 PrimalSA PID（防 handle 被回收給別的視窗）；任一不符就重查（Get-Process 約 27 ms）。
 # click / key 等輸入指令一律不用快取，每次重查，確保不會把輸入送到錯的視窗。
+. (Join-Path $PSScriptRoot 'psawin.ps1')
 $h = [IntPtr]::Zero
+$ClientDir = ''; $ProcCount = 0
 if (($Cmd -eq 'pixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:__psa_pid) {
   $__psa_wp = [uint32]0
   if ([W]::IsWindow([IntPtr]$global:__psa_hwnd)) {
@@ -133,10 +142,13 @@ if (($Cmd -eq 'pixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:
 }
 if ($h -eq [IntPtr]::Zero) {
   $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
+  $ProcCount = @($proc | Where-Object { $_ }).Count
   # 同時開多個客戶端時，用環境變數 PSA_EXE_MATCH（帳號代號（clients.json 對照）或客戶端資料夾名，例：kkfaq11111 / PrimalSA222）指定要操作哪一個
-  if ($env:PSA_EXE_MATCH) { . (Join-Path $PSScriptRoot 'psaclient.ps1'); $proc = Select-PsaProc $proc }
+  # 沒設定 = 主視窗（最早啟動的那個；多開時不能把整個陣列當成一個視窗）
+  . (Join-Path $PSScriptRoot 'psaclient.ps1'); $proc = Select-PsaProc $proc
   if (-not $proc) { $global:__psa_hwnd = $null; $global:__psa_pid = $null; Write-Error "PrimalSA 沒有在執行"; exit 1 }
   $h = $proc.MainWindowHandle
+  try { $ClientDir = Split-Path -Leaf (Split-Path -Parent @($proc)[0].Path) } catch { $ClientDir = '' }
   if ($h -ne [IntPtr]::Zero) { $global:__psa_hwnd = [int64]$h; $global:__psa_pid = [int]@($proc)[0].Id }
 }
 # 最小化時 Unity 不繪製，要還原；用 SW_SHOWNOACTIVATE(4) 不搶焦點
@@ -152,6 +164,11 @@ $WaitOk = $true
 
 # ---- fg 模式：任務期間的使用者狀態（前景視窗、游標）存在檔案裡，跨多次呼叫保留，end 時還原 ----
 $stateFile = Join-Path $PSScriptRoot "..\.cache\gui-session.txt"
+if ($env:PSA_EXE_MATCH) {
+  # 其他視窗各自一份（主視窗沿用原路徑）；資料夾名只留安全字元（與 clients.py safe() 相同）
+  $__cn = ((Resolve-PsaClient $env:PSA_EXE_MATCH) -replace '[^0-9A-Za-z_.-]', '_').Trim('.'); if (-not $__cn) { $__cn = '_' }
+  $stateFile = Join-Path $PSScriptRoot "..\.cache\clients\$__cn\gui-session.txt"
+}
 function SetFg($hwnd) {
   # 暫時把本執行緒的輸入接到目前前景視窗的執行緒，才能繞過前景鎖定（不然只會讓工作列閃爍）
   $me = [W]::GetCurrentThreadId(); $fgT = [W]::GetWindowThreadProcessId([W]::GetForegroundWindow(), [IntPtr]::Zero)
@@ -238,6 +255,9 @@ function ActLog([string]$msg) {
   } catch { }
 }
 
+# 拿點擊鎖；逾時（Enter-PsaInputLock 已寫 actions.log）→ 印 locktimeout、exit 4（這一下不點；seq 後面的動作也不做）
+function Lock([string]$what) { if (-not (Enter-PsaInputLock $what)) { Write-Output 'locktimeout'; exit 4 } }
+
 function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
  switch ($Cmd) {
   'fg' {
@@ -271,16 +291,20 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     $holdMs = 40; if ($env:PSA_CLICK_HOLD_MS -match '^\d+$') { $holdMs = [Math]::Min([int]$env:PSA_CLICK_HOLD_MS, 1000) }
     if ($A3 -eq 'right') { $dn = 0x0204; $up = 0x0205; $mk = 2; $fdn = 8; $fup = 16 } else { $dn = 0x0201; $up = 0x0202; $mk = 1; $fdn = 2; $fup = 4 }
     if ($script:Fg) {
-      Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
-      [W]::mouse_event($fdn, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds ([Math]::Max(60, $holdMs))
-      [W]::mouse_event($fup, 0, 0, 0, [IntPtr]::Zero)
+      try {
+        Lock "click $A1,$A2"
+        Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
+        [W]::mouse_event($fdn, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds ([Math]::Max(60, $holdMs))
+        [W]::mouse_event($fup, 0, 0, 0, [IntPtr]::Zero)
+      } finally { Exit-PsaInputLock }
     } else {
       try {
+        Lock "click $A1,$A2"
         BgBegin
         BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
         BgMsg $dn $mk $A1 $A2; Start-Sleep -Milliseconds $holdMs
         BgMsg $up 0 $A1 $A2
-      } finally { BgEnd }
+      } finally { BgEnd; Exit-PsaInputLock }
     }
     ActLog "click $A1,$A2$(if ($A3) { ' ' + $A3 })"
     "click $A1,$A2" + $(if (-not $script:Fg -and [Guard]::Swallowed) { "（擋下使用者滑鼠 $([Guard]::Swallowed) 次）" })
@@ -288,36 +312,44 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
   'dclick' {
     # 雙擊：游標不動、兩次按放間隔 80ms（在 Windows 雙擊時間內）。倉庫存入 / 取出用
     if ($script:Fg) {
-      Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
-      for ($i = 0; $i -lt 2; $i++) {
-        [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 40
-        [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero); if ($i -eq 0) { Start-Sleep -Milliseconds 80 }
-      }
+      try {
+        Lock "dclick $A1,$A2"
+        Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
+        for ($i = 0; $i -lt 2; $i++) {
+          [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 40
+          [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero); if ($i -eq 0) { Start-Sleep -Milliseconds 80 }
+        }
+      } finally { Exit-PsaInputLock }
     } else {
       # 背景模式未實測：第二下用 WM_LBUTTONDBLCLK（0x0203），照 Windows 雙擊的訊息順序送
       try {
+        Lock "dclick $A1,$A2"
         BgBegin
         BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
         BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
         BgMsg 0x0202 0 $A1 $A2; Start-Sleep -Milliseconds 80
         BgMsg 0x0203 1 $A1 $A2; Start-Sleep -Milliseconds 40
         BgMsg 0x0202 0 $A1 $A2
-      } finally { BgEnd }
+      } finally { BgEnd; Exit-PsaInputLock }
     }
     ActLog "dclick $A1,$A2"
     "dclick $A1,$A2"
   }
   'drag' {
     if ($script:Fg) {
-      Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
-      [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero)
-      for ($i = 1; $i -le 10; $i++) {
-        $x = [double]$A1 + ([double]$A3 - [double]$A1) * $i / 10; $y = [double]$A2 + ([double]$A4 - [double]$A2) * $i / 10
-        MoveTo $x $y; Start-Sleep -Milliseconds 30
-      }
-      [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
+      try {
+        Lock "drag $A1,$A2"
+        Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
+        [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero)
+        for ($i = 1; $i -le 10; $i++) {
+          $x = [double]$A1 + ([double]$A3 - [double]$A1) * $i / 10; $y = [double]$A2 + ([double]$A4 - [double]$A2) * $i / 10
+          MoveTo $x $y; Start-Sleep -Milliseconds 30
+        }
+        [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
+      } finally { Exit-PsaInputLock }
     } else {
       try {
+        Lock "drag $A1,$A2"
         BgBegin
         BgMsg 0x0200 0 $A1 $A2; Start-Sleep -Milliseconds 40
         BgMsg 0x0201 1 $A1 $A2; Start-Sleep -Milliseconds 40
@@ -326,28 +358,60 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
           BgMsg 0x0200 1 $x $y; Start-Sleep -Milliseconds 30
         }
         BgMsg 0x0202 0 $A3 $A4
-      } finally { BgEnd }
+      } finally { BgEnd; Exit-PsaInputLock }
     }
     ActLog "drag $A1,$A2 -> $A3,$A4"
     "drag $A1,$A2 -> $A3,$A4"
   }
   'max' {
     # 最大化一定會把遊戲帶到前景；做完要 end
-    ActLog 'max'; Focus; [W]::ShowWindow($h, 3) | Out-Null; Start-Sleep -Milliseconds 800
+    try { Lock 'max'; ActLog 'max'; Focus; [W]::ShowWindow($h, 3) | Out-Null } finally { Exit-PsaInputLock }
+    Start-Sleep -Milliseconds 800
     [W]::GetClientRect($h, [ref]$r) | Out-Null; "client=$($r.R)x$($r.B)"
   }
   'key' {
-    ActLog "key $A1"
-    if ($script:Fg) { Focus; [System.Windows.Forms.SendKeys]::SendWait($A1) } else { BgKeys $A1 }
+    try {
+      Lock "key $A1"
+      ActLog "key $A1"
+      if ($script:Fg) { Focus; [System.Windows.Forms.SendKeys]::SendWait($A1) } else { BgKeys $A1 }
+    } finally { Exit-PsaInputLock }
     "key $A1"
+  }
+  'typeacct' {
+    # 打入本視窗帳號（只送 WM_CHAR，背景模式）：鍵 = 本視窗資料夾名 → PSA_EXE_MATCH 原值 → 解析後的名字。
+    # 帳號只留在這個區塊的變數裡：不印、不寫 log、不進例外訊息（只記長度）
+    $keys = @($ClientDir, $env:PSA_EXE_MATCH)
+    if ($env:PSA_EXE_MATCH) { $keys += (Resolve-PsaClient $env:PSA_EXE_MATCH) }
+    $acct = Get-PsaAccount $keys
+    if (-not $acct) { ActLog 'typeacct：本視窗沒有帳號設定，不打字'; Write-Output 'typeacct noacct'; exit 5 }
+    $n = $acct.Length
+    try {
+      Lock "typeacct（$n 字）"
+      Wake
+      foreach ($ch in $acct.ToCharArray()) { BgChar $ch }
+    } finally { Exit-PsaInputLock; $acct = $null }
+    ActLog "typeacct（$n 字）"
+    "typeacct $n"
+  }
+  'acctinfo' {
+    # 唯讀：本視窗有沒有帳號設定（只印長度）、目前幾個 PrimalSA 程序（netwatch 判斷多視窗用）
+    $keys = @($ClientDir, $env:PSA_EXE_MATCH)
+    if ($env:PSA_EXE_MATCH) { $keys += (Resolve-PsaClient $env:PSA_EXE_MATCH) }
+    $acct = Get-PsaAccount $keys
+    $len = if ($acct) { $acct.Length } else { 0 }
+    $acct = $null
+    "client=$ClientDir acct=$(if ($len) { 'yes' } else { 'no' }) len=$len procs=$ProcCount"
   }
   'end' {
     if (-not (Test-Path $stateFile)) { "end: 沒有要還原的狀態（任務期間沒切過前景）"; break }
     $v = (Get-Content $stateFile -Raw).Trim() -split ' '
     Remove-Item $stateFile
-    [W]::SetCursorPos([int]$v[1], [int]$v[2]) | Out-Null
-    $prev = [IntPtr][int64]$v[0]
-    if ($prev -ne [IntPtr]::Zero -and $prev -ne $h) { SetFg $prev }
+    try {
+      Lock 'end'
+      [W]::SetCursorPos([int]$v[1], [int]$v[2]) | Out-Null
+      $prev = [IntPtr][int64]$v[0]
+      if ($prev -ne [IntPtr]::Zero -and $prev -ne $h) { SetFg $prev }
+    } finally { Exit-PsaInputLock }
     ActLog 'end 還原前景'
     "end: 已還原前景視窗與游標"
   }
@@ -437,7 +501,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       if ($t[0]) { Invoke-Gui $t[0] $t[1] $t[2] $t[3] $t[4] $t[5] }
     }
   }
-  default { "未知指令：$Cmd（shot|click|dclick|drag|key|info|max|end|wait|seq|fg）" }
+  default { "未知指令：$Cmd（shot|click|dclick|drag|key|typeacct|acctinfo|info|max|end|wait|seq|fg）" }
 }
 }
 Invoke-Gui $Cmd $A1 $A2 $A3 $A4 $A5

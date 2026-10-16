@@ -155,6 +155,9 @@ def gui(*args: str, note: str = '') -> str:
             raise          # 輸入類逾時：動作做到哪不明，不能當沒事，交給呼叫端 / 使用者
         log(f'警告：唯讀 gui {args[0]} 逾時（server 已重開），視同讀圖失敗', act=False)
         return ''          # 唯讀逾時 = 這一輪讀圖失敗，回空結果讓呼叫端進下一輪
+    if r.returncode == 4:
+        # 點擊鎖等超過 5 秒（別的視窗 / 終端機一直佔著輸入）：這一下沒點，gui.ps1 已寫 actions.log
+        log(f'警告：gui {args[0]} 點擊鎖逾時，這一下沒點（rc=4）')
     if r.returncode == 125:
         # 常駐 server 處理輸入類請求時中途結束：動作可能做了一半，不重送；留事件讓使用者 / 呼叫端知道
         log(f'警告：gui {args[0]} 時常駐 server 中途結束（rc=125，輸入類不重送，動作可能沒做完）')

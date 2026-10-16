@@ -16,7 +16,7 @@ function Resolve-PsaClient([string]$m) {
 function Select-PsaProc($procs) {
   $m = Resolve-PsaClient $env:PSA_EXE_MATCH
   $all = @($procs | Where-Object { $_ -and $_.Path })
-  if (-not $m) { return $all | Select-Object -First 1 }
+  if (-not $m) { return $all | Sort-Object { try { $_.StartTime } catch { [datetime]::MaxValue } } | Select-Object -First 1 }   # 沒設定 = 主視窗：最早啟動的
   $exact = @($all | Where-Object { (Split-Path -Leaf (Split-Path -Parent $_.Path)) -eq $m })
   if ($exact.Count -gt 0) { return $exact[0] }
   $part = @($all | Where-Object { $_.Path -like "*$m*" })

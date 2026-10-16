@@ -30,7 +30,7 @@ PrimalSA-AI/
     schemadump/        SchemaDump.cs：從 HotUpdate.dll 抽 Tabtoy 欄位對照與列舉（ReflectionOnly，不執行遊戲程式）
     query/psa.py       知識庫查詢工具（搜尋、交叉查詢、跨地圖路線、通行格）
     gui/gui.sh         遊戲畫面操作（截圖、點擊、拖曳、按鍵）；用法與按鈕地圖見 .claude/skills/psa-game-ui/
-                       watch.py（零輸入即時狀態監看 → tools/.cache/state.json，psa-hud 啟動；HUD 數值用 digitmatch.py 樣板比對為主、stat.ps1 OCR 補漏；state 只供顯示，不能當點擊依據）、serve.ps1（常駐 server，winenv.GuiServer 啟動；WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）、bench.py（唯讀量測 / soak）、failshot.py（所有停手 / 暫時性失敗當下存圖 → tools/.cache/fail/，同原因留 3 張、總量 200；`stats.py errors` 列出對應截圖）、test_*（離線測試）
+                       watch.py（零輸入即時狀態監看 → tools/.cache/state.json，psa-hud 啟動；HUD 數值用 digitmatch.py 樣板比對為主、stat.ps1 OCR 補漏；state 只供顯示，不能當點擊依據）、serve.ps1（常駐 server，winenv.GuiServer 啟動；WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）、bench.py（唯讀量測 / soak）、clients.py（PSA_EXE_MATCH 選視窗、每視窗狀態資料夾：主視窗 tools/.cache/、其他 tools/.cache/clients/<資料夾名>/）、accounts.py（視窗 → 帳號對照檢查，`accounts.py check` 不印帳號）、psawin.ps1（點擊鎖：每一下 click / drag / key 拿全域具名 Mutex，等超過 5 秒不點、exit 4）、failshot.py（所有停手 / 暫時性失敗當下存圖 → tools/.cache/fail/，同原因留 3 張、總量 200；`stats.py errors` 列出對應截圖）、test_*（離線測試）
     web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
     .cache/            匯出時的暫存（HotUpdate.dll 等），可刪
 ```
@@ -40,8 +40,11 @@ PrimalSA-AI/
 1. **`GameClient/` 是唯讀的**：不得新增、修改、刪除、搬移、重新命名其中任何檔案或資料夾，也不要把任何輸出寫進去。
    工具只能讀取它；所有產出寫到 `knowledge/` 或 `tools/.cache/`。遊戲自己更新 / 下載資源不在此限。
 2. **不碰帳號機密**：不讀取、不輸出、不記錄密碼與登入資訊（例：`AssetBundles/savepwd.txt`、登錄檔 PlayerPrefs 的 `LastPassword_*`、`LastCdkey_*`、`LastAccount_*`）。需要登入時由人類操作。
-   例外：斷線回到登入畫面時，可以自動按「登錄」（只用遊戲已自動帶入的帳密；不輸入 / 修改 / 清除帳密欄、不點鑰匙 / 註冊、不把帳號名寫進 log）。
-   帳密欄是空的、登錄出錯（密碼錯誤、封號、維護、驗證碼）或連續失敗 3 次 → 停手通知使用者。實作見 `tools/gui/netwatch.py`。
+   例外：斷線回到登入畫面時，可以自動按「登錄」（用遊戲已自動帶入的帳密；不點鑰匙 / 註冊、不把帳號名寫進 log）。
+   多視窗例外（使用者 2026-10-16 授權）：本視窗在 `tools/gui/accounts.local.json`（本機檔、不進 git、只放帳號不放密碼）有對照時，
+   可以清空**帳號欄**並打入本視窗帳號再按登錄（`gui.ps1 typeacct`，帳號不經參數、不寫 log；只在量過座標的 2880×1659 做）。
+   **密碼欄絕不點、不清、不打、不讀內容**（只數深色像素判斷有沒有字）。沒有對照的視窗：單視窗照舊只按登錄；多視窗不自動登入、只通知人。
+   密碼欄空、帳號欄清不掉、登錄出錯（密碼錯誤、封號、維護、驗證碼）、畫面不認得或連續失敗 3 次 → 停手（只停該視窗）通知使用者。實作見 `tools/gui/netwatch.py`。
 3. **不付費**：不得進行任何儲值、購買鑽石、月卡、抽獎扣鑽等花真錢或鑽石的操作；`economy/recharge.md` 只供參考。
 4. **不修改遊戲行為**：不改遊戲檔案、不注入、不寫入遊戲記憶體、不竄改 / 偽造封包、不使用加速或修改器。
    AI 只能透過正常的畫面操作（看畫面、點擊、鍵盤）遊玩。
