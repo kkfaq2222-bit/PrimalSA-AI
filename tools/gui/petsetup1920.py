@@ -24,6 +24,20 @@ def fail_shot(pd, r, why):
         pass
 
 
+def battle_level(uikit):
+    """寵物分頁中間下方黃字「0轉N」的 N（選中的那一格）；多種二值化讀，取出現最多的值，讀不到 None"""
+    import collections
+    import re
+    vals = []
+    for box in ((310, 380, 110, 26), (320, 382, 90, 22)):
+        for opts in (('-Zooms', '3,4', '-Dark', '170'), ('-Zooms', '3,4', '-Dark', '130'), ('-Zooms', '3,4')):
+            for t in uikit.ocr(box, *opts):
+                m = re.search(r'\d\s*轉\s*(\d+)', t)
+                if m and 1 <= int(m[1]) <= 200:
+                    vals.append(int(m[1]))
+    return collections.Counter(vals).most_common(1)[0][0] if vals else None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--client', default='kkfaq22222')
@@ -55,7 +69,12 @@ def main():
                 continue
             # 戰寵 = 第 2 格（使用者 2026-10-14 改成領個人倉庫第 1 隻，不一定是朵拉比斯；2026-10-15 333 全部被「沒讀到朵拉比斯」擋下）。
             # 騎乘已在 lock 階段鎖定，這裡不再按（再按可能變成取消騎乘）。護欄：第 2 格要有寵物，且不是騎寵格魯西斯
-            if pd.slot_empty(1) or names[1] == '格魯西斯':
+            # 2026-10-16 333：個人倉庫第 1 隻本身就是格魯西斯（127 級戰寵）→ 被當成騎寵擋下。剛抓的騎寵是 1 級，
+            # 所以第 2 格是格魯西斯時看等級（此時選取的就是第 2 格）：> 1 級 = 領出來的戰寵；1 級 / 讀不到才擋
+            lv2 = battle_level(uikit) if names[1] == '格魯西斯' else None
+            if names[1] == '格魯西斯':
+                pd.log(f'角色{r} 第 2 格是格魯西斯，等級 {lv2}（> 1 級才當戰寵）')
+            if pd.slot_empty(1) or (names[1] == '格魯西斯' and not (lv2 and lv2 > 1)):
                 pd.log(f'角色{r} 第 2 格沒有戰寵（{names}）→ 不按出戰')
                 fail_shot(pd, r, f'角色{r} 第 2 格沒有戰寵 {names}')
                 rc = 5
