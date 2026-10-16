@@ -6,7 +6,8 @@ r"""11111 一條龍總控（1920×1017；終端機直接跑；可中斷續跑）
   wait131    5 個角色都 >= 131 級才往下（組隊面板讀 5 人等級；沒到就每 60 秒再看，遇敵繼續開著）
   stopenc    停止遇敵：等戰鬥結束 → 關原地遇敵並驗證
   ledger     任務帳本歸零：轉生後任務全部重置，帳本裡這個帳號舊的 done 要清掉（先備份到 notes/；katan / rebirthprep 的續跑狀態一併備份清除）
-  prebag     開跑任務前先整理一次背包（bag1920 --do：名單內刪除 / 存倉庫，名單外只列出來），保證獎勵進得了背包
+  prebag     開跑任務前先整理一次背包（bag1920 --do：名單內刪除 / 存倉庫，名單外只列出來），保證獎勵進得了背包；
+             再讀共用倉庫誘餌，< 40 到商城石幣分頁買 55（baitsupply1920 --buy；沒買到只警告不停手）
   adult      成人儀式先做（questflow --only 成人儀式；轉生後會重置，一定排在四大洞窟之前；已做過就跳過）
   quests     questflow：全部任務（內含兩次整理背包：五兄弟之謎後 / 彌生和日美子後）
   riddle     猜謎三兄弟（questflow --only riddle；練金布伊 77 級）
@@ -70,7 +71,8 @@ def plan(client: str, stage: str) -> list:
         return [('確認 5 人自動轉換戰寵沒勾（卡坦 / 恐龍博士練寵後可能還開著）', py('autoswapoff1920.py', *c)),
                 (f'練等到隊長 {GRIND_TARGET} 級（不補血）', py('levelwatch.py', '--every', 30, '--stop-at-end', '--no-heal', '--end-level', GRIND_TARGET))]
     if stage == 'prebag':
-        return [('任務前整理背包', py('bag1920.py', *c, '--do'))]
+        return [('任務前整理背包', py('bag1920.py', *c, '--do')),
+                ('寵物誘餌補貨（共用倉庫 < 40 買 55；沒買到不停手）', py('baitsupply1920.py', *c, '--buy'))]
     if stage == 'adult':
         # 使用者 2026-10-15：成人儀式一定先做（轉生後會重置；333 帳本誤標完成 → 先跑了四大洞窟）；questflow 開頭會用主線清單校正帳本
         return [('成人儀式（先做，四大洞窟之前）', py('questflow1920.py', *c, '--only', '成人儀式'))]
@@ -79,7 +81,8 @@ def plan(client: str, stage: str) -> list:
     if stage == 'riddle':
         return [('猜謎三兄弟（練金布伊到 77 級再交；卡坦的願望之前）', py('questflow1920.py', *c, '--only', 'riddle', '--no-potion'))]
     if stage == 'katan':
-        return [('卡坦的願望：鯊魚 → 火雞', py('katan1920.py', *c, '--family', 'all', '--phase', 'all', '--do', '--resume'))]
+        return [('寵物誘餌數量檢查（只讀不買；讀得到且 < 40 才停手）', py('baitsupply1920.py', *c, '--check')),
+                ('卡坦的願望：鯊魚 → 火雞', py('katan1920.py', *c, '--family', 'all', '--phase', 'all', '--do', '--resume'))]
     if stage == 'gate':
         return [('漆黑洞窟步 5 守門人（領守護獸；組隊去講；單人版 gatesolo1920 只在個別角色漏掉時手動用）', py('questflow1920.py', *c, '--dark-gate'))]
     if stage == 'dino':
