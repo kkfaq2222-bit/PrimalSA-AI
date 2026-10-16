@@ -42,6 +42,13 @@ STAT_ROWS = (143, 171, 199)       # 寵物分頁右邊 攻擊 / 防禦 / 敏捷 
 STAT_SUM_MIN = 35                 # 第二道防呆（使用者 2026-10-16）：三項合計要超過這個才算戰寵；1 級寵物約 20（實測 1 級鳥 7+4+8）
 
 
+def battle_pet_ok(lv, sm) -> bool:
+    """第 2 格格魯西斯是不是戰寵（使用者 2026-10-16：兩道防呆任一成立就算，防的是等級讀不到）。
+    讀不到的那項不算數；兩項都讀到但一個說是、一個說不是 → 矛盾，不按。"""
+    votes = [v for v in ((lv > 1) if lv is not None else None, (sm > STAT_SUM_MIN) if sm is not None else None) if v is not None]
+    return bool(votes) and all(votes)
+
+
 def stat_sum(uikit, *img):
     """攻擊 + 防禦 + 敏捷（「+」前的基礎值）；每列分開讀、兩種讀法取出現最多的值，任一列讀不到回 None。
     img：測試用，傳 ('-Image', 截圖檔) 改讀檔案"""
@@ -98,9 +105,9 @@ def main():
             ok2 = True
             if names[1] == '格魯西斯':
                 lv2, sm2 = battle_level(uikit), stat_sum(uikit)
-                ok2 = bool(lv2 and lv2 > 1 and sm2 and sm2 > STAT_SUM_MIN)
+                ok2 = battle_pet_ok(lv2, sm2)
                 pd.log(f'角色{r} 第 2 格是格魯西斯：等級 {lv2}、攻防敏合計 {sm2} → {"戰寵" if ok2 else "不確定是戰寵"}'
-                       f'（要 > 1 級且合計 > {STAT_SUM_MIN}）')
+                       f'（> 1 級或合計 > {STAT_SUM_MIN} 任一讀得到且成立；兩個都讀到但矛盾就停）')
             if pd.slot_empty(1) or not ok2:
                 pd.log(f'角色{r} 第 2 格沒有戰寵（{names}）→ 不按出戰')
                 fail_shot(pd, r, f'角色{r} 第 2 格沒有戰寵 {names}')
